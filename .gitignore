@@ -1,0 +1,17 @@
+# Local workspace state
+/AGENTS.md
+/.agents/
+/.codegraph/
+/.codex/
+/pmo/
+
+# Dependencies and generated output
+node_modules/
+dist/
+coverage/
+*.log
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
