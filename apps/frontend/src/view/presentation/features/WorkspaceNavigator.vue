@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { FolderPlus, Plus } from "@lucide/vue";
+import { FilePlus, FolderPlus, Plus } from "@lucide/vue";
 
 import type { TreeNode, WorkspaceSummary } from "@/model/contracts/backend";
+import CreateResourceDialog from "./CreateResourceDialog.vue";
+
+type CreationKind = "workspace" | "collection" | "request";
 
 const props = defineProps<{
   workspaces: readonly WorkspaceSummary[];
@@ -22,10 +25,7 @@ const emit = defineEmits<{
   selectRequest: [requestId: string];
 }>();
 
-const workspaceName = ref("");
-const collectionName = ref("");
-const requestName = ref("");
-const requestUrl = ref("http://127.0.0.1:8090/hello");
+const creationKind = ref<CreationKind | null>(null);
 
 const collections = computed(() =>
   props.rootNodes.filter((node) => node.kind === "collection"),
@@ -34,27 +34,24 @@ const requests = computed(() =>
   props.collectionNodes.filter((node) => node.kind === "request"),
 );
 
-/** Submits a non-empty workspace name and resets its field. */
-function submitWorkspace(): void {
-  if (workspaceName.value.trim() !== "") {
-    emit("createWorkspace", workspaceName.value);
-    workspaceName.value = "";
-  }
+/** Opens the creation dialog for one navigator resource type. */
+function openCreationDialog(kind: CreationKind): void {
+  creationKind.value = kind;
 }
 
-/** Submits a non-empty collection under the selected workspace. */
-function submitCollection(): void {
-  if (collectionName.value.trim() !== "") {
-    emit("createCollection", collectionName.value);
-    collectionName.value = "";
-  }
+/** Clears the active creation mode after the modal closes. */
+function closeCreationDialog(): void {
+  creationKind.value = null;
 }
 
-/** Submits a named request with a non-empty target URL. */
-function submitRequest(): void {
-  if (requestName.value.trim() !== "" && requestUrl.value.trim() !== "") {
-    emit("createRequest", requestName.value, requestUrl.value);
-    requestName.value = "";
+/** Routes normalized modal fields to the existing creation events. */
+function submitCreation(name: string, targetUrl: string | null): void {
+  if (creationKind.value === "workspace") {
+    emit("createWorkspace", name);
+  } else if (creationKind.value === "collection") {
+    emit("createCollection", name);
+  } else if (creationKind.value === "request" && targetUrl !== null) {
+    emit("createRequest", name, targetUrl);
   }
 }
 </script>
@@ -63,50 +60,56 @@ function submitRequest(): void {
   <aside class="workspace-navigator" aria-label="Workspace navigation">
     <div class="navigator-section">
       <label class="field-label" for="workspace-select">Workspace</label>
-      <select
-        id="workspace-select"
-        class="select-input"
-        :value="selectedWorkspaceId ?? ''"
-        :disabled="busy"
-        @change="
-          emit('selectWorkspace', ($event.target as HTMLSelectElement).value)
-        "
-      >
-        <option value="" disabled>Select a workspace</option>
-        <option
-          v-for="workspace in workspaces"
-          :key="workspace.workspaceId"
-          :value="workspace.workspaceId"
-        >
-          {{ workspace.name }}
-        </option>
-      </select>
-      <form class="inline-create" @submit.prevent="submitWorkspace">
-        <input
-          v-model="workspaceName"
-          class="text-input"
-          aria-label="New workspace name"
-          placeholder="New workspace"
+      <div class="workspace-select-row">
+        <select
+          id="workspace-select"
+          class="select-input"
+          :value="selectedWorkspaceId ?? ''"
           :disabled="busy"
-        />
+          @change="
+            emit('selectWorkspace', ($event.target as HTMLSelectElement).value)
+          "
+        >
+          <option value="" disabled>Select a workspace</option>
+          <option
+            v-for="workspace in workspaces"
+            :key="workspace.workspaceId"
+            :value="workspace.workspaceId"
+          >
+            {{ workspace.name }}
+          </option>
+        </select>
         <button
           class="icon-button"
-          type="submit"
+          type="button"
           title="Create workspace"
           aria-label="Create workspace"
           :disabled="busy"
+          @click="openCreationDialog('workspace')"
         >
           <Plus :size="17" aria-hidden="true" />
         </button>
-      </form>
+      </div>
     </div>
 
     <div v-if="selectedWorkspaceId" class="navigator-section">
       <div class="section-heading">
         <span>Collections</span>
-        <FolderPlus :size="15" aria-hidden="true" />
+        <button
+          class="icon-button compact-icon-button"
+          type="button"
+          title="Create collection"
+          aria-label="Create collection"
+          :disabled="busy"
+          @click="openCreationDialog('collection')"
+        >
+          <FolderPlus :size="16" aria-hidden="true" />
+        </button>
       </div>
       <nav class="tree-list" aria-label="Collections">
+        <p v-if="collections.length === 0" class="tree-empty">
+          No collections yet
+        </p>
         <button
           v-for="collection in collections"
           :key="collection.nodeId"
@@ -118,29 +121,24 @@ function submitRequest(): void {
           {{ collection.name }}
         </button>
       </nav>
-      <form class="inline-create" @submit.prevent="submitCollection">
-        <input
-          v-model="collectionName"
-          class="text-input"
-          aria-label="New collection name"
-          placeholder="New collection"
-          :disabled="busy"
-        />
-        <button
-          class="icon-button"
-          type="submit"
-          title="Create collection"
-          aria-label="Create collection"
-          :disabled="busy"
-        >
-          <Plus :size="17" aria-hidden="true" />
-        </button>
-      </form>
     </div>
 
     <div v-if="selectedCollectionId" class="navigator-section navigator-grow">
-      <div class="section-heading">Requests</div>
+      <div class="section-heading">
+        <span>Requests</span>
+        <button
+          class="icon-button compact-icon-button"
+          type="button"
+          title="Create request"
+          aria-label="Create request"
+          :disabled="busy"
+          @click="openCreationDialog('request')"
+        >
+          <FilePlus :size="16" aria-hidden="true" />
+        </button>
+      </div>
       <nav class="tree-list" aria-label="Requests">
+        <p v-if="requests.length === 0" class="tree-empty">No requests yet</p>
         <button
           v-for="request in requests"
           :key="request.nodeId"
@@ -152,27 +150,14 @@ function submitRequest(): void {
           <span>{{ request.name }}</span>
         </button>
       </nav>
-      <form class="create-request-form" @submit.prevent="submitRequest">
-        <input
-          v-model="requestName"
-          class="text-input"
-          aria-label="New request name"
-          placeholder="Request name"
-          :disabled="busy"
-        />
-        <input
-          v-model="requestUrl"
-          class="text-input"
-          aria-label="New request URL"
-          placeholder="https://api.example.com/path"
-          inputmode="url"
-          :disabled="busy"
-        />
-        <button class="secondary-button" type="submit" :disabled="busy">
-          <Plus :size="16" aria-hidden="true" />
-          Add request
-        </button>
-      </form>
     </div>
+
+    <CreateResourceDialog
+      v-if="creationKind !== null"
+      :kind="creationKind"
+      :busy="busy"
+      @close="closeCreationDialog"
+      @submit="submitCreation"
+    />
   </aside>
 </template>

@@ -11,23 +11,31 @@ test("creates, restores, and sends the first workspace request", async ({
 
   await login(page);
 
-  await page.getByLabel("New workspace name").fill(workspaceName);
   await page.getByRole("button", { name: "Create workspace" }).click();
+  const workspaceDialog = page.getByRole("dialog", { name: "New workspace" });
+  await workspaceDialog.getByLabel("Workspace name").fill(workspaceName);
+  await workspaceDialog.getByRole("button", { name: "Create" }).click();
   await expect(page.locator("#workspace-select option:checked")).toHaveText(
     workspaceName,
   );
 
-  await page.getByLabel("New collection name").fill(collectionName);
   await page.getByRole("button", { name: "Create collection" }).click();
+  const collectionDialog = page.getByRole("dialog", {
+    name: "New collection",
+  });
+  await collectionDialog.getByLabel("Collection name").fill(collectionName);
+  await collectionDialog.getByRole("button", { name: "Create" }).click();
   const collection = page
     .getByRole("navigation", { name: "Collections" })
     .getByRole("button", { name: collectionName });
   await expect(collection).toBeVisible();
   await collection.click();
 
-  await page.getByLabel("New request name").fill(requestName);
-  await page.getByLabel("New request URL").fill(targetUrl);
-  await page.getByRole("button", { name: "Add request" }).click();
+  await page.getByRole("button", { name: "Create request" }).click();
+  const requestDialog = page.getByRole("dialog", { name: "New request" });
+  await requestDialog.getByLabel("Request name").fill(requestName);
+  await requestDialog.getByLabel("New request URL").fill(targetUrl);
+  await requestDialog.getByRole("button", { name: "Create" }).click();
   await expect(page.getByLabel("Request name", { exact: true })).toHaveValue(
     requestName,
   );
