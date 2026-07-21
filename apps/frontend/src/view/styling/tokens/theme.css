@@ -1,38 +1,44 @@
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
 
-  --font-sans:
-    "Inter", ui-sans-serif, system-ui, -apple-system, "BlinkMacSystemFont",
-    "Segoe UI", sans-serif;
-  --font-mono:
-    "SFMono-Regular", "Consolas", "Liberation Mono", "Menlo", monospace;
-  --surface-canvas: #f4f6f7;
-  --surface-primary: #fff;
-  --surface-secondary: #eef1f2;
-  --surface-selected: #dff3f0;
-  --surface-inverse: #1e2729;
-  --text-primary: #172124;
-  --text-secondary: #5a676a;
-  --text-inverse: #fff;
-  --border-subtle: #d8dfe1;
-  --border-strong: #aeb9bc;
-  --accent-primary: #0f766e;
-  --accent-primary-hover: #0b5f59;
-  --accent-secondary: #2563a6;
-  --success: #137333;
-  --warning: #9a6700;
-  --danger: #b42318;
-  --focus: #2563a6;
-  --shadow-menu: 0 6px 18px rgb(23 33 36 / 12%);
-  --radius-control: 5px;
-  --radius-panel: 6px;
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --control-height: 36px;
-  --header-height: 52px;
-  --navigator-width: 288px;
+  --surface-canvas: light-dark(#f4f6f7, #111718);
+  --surface-primary: light-dark(#fff, #182022);
+  --surface-secondary: light-dark(#eef1f2, #222c2e);
+  --surface-selected: light-dark(#dff3f0, #173a37);
+  --surface-inverse: light-dark(#1e2729, #0d1213);
+  --surface-code: light-dark(#fafbfb, #12191b);
+  --surface-danger-subtle: light-dark(#fff1f0, #351b1b);
+  --surface-success-subtle: light-dark(#edf8f0, #163022);
+  --text-primary: light-dark(#172124, #e6edee);
+  --text-secondary: light-dark(#5a676a, #a9b6b8);
+  --text-inverse: light-dark(#fff, #f5f7f7);
+  --text-inverse-subtle: light-dark(#dfe7e8, #dce4e5);
+  --text-inverse-muted: light-dark(#c7d0d2, #b7c3c5);
+  --text-selected: light-dark(#075c55, #8ed9d0);
+  --border-subtle: light-dark(#d8dfe1, #344144);
+  --border-strong: light-dark(#aeb9bc, #506064);
+  --border-inverse: light-dark(#344144, #2b3739);
+  --border-selected: light-dark(#b5ded8, #28645e);
+  --border-danger: light-dark(#f2b8b5, #7c3d3a);
+  --border-success: light-dark(#b9d9c4, #376d49);
+  --accent-primary: light-dark(#0f766e, #4fb6aa);
+  --accent-primary-hover: light-dark(#0b5f59, #68c9be);
+  --accent-secondary: light-dark(#2563a6, #74a7e3);
+  --success: light-dark(#137333, #6dcc8f);
+  --warning: light-dark(#9a6700, #f2c14e);
+  --danger: light-dark(#b42318, #ff8a80);
+  --focus: light-dark(#2563a6, #73aef0);
+  --brand-mark: light-dark(#7dd3c7, #5bc2b6);
+  --overlay-backdrop: light-dark(rgb(23 33 36 / 42%), rgb(3 7 8 / 72%));
+  --overlay-navigator: light-dark(rgb(23 33 36 / 36%), rgb(3 7 8 / 66%));
+  --shadow-menu: 0 6px 18px light-dark(rgb(23 33 36 / 12%), rgb(0 0 0 / 38%));
+  --shadow-dialog: 0 18px 48px light-dark(rgb(23 33 36 / 24%), rgb(0 0 0 / 60%));
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }

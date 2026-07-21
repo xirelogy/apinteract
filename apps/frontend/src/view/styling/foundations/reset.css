@@ -6,7 +6,7 @@ html,
 body,
 #app {
   width: 100%;
-  min-width: 320px;
+  min-width: 20rem;
   height: 100%;
   margin: 0;
 }
@@ -15,8 +15,8 @@ body {
   overflow: hidden;
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-body);
   letter-spacing: 0;
   background: var(--surface-canvas);
 }

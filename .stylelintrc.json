@@ -3,5 +3,20 @@
   "rules": {
     "declaration-no-important": true,
     "selector-class-pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["apps/frontend/src/view/styling/components/**/*.css"],
+      "rules": {
+        "declaration-property-unit-disallowed-list": {
+          "/^(?:width|height|min-width|max-width|min-height|max-height|grid-template-columns|grid-template-rows|margin(?:-.+)?|padding(?:-.+)?|gap|column-gap|row-gap)$/": [
+            "px"
+          ]
+        },
+        "declaration-property-value-disallowed-list": {
+          "/.*/": ["/#[0-9a-f]{3,8}\\b|(?:rgb|hsl)a?\\(/i"]
+        }
+      }
+    }
+  ]
 }

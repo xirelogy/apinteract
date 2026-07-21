@@ -1,3 +1,4 @@
+@import url("./tokens/foundations.css");
 @import url("./tokens/theme.css");
 @import url("./foundations/reset.css");
 @import url("./components/controls.css");
