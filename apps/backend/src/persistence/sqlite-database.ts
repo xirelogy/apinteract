@@ -1,0 +1,247 @@
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
+
+import BetterSqlite3 from "better-sqlite3";
+import { Kysely, SqliteDialect } from "kysely";
+
+import type { DatabaseSchema } from "./schema.js";
+
+const INITIAL_MIGRATION = "0001_quick_verification";
+
+const INITIAL_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id TEXT PRIMARY KEY,
+  applied_at INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE instance_metadata (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE users (
+  id BLOB PRIMARY KEY CHECK(length(id) = 16),
+  status TEXT NOT NULL CHECK(status IN ('active', 'deactivated', 'deleted')),
+  username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  display_name TEXT NOT NULL,
+  is_instance_admin INTEGER NOT NULL CHECK(is_instance_admin IN (0, 1)),
+  created_at INTEGER NOT NULL,
+  deleted_at INTEGER
+) STRICT;
+
+CREATE TABLE login_credentials (
+  id BLOB PRIMARY KEY CHECK(length(id) = 16),
+  user_id BLOB NOT NULL REFERENCES users(id),
+  provider_id TEXT NOT NULL,
+  provider_subject TEXT NOT NULL,
+  secret_hash TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('active', 'disabled')),
+  created_at INTEGER NOT NULL,
+  UNIQUE(provider_id, provider_subject)
+) STRICT;
+CREATE INDEX login_credentials_user_id ON login_credentials(user_id);
+
+CREATE TABLE sessions (
+  id BLOB PRIMARY KEY CHECK(length(id) = 16),
+  user_id BLOB NOT NULL REFERENCES users(id),
+  family_id BLOB NOT NULL CHECK(length(family_id) = 16),
+  status TEXT NOT NULL CHECK(status IN ('active', 'revoked', 'expired')),
+  created_at INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL,
+  absolute_expires_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX sessions_user_status ON sessions(user_id, status);
+
+CREATE TABLE refresh_tokens (
+  token_hash TEXT PRIMARY KEY,
+  session_id BLOB NOT NULL REFERENCES sessions(id),
+  status TEXT NOT NULL CHECK(status IN ('active', 'consumed')),
+  created_at INTEGER NOT NULL,
+  idle_expires_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX refresh_tokens_session ON refresh_tokens(session_id);
+
+CREATE TABLE workspaces (
+  id BLOB PRIMARY KEY CHECK(length(id) = 16),
+  name TEXT NOT NULL,
+  created_by BLOB NOT NULL REFERENCES users(id),
+  created_at INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE workspace_memberships (
+  workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  user_id BLOB NOT NULL REFERENCES users(id),
+  role TEXT NOT NULL CHECK(role IN ('owner', 'editor', 'viewer')),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(workspace_id, user_id)
+) WITHOUT ROWID, STRICT;
+CREATE INDEX workspace_memberships_user ON workspace_memberships(user_id);
+
+CREATE TABLE workspace_tree_nodes (
+  id BLOB PRIMARY KEY CHECK(length(id) = 16),
+  workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  parent_collection_id BLOB REFERENCES workspace_tree_nodes(id),
+  kind TEXT NOT NULL CHECK(kind IN ('collection', 'request')),
+  position INTEGER NOT NULL CHECK(position >= 0),
+  name TEXT NOT NULL,
+  order_revision INTEGER NOT NULL DEFAULT 0 CHECK(order_revision >= 0),
+  created_at INTEGER NOT NULL,
+  UNIQUE(workspace_id, parent_collection_id, position)
+) STRICT;
+CREATE INDEX workspace_tree_parent
+  ON workspace_tree_nodes(workspace_id, parent_collection_id, position);
+
+CREATE TABLE request_drafts (
+  request_id BLOB PRIMARY KEY REFERENCES workspace_tree_nodes(id) ON DELETE CASCADE,
+  draft_revision INTEGER NOT NULL CHECK(draft_revision >= 0),
+  method TEXT NOT NULL CHECK(method = 'GET'),
+  target_mode TEXT NOT NULL CHECK(target_mode = 'absolute'),
+  target_url TEXT NOT NULL,
+  query_mode TEXT NOT NULL CHECK(query_mode = 'structured'),
+  updated_by BLOB NOT NULL REFERENCES users(id),
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE request_revisions (
+  id BLOB PRIMARY KEY CHECK(length(id) = 16),
+  request_id BLOB NOT NULL REFERENCES request_drafts(request_id),
+  parent_revision_id BLOB REFERENCES request_revisions(id),
+  creation_reason TEXT NOT NULL CHECK(creation_reason IN ('manual_save', 'execution')),
+  created_by BLOB NOT NULL REFERENCES users(id),
+  created_at INTEGER NOT NULL,
+  content_json TEXT NOT NULL,
+  content_fingerprint TEXT NOT NULL
+) STRICT;
+CREATE INDEX request_revisions_request_created
+  ON request_revisions(request_id, created_at DESC, id DESC);
+
+CREATE TABLE blobs (
+  id BLOB PRIMARY KEY CHECK(length(id) = 16),
+  provider_id TEXT NOT NULL,
+  storage_key TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK(state IN ('available', 'partial', 'missing')),
+  purpose TEXT NOT NULL CHECK(purpose = 'execution_response'),
+  byte_length INTEGER NOT NULL CHECK(byte_length >= 0),
+  sha256 TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE executions (
+  id BLOB PRIMARY KEY CHECK(length(id) = 16),
+  request_id BLOB NOT NULL REFERENCES request_drafts(request_id),
+  request_revision_id BLOB NOT NULL REFERENCES request_revisions(id),
+  created_by BLOB NOT NULL REFERENCES users(id),
+  state TEXT NOT NULL CHECK(state IN ('created', 'running', 'completed', 'failed')),
+  snapshot_json TEXT NOT NULL,
+  response_status INTEGER,
+  response_headers_json TEXT,
+  response_blob_id BLOB REFERENCES blobs(id),
+  body_complete INTEGER NOT NULL CHECK(body_complete IN (0, 1)),
+  body_bytes INTEGER,
+  body_sha256 TEXT,
+  error_json TEXT,
+  created_at INTEGER NOT NULL,
+  completed_at INTEGER
+) STRICT;
+CREATE INDEX executions_request_created
+  ON executions(request_id, created_at DESC, id DESC);
+
+CREATE TABLE blob_references (
+  blob_id BLOB NOT NULL REFERENCES blobs(id),
+  owner_kind TEXT NOT NULL CHECK(owner_kind = 'execution_response'),
+  owner_id BLOB NOT NULL REFERENCES executions(id),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(blob_id, owner_kind, owner_id)
+) WITHOUT ROWID, STRICT;
+
+CREATE TABLE audit_outbox (
+  id BLOB PRIMARY KEY CHECK(length(id) = 16),
+  event_json TEXT NOT NULL,
+  occurred_at INTEGER NOT NULL,
+  published_at INTEGER
+) STRICT;
+CREATE INDEX audit_outbox_unpublished
+  ON audit_outbox(published_at, occurred_at, id);
+
+CREATE TABLE audit_segments (
+  id BLOB PRIMARY KEY CHECK(length(id) = 16),
+  storage_path TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK(state IN ('open', 'closed')),
+  byte_length INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  closed_at INTEGER
+) STRICT;
+
+CREATE TABLE audit_event_index (
+  event_id BLOB PRIMARY KEY CHECK(length(event_id) = 16),
+  event_type TEXT NOT NULL,
+  actor_user_id BLOB REFERENCES users(id),
+  workspace_id BLOB REFERENCES workspaces(id),
+  segment_id BLOB NOT NULL REFERENCES audit_segments(id),
+  occurred_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX audit_event_workspace_time
+  ON audit_event_index(workspace_id, occurred_at DESC, event_id DESC);
+`;
+
+/**
+ * SQLite persistence adapter and automatic schema-migration boundary.
+ *
+ * SQLite-specific pragmas and migration SQL stay here so domain services use
+ * only the database-neutral Kysely contract.
+ */
+export class SqliteDatabase {
+  readonly db: Kysely<DatabaseSchema>;
+  readonly #driver: BetterSqlite3.Database;
+
+  private constructor(driver: BetterSqlite3.Database) {
+    this.#driver = driver;
+    this.db = new Kysely<DatabaseSchema>({
+      dialect: new SqliteDialect({ database: driver }),
+    });
+  }
+
+  /** Opens the SQLite database, configures durability, and applies migrations. */
+  static async open(path: string): Promise<SqliteDatabase> {
+    await mkdir(dirname(path), { recursive: true });
+    const driver = new BetterSqlite3(path);
+    // These settings provide referential enforcement, durable commits, bounded
+    // lock waiting, and safer handling of schema objects for the local store.
+    driver.pragma("foreign_keys = ON");
+    driver.pragma("journal_mode = WAL");
+    driver.pragma("synchronous = FULL");
+    driver.pragma("busy_timeout = 5000");
+    driver.pragma("trusted_schema = OFF");
+
+    const database = new SqliteDatabase(driver);
+    database.#migrate();
+    return database;
+  }
+
+  /** Closes the Kysely connection and its underlying SQLite driver. */
+  async close(): Promise<void> {
+    await this.db.destroy();
+  }
+
+  /** Applies the initial schema exactly once within a SQLite transaction. */
+  #migrate(): void {
+    // Bootstrap the migration ledger separately because it must exist before
+    // the first versioned migration can be detected and applied atomically.
+    this.#driver.exec(
+      "CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL) STRICT",
+    );
+    const applied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(INITIAL_MIGRATION);
+    if (applied !== undefined) {
+      return;
+    }
+
+    this.#driver.transaction(() => {
+      this.#driver.exec(INITIAL_SCHEMA_SQL);
+      this.#driver
+        .prepare("INSERT INTO schema_migrations(id, applied_at) VALUES (?, ?)")
+        .run(INITIAL_MIGRATION, Date.now());
+    })();
+  }
+}

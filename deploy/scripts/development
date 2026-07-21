@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="$(cd -- "${script_directory}/../.." && pwd)"
+compose_file="${repository_root}/deploy/development/compose.yaml"
+defaults_file="${repository_root}/deploy/development/.env.defaults"
+local_file="${repository_root}/deploy/development/.env.local"
+
+compose=(
+  docker compose
+  --env-file "${defaults_file}"
+)
+
+if [[ -f "${local_file}" ]]; then
+  compose+=(--env-file "${local_file}")
+fi
+
+compose+=(-f "${compose_file}")
+
+usage() {
+  cat <<'USAGE'
+Usage: deploy/scripts/development <command>
+
+Commands:
+  bootstrap     Build, start, and install dependencies
+  build         Build the lightweight workspace image
+  up            Start the workspace container
+  rebuild       Rebuild and start the workspace container
+  down          Stop and remove development containers and network
+  ps            Show development container status
+  install       Install dependencies inside the workspace
+  shell         Open a shell inside the workspace
+  typecheck     Run TypeScript checks inside the workspace
+  test          Run unit and component tests inside the workspace
+  check         Run repository quality checks inside the workspace
+  exec <cmd...> Run an arbitrary command inside the workspace
+  logs          Follow workspace container logs
+  browser-test  Run Playwright through the optional browser profile
+  config        Print the resolved Compose configuration
+USAGE
+}
+
+command="${1:-}"
+
+case "${command}" in
+  bootstrap)
+    "${compose[@]}" up --detach --build workspace
+    "${compose[@]}" exec workspace pnpm install
+    ;;
+  build)
+    "${compose[@]}" build workspace
+    ;;
+  up)
+    "${compose[@]}" up --detach workspace
+    ;;
+  rebuild)
+    "${compose[@]}" up --detach --build workspace
+    ;;
+  down)
+    "${compose[@]}" down
+    ;;
+  ps)
+    "${compose[@]}" ps
+    ;;
+  install)
+    "${compose[@]}" exec workspace pnpm install
+    ;;
+  shell)
+    "${compose[@]}" exec workspace bash
+    ;;
+  typecheck)
+    "${compose[@]}" exec workspace pnpm typecheck
+    ;;
+  test)
+    "${compose[@]}" exec workspace pnpm test
+    ;;
+  check)
+    "${compose[@]}" exec workspace pnpm check
+    ;;
+  exec)
+    shift
+    if [[ "$#" -eq 0 ]]; then
+      printf 'The exec command requires a command to run.\n' >&2
+      exit 2
+    fi
+    "${compose[@]}" exec workspace "$@"
+    ;;
+  logs)
+    "${compose[@]}" logs --follow workspace
+    ;;
+  browser-test)
+    "${compose[@]}" --profile browser run --rm browser
+    ;;
+  config)
+    "${compose[@]}" config
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

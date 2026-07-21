@@ -1,0 +1,9 @@
+.codegraph/
+.git/
+coverage/
+dist/
+node_modules/
+playwright-report/
+pmo/artworks/
+test-results/
+pnpm-lock.yaml

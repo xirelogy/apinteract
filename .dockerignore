@@ -1,0 +1,13 @@
+.codegraph
+.git
+.pnpm-store
+AGENTS.md
+coverage
+dist
+node_modules
+playwright-report
+pmo
+test-results
+var
+**/node_modules
+**/dist

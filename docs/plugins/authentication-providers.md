@@ -116,11 +116,11 @@ persistence.
 
 Provider data has three lifecycles:
 
-| Data | Example | Lifetime |
-| --- | --- | --- |
+| Data                   | Example                    | Lifetime                   |
+| ---------------------- | -------------------------- | -------------------------- |
 | Instance configuration | LDAP URL or OIDC client ID | Until administrator change |
-| Credential material | Password hash or TOTP seed | Until credential removal |
-| Attempt state | OTP hash or PKCE verifier | One short-lived attempt |
+| Credential material    | Password hash or TOTP seed | Until credential removal   |
+| Attempt state          | OTP hash or PKCE verifier  | One short-lived attempt    |
 
 Providers define schemas for credential material and attempt state. APInteract
 persists those records through its database-independent repositories, so
@@ -200,15 +200,15 @@ signing or refresh state.
 
 ## Example Providers
 
-| Provider | User interaction | Persistent provider data | External system |
-| --- | --- | --- | --- |
-| Local password | Username and password | Username lookup and password hash | None |
-| Email code | Email followed by code | Verified email subject | Email delivery |
-| Login link | Email followed by callback | Verified email subject | Email delivery |
-| SMS OTP | Phone followed by code | Verified phone subject | SMS delivery |
-| TOTP | One-time code | Encrypted TOTP seed | None |
-| OIDC | Browser redirect | Issuer-bound subject link | OIDC endpoints |
-| LDAP | Username and password | Stable directory subject | LDAP directory |
+| Provider       | User interaction           | Persistent provider data          | External system |
+| -------------- | -------------------------- | --------------------------------- | --------------- |
+| Local password | Username and password      | Username lookup and password hash | None            |
+| Email code     | Email followed by code     | Verified email subject            | Email delivery  |
+| Login link     | Email followed by callback | Verified email subject            | Email delivery  |
+| SMS OTP        | Phone followed by code     | Verified phone subject            | SMS delivery    |
+| TOTP           | One-time code              | Encrypted TOTP seed               | None            |
+| OIDC           | Browser redirect           | Issuer-bound subject link         | OIDC endpoints  |
+| LDAP           | Username and password      | Stable directory subject          | LDAP directory  |
 
 Raw passwords, one-time codes, login-link tokens, OAuth authorization codes,
 and LDAP bind credentials are transient evidence rather than persistent

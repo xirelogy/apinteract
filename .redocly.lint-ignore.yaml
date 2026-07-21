@@ -1,0 +1,27 @@
+# Redocly cannot infer references carried by APInteract's protocol extensions.
+# Keep these exceptions pointer-specific so the same rules remain active elsewhere.
+docs/backend-api/openapi.json:
+  operation-4xx-response:
+    - "#/paths/~1health/get/responses"
+    - "#/paths/~1ws/get/responses"
+  operation-2xx-response:
+    # A successful WebSocket handshake uses HTTP 101, not a 2XX response.
+    - "#/paths/~1ws/get/responses"
+  no-unused-components:
+    # These schemas are roots or descendants of x-apinteract-websocket.
+    - "#/components/schemas/WebSocketCommand"
+    - "#/components/schemas/WebSocketReply"
+    - "#/components/schemas/WebSocketEvent"
+    - "#/components/schemas/WorkspaceSummary"
+    - "#/components/schemas/TreeNode"
+    - "#/components/schemas/RequestView"
+    - "#/components/schemas/ExecutionView"
+
+docs/proxy-api/openapi.json:
+  operation-4xx-response:
+    - "#/paths/~1health/get/responses"
+  no-unused-components:
+    # These schemas are referenced by x-apinteract-framing.
+    - "#/components/schemas/ResponseHead"
+    - "#/components/schemas/ResponseTrailers"
+    - "#/components/schemas/ResponseComplete"

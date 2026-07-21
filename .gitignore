@@ -5,13 +5,24 @@
 /.codex/
 /pmo/
 
+# IDE
+/.vscode
+
 # Dependencies and generated output
 node_modules/
 dist/
 coverage/
 *.log
+playwright-report/
+test-results/
+.pnpm-store/
 
 # Local configuration and secrets
 .env
 .env.*
 !.env.example
+!deploy/development/.env.defaults
+!deploy/development/.env.local.example
+
+# Local runtime data
+/var/

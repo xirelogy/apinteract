@@ -1,0 +1,19 @@
+ARG PLAYWRIGHT_VERSION=1.57.0
+
+FROM node:24-bookworm-slim AS node-runtime
+
+FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble
+
+# Keep browser tests on the same Node major as every other development and
+# production build while reusing Playwright's pinned Chromium installation.
+COPY --from=node-runtime /usr/local/ /usr/local/
+
+RUN npm install --global pnpm@8.15.0
+
+ENV HOME=/tmp/apinteract-browser-home
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV NPM_CONFIG_STORE_DIR=/pnpm/store
+
+WORKDIR /workspace
+
+CMD ["pnpm", "exec", "playwright", "test"]

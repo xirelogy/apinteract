@@ -4,7 +4,7 @@
     "title": "APInteract Proxy API",
     "summary": "Public contract for the APInteract proxy component.",
     "description": "This specification is the canonical source of truth for the APInteract proxy component API used by the backend.",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "license": {
       "name": "MIT",
       "identifier": "MIT"
@@ -53,10 +53,7 @@
   },
   "x-apinteract-http-semantics": {
     "requestTarget": "Semantic valid HTTP/1.1 derived from the final URL.",
-    "derivedHeaders": [
-      "Host",
-      "Content-Length"
-    ],
+    "derivedHeaders": ["Host", "Content-Length"],
     "automaticRedirects": false,
     "automaticContentDecompression": false,
     "cookieJar": false,
@@ -92,9 +89,7 @@
   "paths": {
     "/health": {
       "get": {
-        "tags": [
-          "Proxy service"
-        ],
+        "tags": ["Proxy service"],
         "operationId": "getProxyHealth",
         "summary": "Get proxy readiness",
         "description": "Returns only readiness and version information suitable for container and service health checks. It does not expose configuration, limits, or principal information.",
@@ -125,9 +120,7 @@
     },
     "/capabilities": {
       "get": {
-        "tags": [
-          "Proxy service"
-        ],
+        "tags": ["Proxy service"],
         "operationId": "getProxyCapabilities",
         "summary": "Get proxy capabilities and principal limits",
         "description": "Returns protocol support and effective limits for the authenticated backend principal. The backend must verify API and frame compatibility before creating executions.",
@@ -150,9 +143,7 @@
     },
     "/executions": {
       "post": {
-        "tags": [
-          "Proxy executions"
-        ],
+        "tags": ["Proxy executions"],
         "operationId": "createProxyExecution",
         "summary": "Create an HTTP execution session",
         "description": "Creates a transient execution owned by the authenticated backend principal. Ownership is derived exclusively from the bearer token and cannot be supplied or changed by the client. A rotated token mapped to the same principal may access the session. Idempotency keys are scoped to the principal and retained until the execution is released or expires.",
@@ -225,9 +216,7 @@
         }
       ],
       "get": {
-        "tags": [
-          "Proxy executions"
-        ],
+        "tags": ["Proxy executions"],
         "operationId": "getProxyExecution",
         "summary": "Get execution state",
         "description": "Returns current control-plane state for an execution owned by the authenticated principal. A missing execution and an execution owned by another principal both return 404.",
@@ -251,9 +240,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "Proxy executions"
-        ],
+        "tags": ["Proxy executions"],
         "operationId": "releaseProxyExecution",
         "summary": "Release a terminal execution",
         "description": "Acknowledges that the backend has persisted or discarded the result and releases the execution, its response cache, and its idempotency-key mapping. Active executions cannot be released and must be cancelled first.",
@@ -280,9 +267,7 @@
         }
       ],
       "put": {
-        "tags": [
-          "Proxy executions"
-        ],
+        "tags": ["Proxy executions"],
         "operationId": "uploadProxyExecutionRequestBody",
         "summary": "Stream the target request body",
         "description": "Streams the target request payload as unmodified bytes. This operation is valid only for an execution created with body mode `stream` and while that execution is accepting an upload. The authenticated principal must own the execution. The protocol content type does not replace or imply the target request's Content-Type header. Request upload resume is not supported in framing version 1; an interrupted upload fails the execution.",
@@ -335,9 +320,7 @@
         }
       ],
       "get": {
-        "tags": [
-          "Proxy executions"
-        ],
+        "tags": ["Proxy executions"],
         "operationId": "streamProxyExecutionResponse",
         "summary": "Stream the target response",
         "description": "Opens the response data plane for an execution owned by the authenticated principal. Only one response reader may be active for an execution. The proxy returns a framed binary stream and may send heartbeat frames while waiting for the target. A RESPONSE_HEAD frame announces the target response before any BODY frame. The outer HTTP status describes this proxy operation; every valid target HTTP status, including 4xx and 5xx, is carried in RESPONSE_HEAD and completes normally unless a separate network or protocol failure occurs. Cached frames remain available until the terminal execution is released or expires.",
@@ -354,25 +337,25 @@
                 "schema": {
                   "$ref": "#/components/schemas/ProxyResponseStream"
                 },
-                  "x-apinteract-framing": {
-                    "version": 1,
-                    "byteOrder": "big-endian",
-                    "jsonEncoding": "UTF-8 without BOM",
-                    "frameHeaderBytes": 16,
-                    "maxFramePayloadBytes": 1048576,
-                    "protocolRules": [
-                      "Every frame, including HEARTBEAT, consumes one sequence number.",
-                      "Sequence starts at zero, increments by one, and must not wrap.",
-                      "Flags and reserved fields must be zero.",
-                      "Unknown frame types, nonzero flags, invalid sequence values, oversized payloads, invalid JSON, and schema-invalid JSON are fatal protocol errors.",
-                      "A receiver must reject an oversized payload length before allocating payload storage.",
-                      "RESPONSE_HEAD must precede BODY and may occur only once.",
-                      "TRAILERS may occur only after all BODY frames and before COMPLETE.",
-                      "Exactly one COMPLETE or ERROR terminal frame is required.",
-                      "No frames may follow a terminal frame, and the stream must end after it.",
-                      "End of stream before a terminal frame is proxy_stream_incomplete.",
-                      "Replayed streams preserve original frame sequence numbers."
-                    ],
+                "x-apinteract-framing": {
+                  "version": 1,
+                  "byteOrder": "big-endian",
+                  "jsonEncoding": "UTF-8 without BOM",
+                  "frameHeaderBytes": 16,
+                  "maxFramePayloadBytes": 1048576,
+                  "protocolRules": [
+                    "Every frame, including HEARTBEAT, consumes one sequence number.",
+                    "Sequence starts at zero, increments by one, and must not wrap.",
+                    "Flags and reserved fields must be zero.",
+                    "Unknown frame types, nonzero flags, invalid sequence values, oversized payloads, invalid JSON, and schema-invalid JSON are fatal protocol errors.",
+                    "A receiver must reject an oversized payload length before allocating payload storage.",
+                    "RESPONSE_HEAD must precede BODY and may occur only once.",
+                    "TRAILERS may occur only after all BODY frames and before COMPLETE.",
+                    "Exactly one COMPLETE or ERROR terminal frame is required.",
+                    "No frames may follow a terminal frame, and the stream must end after it.",
+                    "End of stream before a terminal frame is proxy_stream_incomplete.",
+                    "Replayed streams preserve original frame sequence numbers."
+                  ],
                   "headerFields": [
                     {
                       "name": "type",
@@ -489,9 +472,7 @@
         }
       ],
       "post": {
-        "tags": [
-          "Proxy executions"
-        ],
+        "tags": ["Proxy executions"],
         "operationId": "cancelProxyExecution",
         "summary": "Cancel an execution",
         "description": "Requests best-effort cancellation of request upload, target communication, response streaming, and transient caching for an execution owned by the authenticated principal. Cancellation cannot guarantee that the target did not already process some or all of the request. Repeated cancellation requests are idempotent and return the current session state.",
@@ -710,22 +691,15 @@
       "Health": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "status",
-          "apiVersion",
-          "componentVersion"
-        ],
+        "required": ["status", "apiVersion", "componentVersion"],
         "properties": {
           "status": {
             "type": "string",
-            "enum": [
-              "ready",
-              "not_ready"
-            ]
+            "enum": ["ready", "not_ready"]
           },
           "apiVersion": {
             "type": "string",
-            "const": "0.1.0"
+            "const": "0.1.1"
           },
           "componentVersion": {
             "type": "string",
@@ -747,7 +721,7 @@
         "properties": {
           "apiVersion": {
             "type": "string",
-            "const": "0.1.0"
+            "const": "0.1.1"
           },
           "responseFrameVersions": {
             "type": "array",
@@ -755,9 +729,7 @@
             "uniqueItems": true,
             "items": {
               "type": "integer",
-              "enum": [
-                1
-              ]
+              "enum": [1]
             }
           },
           "outboundHttpVersions": {
@@ -766,9 +738,7 @@
             "uniqueItems": true,
             "items": {
               "type": "string",
-              "enum": [
-                "HTTP/1.1"
-              ]
+              "enum": ["HTTP/1.1"]
             }
           },
           "features": {
@@ -787,6 +757,7 @@
           "requestUploadResume",
           "redirectModes",
           "tlsVerificationModes",
+          "transportMetadata",
           "automaticContentDecompression",
           "cookieJar"
         ],
@@ -816,11 +787,11 @@
             "uniqueItems": true,
             "items": {
               "type": "string",
-              "enum": [
-                "strict",
-                "insecure"
-              ]
+              "enum": ["strict", "insecure"]
             }
+          },
+          "transportMetadata": {
+            "$ref": "#/components/schemas/TransportMetadataCapabilities"
           },
           "automaticContentDecompression": {
             "type": "boolean",
@@ -831,6 +802,35 @@
             "const": false
           }
         }
+      },
+      "TransportMetadataCapabilities": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "remoteEndpoint",
+          "localEndpoint",
+          "connectionReuse",
+          "tlsSummary",
+          "peerCertificateChain"
+        ],
+        "properties": {
+          "remoteEndpoint": {
+            "type": "boolean"
+          },
+          "localEndpoint": {
+            "type": "boolean"
+          },
+          "connectionReuse": {
+            "type": "boolean"
+          },
+          "tlsSummary": {
+            "type": "boolean"
+          },
+          "peerCertificateChain": {
+            "type": "boolean"
+          }
+        },
+        "description": "Transport observations available to the authenticated principal. A true value indicates implementation and policy support; an observation may still be absent when a particular connection fails before the value is known."
       },
       "CapabilityLimits": {
         "type": "object",
@@ -891,9 +891,7 @@
       "CreateExecutionRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "request"
-        ],
+        "required": ["request"],
         "properties": {
           "request": {
             "$ref": "#/components/schemas/TargetRequest"
@@ -903,13 +901,7 @@
       "TargetRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "method",
-          "url",
-          "headers",
-          "body",
-          "behavior"
-        ],
+        "required": ["method", "url", "headers", "body", "behavior"],
         "properties": {
           "method": {
             "type": "string",
@@ -966,10 +958,7 @@
       "HeaderField": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "name",
-          "value"
-        ],
+        "required": ["name", "value"],
         "properties": {
           "name": {
             "type": "string",
@@ -986,32 +975,19 @@
       "RequestBodyDescriptor": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "mode",
-          "length",
-          "sha256"
-        ],
+        "required": ["mode", "length", "sha256"],
         "properties": {
           "mode": {
             "type": "string",
-            "enum": [
-              "none",
-              "stream"
-            ]
+            "enum": ["none", "stream"]
           },
           "length": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "minimum": 0,
             "description": "Exact raw body length when known, otherwise null. Must be zero when mode is none. The proxy derives Content-Length from a known value and otherwise selects HTTP/1.1 streaming transfer framing."
           },
           "sha256": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "pattern": "^[0-9a-f]{64}$",
             "description": "Lowercase SHA-256 digest of the complete raw body when known, otherwise null. Must be null when mode is none. Because the proxy streams to the target, a mismatch can be detected only after some or all bytes have reached the target."
           }
@@ -1024,9 +1000,7 @@
                   "const": "none"
                 }
               },
-              "required": [
-                "mode"
-              ]
+              "required": ["mode"]
             },
             "then": {
               "properties": {
@@ -1088,12 +1062,9 @@
           },
           "tlsVerification": {
             "type": "string",
-            "enum": [
-              "strict",
-              "insecure"
-            ],
+            "enum": ["strict", "insecure"],
             "default": "strict",
-            "description": "Strict verifies the target certificate and hostname. Insecure explicitly disables both checks for this execution."
+            "description": "Strict verifies the target certificate and hostname. Insecure explicitly disables enforcement of both checks for this execution while retaining TLS encryption. The proxy reports the verification outcome in transport metadata when its transport implementation exposes it."
           },
           "maxResponseBodyBytes": {
             "type": "integer",
@@ -1111,10 +1082,10 @@
           "executionId",
           "state",
           "requestBodyState",
-            "responseState",
-            "createdAt",
-            "expiresAt",
-            "error"
+          "responseState",
+          "createdAt",
+          "expiresAt",
+          "error"
         ],
         "properties": {
           "executionId": {
@@ -1134,10 +1105,7 @@
             "format": "date-time"
           },
           "expiresAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time",
             "description": "Null while the execution is active. After a terminal state, the time at which the proxy may delete transient state, cached frames, and the idempotency-key mapping."
           },
@@ -1205,12 +1173,7 @@
       "ResponseHead": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "status",
-          "httpVersion",
-          "headers",
-          "receivedAt"
-        ],
+        "required": ["status", "httpVersion", "headers", "receivedAt"],
         "properties": {
           "status": {
             "type": "integer",
@@ -1219,16 +1182,11 @@
             "description": "Final target HTTP response status."
           },
           "reasonPhrase": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "httpVersion": {
             "type": "string",
-            "enum": [
-              "HTTP/1.1"
-            ],
+            "enum": ["HTTP/1.1"],
             "description": "HTTP transport version negotiated with the target."
           },
           "headers": {
@@ -1238,15 +1196,17 @@
             "type": "string",
             "format": "date-time",
             "description": "Time at which the proxy received the final target response headers."
+          },
+          "transport": {
+            "$ref": "#/components/schemas/TransportObservation"
           }
-        }
+        },
+        "description": "Target response metadata. Transport observations are emitted here before response body frames when they are available."
       },
       "ResponseTrailers": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "headers"
-        ],
+        "required": ["headers"],
         "properties": {
           "headers": {
             "$ref": "#/components/schemas/HeaderList"
@@ -1256,22 +1216,14 @@
       "ResponseComplete": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "bodyBytes",
-          "bodySha256",
-          "timings",
-          "completedAt"
-        ],
+        "required": ["bodyBytes", "bodySha256", "timings", "completedAt"],
         "properties": {
           "bodyBytes": {
             "type": "integer",
             "minimum": 0
           },
           "bodySha256": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "pattern": "^[0-9a-f]{64}$",
             "description": "Lowercase SHA-256 digest of the complete raw response body when calculated."
           },
@@ -1287,9 +1239,7 @@
       "ExecutionTimings": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "totalMs"
-        ],
+        "required": ["totalMs"],
         "properties": {
           "dnsMs": {
             "type": "number",
@@ -1314,24 +1264,176 @@
         },
         "description": "Target execution timings measured by the proxy. Optional phases are omitted when they do not apply or cannot be measured."
       },
+      "TransportObservation": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "localEndpoint": {
+            "$ref": "#/components/schemas/NetworkEndpoint"
+          },
+          "remoteEndpoint": {
+            "$ref": "#/components/schemas/NetworkEndpoint"
+          },
+          "connectionReused": {
+            "type": "boolean",
+            "description": "Whether the target connection existed before this execution."
+          },
+          "tls": {
+            "$ref": "#/components/schemas/TlsObservation"
+          }
+        },
+        "description": "Best available observations about the target transport connection. Fields are omitted when they do not apply, are unavailable from the transport implementation, are suppressed by proxy policy, or were not observed before failure."
+      },
+      "NetworkEndpoint": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["address", "port", "family"],
+            "properties": {
+              "address": {
+                "type": "string",
+                "format": "ipv4"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "family": {
+                "type": "string",
+                "const": "ipv4"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["address", "port", "family"],
+            "properties": {
+              "address": {
+                "type": "string",
+                "format": "ipv6"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "family": {
+                "type": "string",
+                "const": "ipv6"
+              }
+            }
+          }
+        ],
+        "description": "Observed socket endpoint. The remote endpoint is the address actually connected after name resolution, not the target hostname."
+      },
+      "TlsObservation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["verificationMode"],
+        "properties": {
+          "verificationMode": {
+            "type": "string",
+            "enum": ["strict", "insecure"]
+          },
+          "authorized": {
+            "type": "boolean",
+            "description": "Whether the observed peer certificate and hostname satisfied normal strict verification, including when insecure mode allowed the connection to continue."
+          },
+          "authorizationErrorCode": {
+            "$ref": "#/components/schemas/TlsAuthorizationErrorCode"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": ["TLSv1.2", "TLSv1.3"]
+          },
+          "alpnProtocol": {
+            "type": ["string", "null"],
+            "enum": ["http/1.1", null],
+            "description": "Negotiated ALPN protocol, or null when the peer did not negotiate ALPN."
+          },
+          "serverName": {
+            "type": ["string", "null"],
+            "maxLength": 253,
+            "description": "TLS Server Name Indication value sent to the target, or null when no server name was sent."
+          },
+          "cipher": {
+            "$ref": "#/components/schemas/TlsCipher"
+          },
+          "peerCertificateChain": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "$ref": "#/components/schemas/TlsPeerCertificate"
+            },
+            "description": "Peer certificate chain in leaf-first order as exposed by the transport runtime. A self-signed peer normally produces one entry."
+          }
+        },
+        "description": "TLS observations collected during connection establishment. On a failed handshake, only values observed before failure are present."
+      },
+      "TlsAuthorizationErrorCode": {
+        "type": "string",
+        "enum": [
+          "self_signed_certificate",
+          "unknown_certificate_authority",
+          "hostname_mismatch",
+          "certificate_expired",
+          "certificate_not_yet_valid",
+          "certificate_revoked",
+          "invalid_certificate_chain",
+          "unsupported_certificate",
+          "other_verification_error"
+        ],
+        "description": "Normalized primary reason that normal strict certificate or hostname verification did not authorize the peer."
+      },
+      "TlsCipher": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Cipher suite name reported by the transport runtime."
+          },
+          "standardName": {
+            "type": ["string", "null"],
+            "minLength": 1,
+            "description": "IANA cipher suite name when the transport runtime provides it."
+          }
+        }
+      },
+      "TlsPeerCertificate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["derBase64", "sha256Fingerprint"],
+        "properties": {
+          "derBase64": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "contentMediaType": "application/pkix-cert",
+            "maxLength": 262144,
+            "description": "Base64 representation of the exact DER certificate bytes exposed by the transport runtime."
+          },
+          "sha256Fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Lowercase SHA-256 digest of the DER certificate bytes."
+          }
+        }
+      },
       "ExecutionStreamError": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "category",
-          "code",
-          "message",
-          "phase",
-          "retryable"
-        ],
+        "required": ["category", "code", "message", "phase", "retryable"],
         "properties": {
           "category": {
             "type": "string",
-            "enum": [
-              "proxy",
-              "network",
-              "http_protocol"
-            ],
+            "enum": ["proxy", "network", "http_protocol"],
             "description": "Origin of the execution failure. Valid target HTTP status responses, including 4xx and 5xx, are not errors."
           },
           "code": {
@@ -1358,8 +1460,13 @@
           },
           "retryable": {
             "type": "boolean"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/TransportObservation",
+            "description": "Transport observations available before failure. When a response head was already emitted, the backend retains the observations from that frame and this field may be omitted."
           }
-        }
+        },
+        "description": "Terminal execution failure. Valid target HTTP status responses, including 4xx and 5xx, are not failures."
       },
       "HeaderList": {
         "type": "array",
@@ -1370,13 +1477,7 @@
       },
       "Problem": {
         "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "category",
-          "code"
-        ],
+        "required": ["type", "title", "status", "category", "code"],
         "properties": {
           "type": {
             "type": "string",

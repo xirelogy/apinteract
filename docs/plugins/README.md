@@ -199,4 +199,3 @@ proxy component contract.
 Plugins do not replace APInteract users, session policy, authorization,
 workspace hierarchy, variable precedence, request versioning, execution state,
 audit definitions, or public component protocols.
-

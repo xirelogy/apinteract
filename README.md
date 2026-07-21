@@ -58,7 +58,7 @@ Public project documentation is maintained in [docs](docs/README.md).
 The [component API index](docs/api/README.md) lists the public contracts used
 between APInteract components. The proxy component's canonical
 [OpenAPI JSON document](docs/proxy-api/openapi.json) currently defines the
-`0.1.0` backend-to-proxy execution protocol.
+`0.1.1` backend-to-proxy execution protocol.
 
 The planned
 [authentication provider plugin contract](docs/plugins/authentication-providers.md)

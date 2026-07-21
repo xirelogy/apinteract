@@ -1,0 +1,107 @@
+.text-input,
+.select-input,
+.url-input,
+.request-name-input,
+.input-with-icon {
+  min-width: 0;
+  min-height: var(--control-height);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-primary);
+}
+
+.input-with-icon {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  color: var(--text-secondary);
+}
+
+.text-input,
+.select-input,
+.url-input,
+.request-name-input {
+  width: 100%;
+  padding: 0 var(--space-3);
+}
+
+.text-input:hover,
+.select-input:hover,
+.url-input:hover,
+.request-name-input:hover,
+.input-with-icon:hover {
+  border-color: var(--border-strong);
+}
+
+.primary-button,
+.secondary-button,
+.icon-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.primary-button,
+.secondary-button {
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  font-weight: 650;
+}
+
+.primary-button {
+  color: var(--text-inverse);
+  border: 1px solid var(--accent-primary);
+  background: var(--accent-primary);
+}
+
+.primary-button:hover:not(:disabled) {
+  border-color: var(--accent-primary-hover);
+  background: var(--accent-primary-hover);
+}
+
+.secondary-button {
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-primary);
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: var(--surface-secondary);
+}
+
+.icon-button {
+  width: var(--control-height);
+  padding: 0;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  background: transparent;
+  text-decoration: none;
+}
+
+.icon-button:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+  background: var(--surface-secondary);
+}
+
+.field-label,
+.input-field > span:first-child {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.input-with-icon input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+}

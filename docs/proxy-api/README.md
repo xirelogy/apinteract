@@ -5,7 +5,7 @@ proxy component's public API. Proxy implementations, backend clients, contract
 tests, generated clients, and published references use it as their
 authoritative contract.
 
-The current `0.1.0` contract defines the backend-to-proxy HTTP execution
+The current `0.1.1` contract defines the backend-to-proxy HTTP execution
 protocol. It separates small control-plane operations from streaming request
 and response data:
 
@@ -31,6 +31,26 @@ prevents execution identifiers from revealing resources across principals. See
 
 Bearer credentials do not provide transport confidentiality. Remote proxy
 communication uses TLS.
+
+## TLS And Transport Observations
+
+Each execution selects strict or insecure target TLS verification when that
+mode is reported by `/capabilities`. Strict mode verifies the target
+certificate and hostname. Insecure mode keeps the connection encrypted but
+allows an untrusted, expired, hostname-mismatched, or self-signed target
+certificate.
+
+The proxy can report the actual local and remote socket endpoints, connection
+reuse, negotiated TLS details, verification outcome, and the peer certificate
+chain. `/capabilities` identifies which observations are available to the
+authenticated principal.
+
+Successful connections carry available observations in the response-head
+frame, before response body frames. DNS, connection, and TLS failures carry
+observations collected before failure in the terminal error frame. Certificate
+entries preserve DER bytes in Base64 because they are bounded metadata rather
+than request or response payloads. The backend can parse those bytes for
+display without replacing the observed certificate representation.
 
 ## Response Recovery
 

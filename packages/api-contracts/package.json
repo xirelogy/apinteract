@@ -1,0 +1,25 @@
+{
+  "name": "@apinteract/api-contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./backend": {
+      "types": "./src/backend.generated.ts",
+      "default": "./src/backend.generated.ts"
+    },
+    "./proxy": {
+      "types": "./src/proxy.generated.ts",
+      "default": "./src/proxy.generated.ts"
+    }
+  },
+  "scripts": {
+    "generate": "openapi-typescript ../../docs/backend-api/openapi.json -o src/backend.generated.ts && openapi-typescript ../../docs/proxy-api/openapi.json -o src/proxy.generated.ts && prettier --write \"src/*.generated.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.10.1",
+    "prettier": "3.6.2",
+    "typescript": "5.9.3"
+  }
+}

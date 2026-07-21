@@ -1,0 +1,44 @@
+{
+  "name": "apinteract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@8.15.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "build": "pnpm contracts:generate && pnpm -r --if-present build",
+    "check": "pnpm format:check && pnpm contracts:check && pnpm source-docs:check && pnpm lint && pnpm typecheck && pnpm test",
+    "contracts:check": "node tooling/check-generated-contracts.mjs",
+    "contracts:generate": "pnpm --filter @apinteract/api-contracts generate",
+    "dev": "node tooling/run-development.mjs",
+    "dev:backend": "pnpm --filter @apinteract/backend dev",
+    "dev:frontend": "pnpm --filter @apinteract/frontend dev",
+    "dev:proxy": "pnpm --filter @apinteract/proxy dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings 0 && stylelint \"apps/frontend/src/**/*.css\"",
+    "source-docs:check": "node tooling/check-source-documentation.mjs",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm contracts:generate && pnpm -r --if-present typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.38.0",
+    "@playwright/test": "1.57.0",
+    "@redocly/cli": "2.39.0",
+    "@types/node": "24.10.0",
+    "dependency-cruiser": "18.1.0",
+    "eslint": "9.38.0",
+    "eslint-plugin-vue": "10.5.1",
+    "globals": "16.5.0",
+    "openapi-typescript": "7.10.1",
+    "prettier": "3.6.2",
+    "stylelint": "16.25.0",
+    "stylelint-config-standard": "39.0.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.46.2",
+    "vitest": "4.0.4",
+    "vue-eslint-parser": "10.2.0"
+  }
+}

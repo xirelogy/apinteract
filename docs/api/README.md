@@ -7,6 +7,8 @@ use the owning component's specification as their authoritative contract.
 
 ## Available Contracts
 
+- [Backend component API](../backend-api/README.md): frontend authentication,
+  sessions, domain commands, execution events, and response-body transfer.
 - [Proxy component API](../proxy-api/README.md): backend-to-proxy request
   execution, streaming, authentication, and cancellation.
 

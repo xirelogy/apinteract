@@ -8,6 +8,8 @@ This directory contains the public documentation for APInteract.
   communication boundaries, request flow, and deployment topologies.
 - [Component API contracts](api/README.md): the index and governance rules for
   public APIs used between APInteract components.
+- [Backend component API](backend-api/README.md): browser authentication,
+  sessions, commands, events, and response-body transfer.
 - [Proxy component API](proxy-api/README.md): the proxy protocol specification
   and supporting documentation.
 - [Plugins](plugins/README.md): common registration, sensitivity reporting,

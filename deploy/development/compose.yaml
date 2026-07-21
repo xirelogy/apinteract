@@ -1,0 +1,64 @@
+name: apinteract-development
+
+services:
+  workspace:
+    build:
+      context: ../..
+      dockerfile: deploy/development/Dockerfile
+      args:
+        APT_MIRROR_URL: "${APT_MIRROR_URL:-}"
+    init: true
+    working_dir: /workspace
+    command: sleep infinity
+    stdin_open: true
+    tty: true
+    shm_size: 1gb
+    ports:
+      - "${APINTERACT_DEV_BACKEND_PORT:-8080}:8080"
+      - "${APINTERACT_DEV_PROXY_PORT:-8081}:8081"
+      - "${APINTERACT_DEV_FRONTEND_PORT:-5173}:5173"
+      - "${APINTERACT_DEV_FIXTURE_PORT:-8090}:8090"
+      - "${APINTERACT_DEV_PLAYWRIGHT_REPORT_PORT:-9323}:9323"
+    volumes:
+      - ../..:/workspace
+      - root-node-modules:/workspace/node_modules
+      - backend-node-modules:/workspace/apps/backend/node_modules
+      - frontend-node-modules:/workspace/apps/frontend/node_modules
+      - proxy-node-modules:/workspace/apps/proxy/node_modules
+      - contracts-node-modules:/workspace/packages/api-contracts/node_modules
+      - pnpm-store:/pnpm/store
+      - playwright-output:/workspace/var/playwright
+
+  browser:
+    profiles:
+      - browser
+    build:
+      context: ../..
+      dockerfile: deploy/development/Dockerfile.browser
+      args:
+        PLAYWRIGHT_VERSION: "1.57.0"
+    init: true
+    user: "${APINTERACT_DEV_UID:-1000}:${APINTERACT_DEV_GID:-1000}"
+    working_dir: /workspace
+    shm_size: 1gb
+    environment:
+      HOME: /tmp/apinteract-browser-home
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+    volumes:
+      - ../..:/workspace
+      - root-node-modules:/workspace/node_modules
+      - backend-node-modules:/workspace/apps/backend/node_modules
+      - frontend-node-modules:/workspace/apps/frontend/node_modules
+      - proxy-node-modules:/workspace/apps/proxy/node_modules
+      - contracts-node-modules:/workspace/packages/api-contracts/node_modules
+      - pnpm-store:/pnpm/store
+      - playwright-output:/workspace/var/playwright
+
+volumes:
+  root-node-modules:
+  backend-node-modules:
+  frontend-node-modules:
+  proxy-node-modules:
+  contracts-node-modules:
+  pnpm-store:
+  playwright-output:

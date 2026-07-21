@@ -1,0 +1,1147 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "APInteract Backend API",
+    "summary": "Public contract for APInteract frontend and backend communication.",
+    "description": "This specification is the canonical source of truth for the APInteract backend API used by browser clients.",
+    "version": "0.1.0",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "The APInteract backend origin."
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Backend liveness and readiness information."
+    },
+    {
+      "name": "Authentication",
+      "description": "Authentication-provider discovery and credential verification."
+    },
+    {
+      "name": "Sessions",
+      "description": "Access-token renewal and session termination."
+    },
+    {
+      "name": "Executions",
+      "description": "Request execution and streamed response-body access."
+    },
+    {
+      "name": "WebSocket",
+      "description": "Frontend control-channel establishment and message contracts."
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["Health"],
+        "operationId": "getBackendHealth",
+        "summary": "Report backend liveness and readiness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Backend health state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackendHealth"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": ["Authentication"],
+        "operationId": "login",
+        "summary": "Authenticate with an enabled provider",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authentication succeeded and a refresh cookie was set.",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Opaque rotating refresh credential in an HttpOnly cookie."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessCredential"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": ["Sessions"],
+        "operationId": "refreshSession",
+        "summary": "Rotate a refresh credential and issue a new access token",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Refresh succeeded and the refresh cookie was rotated.",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessCredential"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["Sessions"],
+        "operationId": "logout",
+        "summary": "Revoke the current session",
+        "security": [
+          {
+            "accessToken": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Session revoked and refresh cookie cleared."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/auth/session": {
+      "get": {
+        "tags": ["Sessions"],
+        "operationId": "getCurrentSession",
+        "summary": "Read the current application session",
+        "security": [
+          {
+            "accessToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentSession"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/executions/{executionId}/body": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExecutionId"
+        }
+      ],
+      "get": {
+        "tags": ["Executions"],
+        "operationId": "downloadExecutionResponseBody",
+        "summary": "Download exact stored response bytes",
+        "security": [
+          {
+            "accessToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact response body bytes.",
+            "headers": {
+              "Content-Length": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "Digest": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/ws": {
+      "get": {
+        "tags": ["WebSocket"],
+        "operationId": "connectBackendWebSocket",
+        "summary": "Open the frontend control connection",
+        "security": [],
+        "responses": {
+          "101": {
+            "description": "WebSocket protocol upgrade."
+          }
+        },
+        "x-apinteract-websocket": {
+          "protocolVersion": 1,
+          "encoding": "JSON text",
+          "serverMessages": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WebSocketReply"
+              },
+              {
+                "$ref": "#/components/schemas/WebSocketEvent"
+              }
+            ]
+          },
+          "clientMessages": {
+            "$ref": "#/components/schemas/WebSocketCommand"
+          },
+          "rules": [
+            "The server emits system.ready immediately after upgrade.",
+            "The client must authenticate before sending domain commands.",
+            "A connection may replace an expiring access token for the same session.",
+            "A connection cannot switch to another user or session.",
+            "Blob bytes are transferred through authenticated HTTP operations."
+          ]
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "accessToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "parameters": {
+      "ExecutionId": {
+        "name": "executionId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/ExecutionId"
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "The request is invalid.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Authentication is required or failed.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The current user is not allowed to perform this operation.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "The requested resource does not exist or is not visible.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "UuidV7": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      },
+      "UtcDateTime": {
+        "type": "string",
+        "format": "date-time",
+        "description": "Canonical RFC 3339 UTC timestamp with millisecond precision.",
+        "examples": ["2026-07-21T09:00:00.000Z"]
+      },
+      "CorrelationId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
+      "CommandId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
+      "EventId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
+      "UserId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
+      "SessionId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
+      "WorkspaceId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
+      "CollectionId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
+      "RequestId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
+      "ExecutionId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
+      "BlobId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
+      "ProblemCode": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$"
+      },
+      "ValidationError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "code", "message"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "JSON Pointer to the invalid input."
+          },
+          "code": {
+            "$ref": "#/components/schemas/ProblemCode"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code",
+          "detail",
+          "correlationId",
+          "errors"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri-reference"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 400,
+            "maximum": 599
+          },
+          "code": {
+            "$ref": "#/components/schemas/ProblemCode"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "correlationId": {
+            "$ref": "#/components/schemas/CorrelationId"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            }
+          }
+        }
+      },
+      "BackendHealth": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "version", "checks"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ready", "not_ready"]
+          },
+          "version": {
+            "type": "string"
+          },
+          "checks": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": ["ready", "not_ready"]
+            }
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["providerId", "fields"],
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Provider-defined fields collected by the frontend."
+          }
+        }
+      },
+      "AccessCredential": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["accessToken", "accessTokenExpiresAt", "session"],
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "accessTokenExpiresAt": {
+            "$ref": "#/components/schemas/UtcDateTime"
+          },
+          "session": {
+            "$ref": "#/components/schemas/CurrentSession"
+          }
+        }
+      },
+      "CurrentSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sessionId", "user", "createdAt", "absoluteExpiresAt"],
+        "properties": {
+          "sessionId": {
+            "$ref": "#/components/schemas/SessionId"
+          },
+          "user": {
+            "$ref": "#/components/schemas/CurrentUser"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/UtcDateTime"
+          },
+          "absoluteExpiresAt": {
+            "$ref": "#/components/schemas/UtcDateTime"
+          }
+        }
+      },
+      "CurrentUser": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["userId", "username", "displayName"],
+        "properties": {
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "username": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          }
+        }
+      },
+      "WebSocketCommand": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SessionAuthenticateCommand"
+          },
+          {
+            "$ref": "#/components/schemas/SystemPingCommand"
+          },
+          {
+            "$ref": "#/components/schemas/WorkspaceListCommand"
+          },
+          {
+            "$ref": "#/components/schemas/WorkspaceCreateCommand"
+          },
+          {
+            "$ref": "#/components/schemas/TreeListCommand"
+          },
+          {
+            "$ref": "#/components/schemas/CollectionCreateCommand"
+          },
+          {
+            "$ref": "#/components/schemas/RequestCreateCommand"
+          },
+          {
+            "$ref": "#/components/schemas/RequestGetCommand"
+          },
+          {
+            "$ref": "#/components/schemas/RequestUpdateCommand"
+          },
+          {
+            "$ref": "#/components/schemas/ExecutionStartCommand"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type"
+        }
+      },
+      "CommandEnvelope": {
+        "type": "object",
+        "required": ["protocolVersion", "kind", "id", "type", "payload"],
+        "properties": {
+          "protocolVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "kind": {
+            "type": "string",
+            "const": "command"
+          },
+          "id": {
+            "$ref": "#/components/schemas/CommandId"
+          },
+          "type": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          }
+        }
+      },
+      "SessionAuthenticateCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "session.authenticate"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["accessToken"],
+                "properties": {
+                  "accessToken": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "SystemPingCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "system.ping"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        ]
+      },
+      "WorkspaceListCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "workspace.list"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        ]
+      },
+      "WorkspaceCreateCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "workspace.create"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "TreeListCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "tree.list"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["workspaceId", "parentCollectionId"],
+                "properties": {
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/WorkspaceId"
+                  },
+                  "parentCollectionId": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/CollectionId"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CollectionCreateCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "collection.create"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["workspaceId", "parentCollectionId", "name"],
+                "properties": {
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/WorkspaceId"
+                  },
+                  "parentCollectionId": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/CollectionId"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RequestCreateCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "request.create"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "workspaceId",
+                  "parentCollectionId",
+                  "name",
+                  "targetUrl"
+                ],
+                "properties": {
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/WorkspaceId"
+                  },
+                  "parentCollectionId": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/CollectionId"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "targetUrl": {
+                    "type": "string",
+                    "format": "uri",
+                    "pattern": "^https?://[^?#]+$"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RequestGetCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "request.get"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requestId"],
+                "properties": {
+                  "requestId": {
+                    "$ref": "#/components/schemas/RequestId"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RequestUpdateCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "request.update"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "requestId",
+                  "expectedDraftRevision",
+                  "name",
+                  "targetUrl"
+                ],
+                "properties": {
+                  "requestId": {
+                    "$ref": "#/components/schemas/RequestId"
+                  },
+                  "expectedDraftRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "targetUrl": {
+                    "type": "string",
+                    "format": "uri",
+                    "pattern": "^https?://[^?#]+$"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ExecutionStartCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "execution.start"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requestId"],
+                "properties": {
+                  "requestId": {
+                    "$ref": "#/components/schemas/RequestId"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "WebSocketReply": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocolVersion",
+          "kind",
+          "commandId",
+          "outcome",
+          "correlationId"
+        ],
+        "properties": {
+          "protocolVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "kind": {
+            "type": "string",
+            "const": "reply"
+          },
+          "commandId": {
+            "$ref": "#/components/schemas/CommandId"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": ["success", "error"]
+          },
+          "correlationId": {
+            "$ref": "#/components/schemas/CorrelationId"
+          },
+          "payload": {},
+          "error": {
+            "$ref": "#/components/schemas/WebSocketError"
+          }
+        }
+      },
+      "WebSocketError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message", "errors"],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ProblemCode"
+          },
+          "message": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            }
+          }
+        }
+      },
+      "WebSocketEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocolVersion",
+          "kind",
+          "id",
+          "type",
+          "occurredAt",
+          "correlationId",
+          "payload"
+        ],
+        "properties": {
+          "protocolVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "kind": {
+            "type": "string",
+            "const": "event"
+          },
+          "id": {
+            "$ref": "#/components/schemas/EventId"
+          },
+          "type": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "$ref": "#/components/schemas/UtcDateTime"
+          },
+          "correlationId": {
+            "$ref": "#/components/schemas/CorrelationId"
+          },
+          "payload": {}
+        }
+      },
+      "WorkspaceSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["workspaceId", "name", "role"],
+        "properties": {
+          "workspaceId": {
+            "$ref": "#/components/schemas/WorkspaceId"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["owner", "editor", "viewer"]
+          }
+        }
+      },
+      "TreeNode": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["nodeId", "kind", "name", "position"],
+        "properties": {
+          "nodeId": {
+            "$ref": "#/components/schemas/UuidV7"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["collection", "request"]
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "RequestView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestId",
+          "workspaceId",
+          "name",
+          "method",
+          "targetMode",
+          "targetUrl",
+          "queryMode",
+          "draftRevision"
+        ],
+        "properties": {
+          "requestId": {
+            "$ref": "#/components/schemas/RequestId"
+          },
+          "workspaceId": {
+            "$ref": "#/components/schemas/WorkspaceId"
+          },
+          "name": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string",
+            "const": "GET"
+          },
+          "targetMode": {
+            "type": "string",
+            "const": "absolute"
+          },
+          "targetUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "queryMode": {
+            "type": "string",
+            "const": "structured"
+          },
+          "draftRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ExecutionView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "executionId",
+          "requestId",
+          "state",
+          "bodyComplete",
+          "createdAt"
+        ],
+        "properties": {
+          "executionId": {
+            "$ref": "#/components/schemas/ExecutionId"
+          },
+          "requestId": {
+            "$ref": "#/components/schemas/RequestId"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["created", "running", "completed", "failed"]
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeaderField"
+            }
+          },
+          "bodyComplete": {
+            "type": "boolean"
+          },
+          "bodyBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bodySha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "bodyPreview": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "bodyBlobId": {
+            "$ref": "#/components/schemas/BlobId"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/UtcDateTime"
+          },
+          "completedAt": {
+            "$ref": "#/components/schemas/UtcDateTime"
+          },
+          "error": {
+            "$ref": "#/components/schemas/WebSocketError"
+          }
+        }
+      },
+      "HeaderField": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "value"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

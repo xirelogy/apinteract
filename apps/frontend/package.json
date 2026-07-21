@@ -1,0 +1,29 @@
+{
+  "name": "@apinteract/frontend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vue-tsc --noEmit && vite build",
+    "dev": "vite --host 0.0.0.0",
+    "test": "vitest run",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@apinteract/api-contracts": "workspace:*",
+    "@lucide/vue": "1.25.0",
+    "pinia": "3.0.3",
+    "uuid": "13.0.0",
+    "vue": "3.5.22",
+    "vue-router": "4.6.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.1",
+    "@vue/test-utils": "2.4.6",
+    "jsdom": "27.0.1",
+    "typescript": "5.9.3",
+    "vite": "7.1.10",
+    "vitest": "4.0.4",
+    "vue-tsc": "3.1.1"
+  }
+}
