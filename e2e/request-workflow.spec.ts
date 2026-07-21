@@ -102,12 +102,18 @@ test("creates, restores, and sends the first workspace request", async ({
     requestName,
   );
   await expect(page.getByLabel("Target URL")).toHaveValue(targetUrl);
+  const draftRevision = page
+    .locator(".request-summary dl > div")
+    .filter({ hasText: "Draft revision" })
+    .locator("dd");
+  await expect(draftRevision).toHaveText("0");
   await page.getByRole("button", { name: "Send" }).click();
 
   await expect(page.locator(".status-code")).toHaveText("200");
   await expect(page.locator(".body-preview")).toContainText(
     "Hello from the APInteract fixture.",
   );
+  await expect(draftRevision).toHaveText("0");
 });
 
 /** Authenticates the isolated browser-test administrator. */

@@ -223,6 +223,7 @@ export class RequestService {
     name: string,
     targetUrl: string,
   ): Promise<RequestView> {
+    const normalizedName = normalizeName(name);
     const normalizedUrl = validateTargetUrl(targetUrl);
     return this.#database.transaction().execute(async (transaction) => {
       const row = await this.#requestRow(transaction, requestId);
@@ -231,9 +232,12 @@ export class RequestService {
       if (row.draft_revision !== expectedDraftRevision) {
         throw new DraftConflictError("The request draft changed");
       }
+      if (row.name === normalizedName && row.target_url === normalizedUrl) {
+        return mapRequest(row);
+      }
       await transaction
         .updateTable("workspace_tree_nodes")
-        .set({ name: normalizeName(name) })
+        .set({ name: normalizedName })
         .where("id", "=", idToBytes(requestId))
         .execute();
       await transaction
@@ -254,7 +258,7 @@ export class RequestService {
       });
       return {
         ...mapRequest(row),
-        name: normalizeName(name),
+        name: normalizedName,
         targetUrl: normalizedUrl,
         draftRevision: expectedDraftRevision + 1,
       };
