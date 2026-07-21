@@ -20,6 +20,9 @@ try {
   await prepareRuntime();
   await initializeAdministrator();
 
+  startProcess("fixture", ["exec", "node", "tooling/run-http-fixture.mjs"]);
+  await waitForUrl("http://127.0.0.1:8090/hello");
+
   startProcess("proxy", [
     "--filter",
     "@apinteract/proxy",

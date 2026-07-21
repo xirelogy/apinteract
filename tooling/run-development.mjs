@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
 const processes = [
+  ["fixture", ["exec", "node", "tooling/run-http-fixture.mjs"]],
   ["proxy", ["--filter", "@apinteract/proxy", "dev"]],
   ["backend", ["--filter", "@apinteract/backend", "dev"]],
   ["frontend", ["--filter", "@apinteract/frontend", "dev"]],

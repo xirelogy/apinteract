@@ -25,7 +25,7 @@ const emit = defineEmits<{
 const workspaceName = ref("");
 const collectionName = ref("");
 const requestName = ref("");
-const requestUrl = ref("http://fixture:8090/hello");
+const requestUrl = ref("http://127.0.0.1:8090/hello");
 
 const collections = computed(() =>
   props.rootNodes.filter((node) => node.kind === "collection"),

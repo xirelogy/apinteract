@@ -53,19 +53,23 @@ async function logout(): Promise<void> {
         :selected-collection-id="selectedCollectionId"
         :collection-nodes="collectionNodes"
         :busy="busy"
-        @create-workspace="controller.createWorkspace"
-        @select-workspace="controller.selectWorkspace"
-        @create-collection="controller.createCollection"
-        @select-collection="controller.selectCollection"
-        @create-request="controller.createRequest"
-        @select-request="controller.selectRequest"
+        @create-workspace="controller.createWorkspace($event)"
+        @select-workspace="controller.selectWorkspace($event)"
+        @create-collection="controller.createCollection($event)"
+        @select-collection="controller.selectCollection($event)"
+        @create-request="
+          (name, targetUrl) => controller.createRequest(name, targetUrl)
+        "
+        @select-request="controller.selectRequest($event)"
       />
       <RequestEditor
         :request="request"
         :execution="execution"
         :busy="busy"
-        @save="controller.saveRequest"
-        @execute="controller.executeRequest"
+        @save="(name, targetUrl) => controller.saveRequest(name, targetUrl)"
+        @execute="
+          (name, targetUrl) => controller.executeRequest(name, targetUrl)
+        "
       />
     </div>
   </div>
