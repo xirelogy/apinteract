@@ -13,6 +13,8 @@ services:
     stdin_open: true
     tty: true
     shm_size: 1gb
+    environment:
+      APINTERACT_DEV_PUBLIC_ORIGIN: "http://localhost:${APINTERACT_DEV_FRONTEND_PORT:-5173}"
     ports:
       - "${APINTERACT_DEV_BACKEND_PORT:-8080}:8080"
       - "${APINTERACT_DEV_PROXY_PORT:-8081}:8081"
@@ -38,7 +40,6 @@ services:
       args:
         PLAYWRIGHT_VERSION: "1.57.0"
     init: true
-    user: "${APINTERACT_DEV_UID:-1000}:${APINTERACT_DEV_GID:-1000}"
     working_dir: /workspace
     shm_size: 1gb
     environment:

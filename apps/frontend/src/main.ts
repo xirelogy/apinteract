@@ -19,8 +19,11 @@ const webSocket = new BackendWebSocketClient();
 const session = new SessionController(http, webSocket);
 const controller = new ApplicationController(session, webSocket);
 app.provide(applicationControllerKey, controller);
-app.use(router);
 
+// Restore browser credentials before router guards inspect authenticated state.
+// Otherwise a valid reload of /main can be redirected to /login while refresh
+// cookie rotation is still in progress.
 await session.restore();
+app.use(router);
 await router.isReady();
 app.mount("#app");

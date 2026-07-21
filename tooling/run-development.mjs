@@ -25,6 +25,7 @@ const children = processes.map(([name, arguments_]) => {
 
 let stopping = false;
 
+/** Stops all development components and preserves the triggering exit code. */
 async function stop(exitCode = 0) {
   if (stopping) {
     return;

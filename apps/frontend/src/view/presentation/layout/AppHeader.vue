@@ -27,7 +27,7 @@ defineEmits<{
         class="icon-button"
         type="button"
         title="Log out"
-        aria-label="Log out"
+        :aria-label="`Log out ${displayName}`"
         @click="$emit('logout')"
       >
         <LogOut :size="18" aria-hidden="true" />

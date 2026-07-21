@@ -3,8 +3,8 @@ import { ref } from "vue";
 import { ArrowRight, LockKeyhole, User } from "@lucide/vue";
 import { useRouter } from "vue-router";
 
-import logoUrl from "../../../../../logo.png";
 import { useApplicationController } from "@/app/dependencies";
+import logoUrl from "@brand/logo.png";
 
 const controller = useApplicationController();
 const router = useRouter();

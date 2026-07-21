@@ -4,6 +4,7 @@ import { relative, resolve, sep } from "node:path";
 import ts from "typescript";
 
 const rootPath = resolve(import.meta.dirname, "..");
+const excludedDirectoryNames = new Set(["coverage", "dist", "node_modules"]);
 const sourceFiles = [
   ...(await discoverSourceFiles(resolve(rootPath, "apps"))),
   ...(await discoverSourceFiles(resolve(rootPath, "tooling"))),
@@ -34,7 +35,7 @@ for (const sourcePath of sourceFiles) {
     for (const script of vueScripts(source)) {
       inspectSource(sourcePath, script.source, script.lineOffset);
     }
-  } else if (sourcePath.endsWith(".ts")) {
+  } else if (/\.(?:[cm]?js|ts)$/u.test(sourcePath)) {
     inspectSource(sourcePath, source, 0);
   }
 }
@@ -57,7 +58,9 @@ async function discoverSourceFiles(directoryPath) {
   for (const entry of await readdir(directoryPath, { withFileTypes: true })) {
     const absolutePath = resolve(directoryPath, entry.name);
     if (entry.isDirectory()) {
-      discovered.push(...(await discoverSourceFiles(absolutePath)));
+      if (!excludedDirectoryNames.has(entry.name)) {
+        discovered.push(...(await discoverSourceFiles(absolutePath)));
+      }
     } else if (
       entry.name.endsWith(".js") ||
       entry.name.endsWith(".mjs") ||

@@ -20,6 +20,24 @@ Build, start, and install dependencies:
 deploy/scripts/development bootstrap
 ```
 
+Create the first local-password administrator. The command prompts for the
+password without echoing it:
+
+```sh
+deploy/scripts/development init-admin
+```
+
+Start the proxy, backend, and Vite frontend in the foreground:
+
+```sh
+deploy/scripts/development dev
+```
+
+The login page is then available at
+`http://localhost:5173/web-ui/#/login`. When the frontend host port is changed
+through `.env.local`, use that port in the URL. The generated backend
+configuration uses the same value for exact origin validation.
+
 Common lifecycle commands are:
 
 ```sh
@@ -28,6 +46,9 @@ deploy/scripts/development up
 deploy/scripts/development rebuild
 deploy/scripts/development down
 deploy/scripts/development ps
+deploy/scripts/development prepare
+deploy/scripts/development init-admin
+deploy/scripts/development dev
 deploy/scripts/development shell
 deploy/scripts/development typecheck
 deploy/scripts/development test
@@ -105,8 +126,10 @@ deploy/scripts/development browser-test
 ```
 
 This command pulls the pinned Playwright image on first use. The browser
-service shares the repository dependency volumes and writes reports to the
-`playwright-output` volume.
+service starts an isolated proxy, backend, and Vite server with disposable
+state. It verifies rejected credentials, successful login, refresh-cookie
+session restoration, logout, and protected-route redirection. Reports and
+failure traces are written to the `playwright-output` volume.
 
 ## Exposed Ports
 
