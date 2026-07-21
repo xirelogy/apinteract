@@ -7,6 +7,7 @@ type CreationKind = "workspace" | "collection" | "request";
 const props = defineProps<{
   kind: CreationKind;
   busy: boolean;
+  context?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -18,7 +19,11 @@ const dialog = ref<HTMLDialogElement | null>(null);
 const name = ref("");
 const targetUrl = ref("http://127.0.0.1:8090/hello");
 
-const title = computed(() => `New ${props.kind}`);
+const title = computed(() =>
+  props.kind === "collection" && props.context != null
+    ? "New subcollection"
+    : `New ${props.kind}`,
+);
 const nameLabel = computed(
   () => `${props.kind[0]?.toUpperCase()}${props.kind.slice(1)} name`,
 );
@@ -66,7 +71,10 @@ function submit(): void {
   >
     <div class="resource-dialog-surface">
       <header class="resource-dialog-header">
-        <h2 id="resource-dialog-title">{{ title }}</h2>
+        <div>
+          <h2 id="resource-dialog-title">{{ title }}</h2>
+          <p v-if="context" class="resource-dialog-context">{{ context }}</p>
+        </div>
         <button
           class="icon-button"
           type="button"

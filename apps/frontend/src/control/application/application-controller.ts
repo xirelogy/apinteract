@@ -43,7 +43,7 @@ export class ApplicationController {
       store.workspaces = result.workspaces;
       const first = result.workspaces[0];
       if (first !== undefined) {
-        await this.selectWorkspace(first.workspaceId);
+        await this.#selectWorkspace(first.workspaceId);
       }
     });
   }
@@ -57,12 +57,17 @@ export class ApplicationController {
       );
       const store = useApplicationStore();
       store.workspaces.push(workspace);
-      await this.selectWorkspace(workspace.workspaceId);
+      await this.#selectWorkspace(workspace.workspaceId);
     });
   }
 
   /** Selects a workspace and resets all descendant view state. */
   async selectWorkspace(workspaceId: string): Promise<void> {
+    await this.#run(() => this.#selectWorkspace(workspaceId));
+  }
+
+  /** Loads a workspace root without creating a nested foreground operation. */
+  async #selectWorkspace(workspaceId: string): Promise<void> {
     const result = await this.#webSocket.command<{ children: TreeNode[] }>(
       "tree.list",
       { workspaceId, parentCollectionId: null },
@@ -71,27 +76,54 @@ export class ApplicationController {
     store.selectedWorkspaceId = workspaceId;
     store.rootNodes = result.children;
     store.selectedCollectionId = null;
-    store.collectionNodes = [];
+    store.collectionChildren = {};
+    store.expandedCollectionIds = [];
     store.request = null;
     store.execution = null;
   }
 
-  /** Creates a root collection in the currently selected workspace. */
-  async createCollection(name: string): Promise<void> {
+  /** Creates a collection under the workspace root or a selected collection. */
+  async createCollection(
+    name: string,
+    parentCollectionId: string | null,
+  ): Promise<void> {
     const store = useApplicationStore();
     const workspaceId = requireSelection(store.selectedWorkspaceId);
     await this.#run(async () => {
       await this.#webSocket.command("collection.create", {
         workspaceId,
-        parentCollectionId: null,
+        parentCollectionId,
         name,
       });
-      await this.selectWorkspace(workspaceId);
+      const result = await this.#webSocket.command<{ children: TreeNode[] }>(
+        "tree.list",
+        { workspaceId, parentCollectionId },
+      );
+      if (parentCollectionId === null) {
+        store.rootNodes = result.children;
+      } else {
+        store.collectionChildren = {
+          ...store.collectionChildren,
+          [parentCollectionId]: result.children,
+        };
+        store.selectedCollectionId = parentCollectionId;
+        store.expandedCollectionIds = includeOnce(
+          store.expandedCollectionIds,
+          parentCollectionId,
+        );
+        store.request = null;
+        store.execution = null;
+      }
     });
   }
 
-  /** Selects a collection and loads its ordered child nodes. */
+  /** Selects and expands a collection after loading its direct children. */
   async selectCollection(collectionId: string): Promise<void> {
+    await this.#run(() => this.#selectCollection(collectionId));
+  }
+
+  /** Loads one collection branch without nesting foreground busy state. */
+  async #selectCollection(collectionId: string): Promise<void> {
     const store = useApplicationStore();
     const workspaceId = requireSelection(store.selectedWorkspaceId);
     const result = await this.#webSocket.command<{ children: TreeNode[] }>(
@@ -99,9 +131,28 @@ export class ApplicationController {
       { workspaceId, parentCollectionId: collectionId },
     );
     store.selectedCollectionId = collectionId;
-    store.collectionNodes = result.children;
+    store.collectionChildren = {
+      ...store.collectionChildren,
+      [collectionId]: result.children,
+    };
+    store.expandedCollectionIds = includeOnce(
+      store.expandedCollectionIds,
+      collectionId,
+    );
     store.request = null;
     store.execution = null;
+  }
+
+  /** Expands an unloaded collection or collapses its currently visible branch. */
+  async toggleCollection(collectionId: string): Promise<void> {
+    const store = useApplicationStore();
+    if (store.expandedCollectionIds.includes(collectionId)) {
+      store.expandedCollectionIds = store.expandedCollectionIds.filter(
+        (candidate) => candidate !== collectionId,
+      );
+      return;
+    }
+    await this.selectCollection(collectionId);
   }
 
   /** Creates and selects a request under the current collection. */
@@ -119,8 +170,9 @@ export class ApplicationController {
           targetUrl,
         },
       );
-      await this.selectCollection(collectionId);
+      await this.#selectCollection(collectionId);
       store.request = request;
+      store.selectedCollectionId = null;
     });
   }
 
@@ -132,6 +184,7 @@ export class ApplicationController {
         "request.get",
         { requestId },
       );
+      store.selectedCollectionId = null;
       store.execution = null;
     });
   }
@@ -226,4 +279,9 @@ function requireSelection(value: string | null): string {
     throw new Error("Select the required parent first.");
   }
   return value;
+}
+
+/** Returns an array containing the value exactly once. */
+function includeOnce(values: readonly string[], value: string): string[] {
+  return values.includes(value) ? [...values] : [...values, value];
 }

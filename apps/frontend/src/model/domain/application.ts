@@ -15,7 +15,8 @@ export interface ApplicationSnapshot {
   readonly selectedWorkspaceId: string | null;
   readonly rootNodes: readonly TreeNode[];
   readonly selectedCollectionId: string | null;
-  readonly collectionNodes: readonly TreeNode[];
+  readonly collectionChildren: Readonly<Record<string, readonly TreeNode[]>>;
+  readonly expandedCollectionIds: readonly string[];
   readonly request: RequestView | null;
   readonly execution: ExecutionView | null;
   readonly busy: boolean;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
 
@@ -12,6 +12,7 @@ import WorkspaceNavigator from "@/view/presentation/features/WorkspaceNavigator.
 const controller = useApplicationController();
 const store = useApplicationStore();
 const router = useRouter();
+const navigatorOpen = ref(false);
 const {
   session,
   connection,
@@ -19,7 +20,8 @@ const {
   selectedWorkspaceId,
   rootNodes,
   selectedCollectionId,
-  collectionNodes,
+  collectionChildren,
+  expandedCollectionIds,
   request,
   execution,
   busy,
@@ -35,6 +37,28 @@ async function logout(): Promise<void> {
   await controller.session.logout();
   await router.push("/login");
 }
+
+/** Toggles the mobile workspace navigator drawer. */
+function toggleNavigator(): void {
+  navigatorOpen.value = !navigatorOpen.value;
+}
+
+/** Closes the mobile workspace navigator drawer. */
+function closeNavigator(): void {
+  navigatorOpen.value = false;
+}
+
+/** Creates a request and reveals its editor after closing the mobile drawer. */
+async function createRequest(name: string, targetUrl: string): Promise<void> {
+  await controller.createRequest(name, targetUrl);
+  closeNavigator();
+}
+
+/** Selects a request and reveals its editor after closing the mobile drawer. */
+async function selectRequest(requestId: string): Promise<void> {
+  await controller.selectRequest(requestId);
+  closeNavigator();
+}
 </script>
 
 <template>
@@ -42,26 +66,41 @@ async function logout(): Promise<void> {
     <AppHeader
       :display-name="session?.user.displayName ?? ''"
       :connected="connection === 'authenticated'"
+      :navigator-open="navigatorOpen"
       @logout="logout"
+      @toggle-navigator="toggleNavigator"
     />
     <div v-if="error" class="global-error" role="alert">{{ error }}</div>
     <div class="application-body">
       <WorkspaceNavigator
+        id="workspace-navigator"
+        :class="{ 'is-mobile-open': navigatorOpen }"
         :workspaces="workspaces"
         :selected-workspace-id="selectedWorkspaceId"
         :root-nodes="rootNodes"
         :selected-collection-id="selectedCollectionId"
-        :collection-nodes="collectionNodes"
+        :collection-children="collectionChildren"
+        :expanded-collection-ids="expandedCollectionIds"
+        :selected-request-id="request?.requestId ?? null"
         :busy="busy"
         @create-workspace="controller.createWorkspace($event)"
         @select-workspace="controller.selectWorkspace($event)"
-        @create-collection="controller.createCollection($event)"
-        @select-collection="controller.selectCollection($event)"
-        @create-request="
-          (name, targetUrl) => controller.createRequest(name, targetUrl)
+        @create-collection="
+          (name, parentCollectionId) =>
+            controller.createCollection(name, parentCollectionId)
         "
-        @select-request="controller.selectRequest($event)"
+        @select-collection="controller.selectCollection($event)"
+        @toggle-collection="controller.toggleCollection($event)"
+        @create-request="createRequest"
+        @select-request="selectRequest"
       />
+      <button
+        v-if="navigatorOpen"
+        class="navigator-scrim"
+        type="button"
+        aria-label="Close workspace navigator"
+        @click="closeNavigator"
+      ></button>
       <RequestEditor
         :request="request"
         :execution="execution"
