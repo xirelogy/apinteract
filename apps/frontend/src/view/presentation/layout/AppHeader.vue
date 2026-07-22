@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import { LogOut, Menu, Radio, X } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
+
+import LocaleSelector from "@/view/presentation/features/LocaleSelector.vue";
+
+const { t } = useI18n();
 
 defineProps<{
   displayName: string;
@@ -20,14 +25,10 @@ defineEmits<{
         class="icon-button navigator-toggle-button"
         type="button"
         :title="
-          navigatorOpen
-            ? 'Close workspace navigator'
-            : 'Open workspace navigator'
+          navigatorOpen ? t('header.closeNavigator') : t('header.openNavigator')
         "
         :aria-label="
-          navigatorOpen
-            ? 'Close workspace navigator'
-            : 'Open workspace navigator'
+          navigatorOpen ? t('header.closeNavigator') : t('header.openNavigator')
         "
         :aria-expanded="navigatorOpen"
         aria-controls="workspace-navigator"
@@ -44,14 +45,15 @@ defineEmits<{
     <div class="header-actions">
       <span class="connection-state" :data-connected="connected">
         <Radio :size="15" aria-hidden="true" />
-        {{ connected ? "Connected" : "Offline" }}
+        {{ connected ? t("header.connected") : t("header.offline") }}
       </span>
+      <LocaleSelector />
       <span class="user-name">{{ displayName }}</span>
       <button
         class="icon-button"
         type="button"
-        title="Log out"
-        :aria-label="`Log out ${displayName}`"
+        :title="t('header.logout', { name: displayName })"
+        :aria-label="t('header.logout', { name: displayName })"
         @click="$emit('logout')"
       >
         <LogOut :size="18" aria-hidden="true" />

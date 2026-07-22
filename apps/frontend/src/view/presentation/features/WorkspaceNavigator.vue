@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { FilePlus, FolderPlus, Plus } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 
 import type { TreeNode, WorkspaceSummary } from "@/model/contracts/backend";
 import CreateResourceDialog from "./CreateResourceDialog.vue";
@@ -18,6 +19,7 @@ const props = defineProps<{
   selectedRequestId: string | null;
   busy: boolean;
 }>();
+const { t } = useI18n();
 
 const emit = defineEmits<{
   createWorkspace: [name: string];
@@ -39,7 +41,7 @@ const creationParentName = computed(() =>
 const creationContext = computed(() =>
   creationParentName.value === null
     ? null
-    : `Inside ${creationParentName.value}`,
+    : t("collection.inside", { name: creationParentName.value }),
 );
 
 /** Opens the creation dialog for one navigator resource type. */
@@ -80,9 +82,11 @@ function findLoadedNodeName(nodeId: string): string | null {
 </script>
 
 <template>
-  <aside class="workspace-navigator" aria-label="Workspace navigation">
+  <aside class="workspace-navigator" :aria-label="t('workspace.navigation')">
     <div class="navigator-section">
-      <label class="field-label" for="workspace-select">Workspace</label>
+      <label class="field-label" for="workspace-select">
+        {{ t("workspace.label") }}
+      </label>
       <div class="workspace-select-row">
         <select
           id="workspace-select"
@@ -93,7 +97,7 @@ function findLoadedNodeName(nodeId: string): string | null {
             emit('selectWorkspace', ($event.target as HTMLSelectElement).value)
           "
         >
-          <option value="" disabled>Select a workspace</option>
+          <option value="" disabled>{{ t("workspace.select") }}</option>
           <option
             v-for="workspace in workspaces"
             :key="workspace.workspaceId"
@@ -105,8 +109,8 @@ function findLoadedNodeName(nodeId: string): string | null {
         <button
           class="icon-button"
           type="button"
-          title="Create workspace"
-          aria-label="Create workspace"
+          :title="t('workspace.create')"
+          :aria-label="t('workspace.create')"
           :disabled="busy"
           @click="openCreationDialog('workspace')"
         >
@@ -117,13 +121,13 @@ function findLoadedNodeName(nodeId: string): string | null {
 
     <div v-if="selectedWorkspaceId" class="navigator-section navigator-grow">
       <div class="section-heading">
-        <span>Collections</span>
+        <span>{{ t("workspace.collections") }}</span>
         <div class="section-actions">
           <button
             class="icon-button compact-icon-button"
             type="button"
-            title="Create root collection"
-            aria-label="Create root collection"
+            :title="t('workspace.createRootCollection')"
+            :aria-label="t('workspace.createRootCollection')"
             :disabled="busy"
             @click="openCreationDialog('collection')"
           >
@@ -132,8 +136,8 @@ function findLoadedNodeName(nodeId: string): string | null {
           <button
             class="icon-button compact-icon-button"
             type="button"
-            title="Create request"
-            aria-label="Create request"
+            :title="t('workspace.createRequest')"
+            :aria-label="t('workspace.createRequest')"
             :disabled="busy || selectedCollectionId === null"
             @click="emit('createRequest', selectedCollectionId)"
           >
@@ -141,7 +145,7 @@ function findLoadedNodeName(nodeId: string): string | null {
           </button>
         </div>
       </div>
-      <nav class="workspace-tree" aria-label="Workspace tree">
+      <nav class="workspace-tree" :aria-label="t('workspace.tree')">
         <ul v-if="rootNodes.length > 0" class="workspace-tree-root">
           <WorkspaceTreeNode
             v-for="node in rootNodes"
@@ -158,7 +162,7 @@ function findLoadedNodeName(nodeId: string): string | null {
             @select-request="emit('selectRequest', $event)"
           />
         </ul>
-        <p v-else class="tree-empty">No collections yet</p>
+        <p v-else class="tree-empty">{{ t("workspace.noCollections") }}</p>
       </nav>
     </div>
 

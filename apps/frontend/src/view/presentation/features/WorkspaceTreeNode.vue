@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { ChevronRight, Folder, FolderOpen, FolderPlus } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 
 import type { TreeNode } from "@/model/contracts/backend";
 
@@ -12,6 +13,7 @@ const props = defineProps<{
   selectedRequestId: string | null;
   busy: boolean;
 }>();
+const { t } = useI18n();
 
 const emit = defineEmits<{
   createCollection: [parentCollectionId: string];
@@ -40,8 +42,16 @@ const children = computed(
       <button
         class="tree-toggle-button"
         type="button"
-        :title="expanded ? `Collapse ${node.name}` : `Expand ${node.name}`"
-        :aria-label="expanded ? `Collapse ${node.name}` : `Expand ${node.name}`"
+        :title="
+          expanded
+            ? t('collection.collapse', { name: node.name })
+            : t('collection.expand', { name: node.name })
+        "
+        :aria-label="
+          expanded
+            ? t('collection.collapse', { name: node.name })
+            : t('collection.expand', { name: node.name })
+        "
         :aria-expanded="expanded"
         :disabled="busy"
         @click="emit('toggleCollection', node.nodeId)"
@@ -66,8 +76,8 @@ const children = computed(
       <button
         class="tree-node-action"
         type="button"
-        :title="`Create subcollection in ${node.name}`"
-        :aria-label="`Create subcollection in ${node.name}`"
+        :title="t('collection.createSubcollection', { name: node.name })"
+        :aria-label="t('collection.createSubcollection', { name: node.name })"
         :disabled="busy"
         @click="emit('createCollection', node.nodeId)"
       >
@@ -107,7 +117,7 @@ const children = computed(
         @select-request="emit('selectRequest', $event)"
       />
       <li v-if="children.length === 0" class="tree-empty">
-        This collection is empty
+        {{ t("collection.empty") }}
       </li>
     </ul>
   </li>

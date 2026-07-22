@@ -9,6 +9,9 @@ The plugin system is currently in the design stage. Detailed executable
 manifests and TypeScript interfaces will be published with the component
 implementations.
 
+Frontend translations use a separate data-only extension mechanism documented
+in [Translation packs](translations.md).
+
 ## Package Layout
 
 External plugins are self-contained packages loaded from an administrator-

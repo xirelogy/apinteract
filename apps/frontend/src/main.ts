@@ -3,6 +3,10 @@ import { createApp } from "vue";
 
 import App from "./App.vue";
 import { applicationControllerKey } from "./app/dependencies";
+import {
+  createTranslationService,
+  translationServiceKey,
+} from "./app/i18n/translation-service";
 import { router } from "./app/router";
 import { ApplicationController } from "./control/application/application-controller";
 import { SessionController } from "./control/session/session-controller";
@@ -13,6 +17,10 @@ import "./view/styling/index.css";
 const app = createApp(App);
 const pinia = createPinia();
 app.use(pinia);
+
+const translation = await createTranslationService();
+app.use(translation.i18n);
+app.provide(translationServiceKey, translation);
 
 const http = new BackendHttpClient();
 const webSocket = new BackendWebSocketClient();

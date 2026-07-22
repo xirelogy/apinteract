@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { X } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 
 type CreationKind = "workspace" | "collection";
 
@@ -9,6 +10,7 @@ const props = defineProps<{
   busy: boolean;
   context?: string | null;
 }>();
+const { t } = useI18n();
 
 const emit = defineEmits<{
   close: [];
@@ -19,12 +21,16 @@ const dialog = ref<HTMLDialogElement | null>(null);
 const name = ref("");
 
 const title = computed(() =>
-  props.kind === "collection" && props.context != null
-    ? "New subcollection"
-    : `New ${props.kind}`,
+  props.kind === "workspace"
+    ? t("resource.newWorkspace")
+    : props.context != null
+      ? t("collection.newSubcollection")
+      : t("collection.new"),
 );
-const nameLabel = computed(
-  () => `${props.kind[0]?.toUpperCase()}${props.kind.slice(1)} name`,
+const nameLabel = computed(() =>
+  props.kind === "workspace"
+    ? t("resource.workspaceName")
+    : t("collection.name"),
 );
 const canSubmit = computed(() => name.value.trim() !== "");
 
@@ -69,8 +75,8 @@ function submit(): void {
         <button
           class="icon-button"
           type="button"
-          title="Close"
-          aria-label="Close"
+          :title="t('common.actions.close')"
+          :aria-label="t('common.actions.close')"
           :disabled="busy"
           @click="close"
         >
@@ -98,14 +104,14 @@ function submit(): void {
             :disabled="busy"
             @click="close"
           >
-            Cancel
+            {{ t("common.actions.cancel") }}
           </button>
           <button
             class="primary-button"
             type="submit"
             :disabled="busy || !canSubmit"
           >
-            Create
+            {{ t("common.actions.create") }}
           </button>
         </footer>
       </form>

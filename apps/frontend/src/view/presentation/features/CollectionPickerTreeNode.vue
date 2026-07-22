@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { ChevronRight, Folder, FolderOpen } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 
 import type { TreeNode } from "@/model/contracts/backend";
 
@@ -11,6 +12,7 @@ const props = defineProps<{
   selectedCollectionId: string;
   busy: boolean;
 }>();
+const { t } = useI18n();
 
 const emit = defineEmits<{
   select: [collectionId: string];
@@ -36,8 +38,16 @@ const children = computed(() =>
       <button
         class="tree-toggle-button"
         type="button"
-        :title="expanded ? `Collapse ${node.name}` : `Expand ${node.name}`"
-        :aria-label="expanded ? `Collapse ${node.name}` : `Expand ${node.name}`"
+        :title="
+          expanded
+            ? t('collection.collapse', { name: node.name })
+            : t('collection.expand', { name: node.name })
+        "
+        :aria-label="
+          expanded
+            ? t('collection.collapse', { name: node.name })
+            : t('collection.expand', { name: node.name })
+        "
         :disabled="busy"
         @click="emit('toggle', node.nodeId)"
       >

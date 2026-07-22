@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { Play, Plus, Save, Trash2 } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 
 import type {
   ExecutionView,
@@ -18,6 +19,7 @@ const props = defineProps<{
   temporary: boolean;
   busy: boolean;
 }>();
+const { t } = useI18n();
 
 const emit = defineEmits<{
   save: [draft: RequestDraftInput];
@@ -64,6 +66,11 @@ const validTarget = computed(() => {
   }
 });
 const canSave = computed(() => name.value.trim() !== "" && validTarget.value);
+const draftRevisionLabel = computed(() =>
+  props.temporary
+    ? t("request.temporary")
+    : t("request.draft", { revision: props.request?.draftRevision ?? 0 }),
+);
 
 /** Returns mutable field copies without sharing generated contract objects. */
 function cloneFields(fields: readonly RequestField[]): RequestField[] {
@@ -124,13 +131,28 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
     fields.filter((field) => field.name !== "" || field.value !== ""),
   );
 }
+
+/** Returns the translated label for a request settings tab. */
+function requestTabLabel(tab: (typeof requestTabs)[number]): string {
+  if (tab === "query") {
+    return t("request.query");
+  }
+  return tab === "headers" ? t("request.headers") : t("request.body");
+}
+
+/** Returns the translated singular label for the active structured field. */
+function activeFieldKind(): string {
+  return activeTab.value === "headers"
+    ? t("request.headerField")
+    : t("request.queryField");
+}
 </script>
 
 <template>
   <main class="request-workbench">
     <div v-if="draft === null" class="empty-workbench">
-      <h1>Select a request</h1>
-      <p>Choose a collection and request from the workspace navigator.</p>
+      <h1>{{ t("request.selectTitle") }}</h1>
+      <p>{{ t("request.selectDescription") }}</p>
     </div>
     <template v-else>
       <section class="request-editor" aria-labelledby="request-name">
@@ -140,14 +162,12 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
               id="request-name"
               v-model="name"
               class="request-name-input"
-              aria-label="Request name"
+              :aria-label="t('request.name')"
               :disabled="busy"
               @input="emitChange"
             />
             <span class="draft-revision">
-              {{
-                temporary ? "Temporary" : `Draft ${request?.draftRevision ?? 0}`
-              }}
+              {{ draftRevisionLabel }}
             </span>
           </div>
           <div class="command-bar">
@@ -158,7 +178,7 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
               @click="emit('save', currentDraft())"
             >
               <Save :size="16" aria-hidden="true" />
-              Save
+              {{ t("common.actions.save") }}
             </button>
             <button
               class="primary-button"
@@ -167,7 +187,7 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
               @click="emit('execute', currentDraft())"
             >
               <Play :size="16" aria-hidden="true" />
-              Send
+              {{ t("request.send") }}
             </button>
           </div>
         </div>
@@ -176,7 +196,7 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
           <select
             v-model="method"
             class="method-control"
-            aria-label="HTTP method"
+            :aria-label="t('request.httpMethod')"
             :disabled="busy"
             @change="emitChange"
           >
@@ -187,7 +207,7 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
           <input
             v-model="targetUrl"
             class="url-input"
-            aria-label="Target URL"
+            :aria-label="t('request.targetUrl')"
             inputmode="url"
             autocomplete="off"
             spellcheck="false"
@@ -196,7 +216,11 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
           />
         </div>
 
-        <div class="request-tabs" role="tablist" aria-label="Request settings">
+        <div
+          class="request-tabs"
+          role="tablist"
+          :aria-label="t('request.requestSettings')"
+        >
           <button
             v-for="tab in requestTabs"
             :key="tab"
@@ -207,9 +231,7 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
             :aria-selected="activeTab === tab"
             @click="activeTab = tab"
           >
-            {{
-              tab === "query" ? "Query" : tab[0]?.toUpperCase() + tab.slice(1)
-            }}
+            {{ requestTabLabel(tab) }}
             <span v-if="tab !== 'body'" class="tab-count">
               {{ tab === "query" ? query.length : headers.length }}
             </span>
@@ -219,8 +241,8 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
         <div v-if="activeTab !== 'body'" class="request-fields">
           <div class="request-field-heading" aria-hidden="true">
             <span></span>
-            <span>Name</span>
-            <span>Value</span>
+            <span>{{ t("common.fields.name") }}</span>
+            <span>{{ t("common.fields.value") }}</span>
             <span></span>
           </div>
           <div
@@ -231,15 +253,27 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
             <input
               v-model="field.enabled"
               type="checkbox"
-              :aria-label="`Enable ${activeTab} field ${index + 1}`"
+              :aria-label="
+                t('request.enableField', {
+                  kind: activeFieldKind(),
+                  index: index + 1,
+                })
+              "
               :disabled="busy"
               @change="emitChange"
             />
             <input
               v-model="field.name"
               class="field-cell-input"
-              :aria-label="`${activeTab === 'query' ? 'Query' : 'Header'} name ${index + 1}`"
-              placeholder="Name"
+              :aria-label="
+                t(
+                  activeTab === 'query'
+                    ? 'request.queryName'
+                    : 'request.headerName',
+                  { index: index + 1 },
+                )
+              "
+              :placeholder="t('common.fields.name')"
               autocomplete="off"
               spellcheck="false"
               :disabled="busy"
@@ -248,8 +282,15 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
             <input
               v-model="field.value"
               class="field-cell-input"
-              :aria-label="`${activeTab === 'query' ? 'Query' : 'Header'} value ${index + 1}`"
-              placeholder="Value"
+              :aria-label="
+                t(
+                  activeTab === 'query'
+                    ? 'request.queryValue'
+                    : 'request.headerValue',
+                  { index: index + 1 },
+                )
+              "
+              :placeholder="t('common.fields.value')"
               autocomplete="off"
               spellcheck="false"
               :disabled="busy"
@@ -258,8 +299,17 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
             <button
               class="icon-button compact-icon-button"
               type="button"
-              :aria-label="`Remove ${activeTab} field ${index + 1}`"
-              :title="`Remove ${activeTab} field`"
+              :aria-label="
+                t('request.removeField', {
+                  kind: activeFieldKind(),
+                  index: index + 1,
+                })
+              "
+              :title="
+                t('request.removeFieldTitle', {
+                  kind: activeFieldKind(),
+                })
+              "
               :disabled="busy"
               @click="removeActiveField(index)"
             >
@@ -273,7 +323,11 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
             @click="addActiveField"
           >
             <Plus :size="15" aria-hidden="true" />
-            Add {{ activeTab === "query" ? "parameter" : "header" }}
+            {{
+              activeTab === "query"
+                ? t("request.addParameter")
+                : t("request.addHeader")
+            }}
           </button>
         </div>
 
@@ -281,8 +335,8 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
           <textarea
             v-model="body"
             class="raw-body-input"
-            aria-label="Raw request body"
-            placeholder="Raw request body"
+            :aria-label="t('request.rawBody')"
+            :placeholder="t('request.rawBody')"
             spellcheck="false"
             :disabled="busy"
             @input="emitChange"

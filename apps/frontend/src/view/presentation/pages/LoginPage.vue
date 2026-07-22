@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { ArrowRight, LockKeyhole, User } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
 import { useApplicationController } from "@/app/dependencies";
+import LocaleSelector from "@/view/presentation/features/LocaleSelector.vue";
 import logoUrl from "@brand/logo.png";
 
 const controller = useApplicationController();
 const router = useRouter();
+const { t } = useI18n();
 const username = ref("");
 const password = ref("");
 const busy = ref(false);
@@ -21,8 +24,7 @@ async function submit(): Promise<void> {
     await controller.session.login(username.value, password.value);
     await router.push("/main");
   } catch (cause) {
-    error.value =
-      cause instanceof Error ? cause.message : "Authentication failed.";
+    error.value = cause instanceof Error ? cause.message : t("auth.failed");
   } finally {
     busy.value = false;
   }
@@ -32,11 +34,14 @@ async function submit(): Promise<void> {
 <template>
   <main class="login-page">
     <section class="login-panel" aria-labelledby="login-title">
+      <div class="login-locale">
+        <LocaleSelector />
+      </div>
       <img class="login-logo" :src="logoUrl" alt="APInteract" />
-      <h1 id="login-title">Sign in</h1>
+      <h1 id="login-title">{{ t("auth.signIn") }}</h1>
       <form class="login-form" @submit.prevent="submit">
         <label class="input-field">
-          <span>Username</span>
+          <span>{{ t("auth.username") }}</span>
           <span class="input-with-icon">
             <User :size="17" aria-hidden="true" />
             <input
@@ -48,7 +53,7 @@ async function submit(): Promise<void> {
           </span>
         </label>
         <label class="input-field">
-          <span>Password</span>
+          <span>{{ t("auth.password") }}</span>
           <span class="input-with-icon">
             <LockKeyhole :size="17" aria-hidden="true" />
             <input
@@ -66,7 +71,9 @@ async function submit(): Promise<void> {
           type="submit"
           :disabled="busy"
         >
-          <span>{{ busy ? "Signing in" : "Continue" }}</span>
+          <span>{{
+            busy ? t("auth.signingIn") : t("common.actions.continue")
+          }}</span>
           <ArrowRight :size="17" aria-hidden="true" />
         </button>
       </form>

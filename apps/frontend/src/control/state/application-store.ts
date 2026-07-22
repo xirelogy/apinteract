@@ -5,7 +5,11 @@ import type {
   TreeNode,
   WorkspaceSummary,
 } from "@/model/contracts/backend";
-import type { ConnectionState, RequestTab } from "@/model/domain/application";
+import type {
+  ApplicationError,
+  ConnectionState,
+  RequestTab,
+} from "@/model/domain/application";
 
 export const useApplicationStore = defineStore("application", {
   state: () => ({
@@ -20,6 +24,6 @@ export const useApplicationStore = defineStore("application", {
     requestTabs: [] as RequestTab[],
     activeRequestTabId: null as string | null,
     busy: false,
-    error: null as string | null,
+    error: null as ApplicationError | null,
   }),
 });

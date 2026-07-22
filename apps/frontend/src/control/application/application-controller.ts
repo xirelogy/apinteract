@@ -9,7 +9,21 @@ import type {
 import { useApplicationStore } from "@/control/state/application-store";
 import type { SessionController } from "@/control/session/session-controller";
 import type { BackendWebSocketClient } from "@/control/transport/websocket-client";
-import type { RequestDraftInput, RequestTab } from "@/model/domain/application";
+import type {
+  ApplicationError,
+  ApplicationErrorCode,
+  RequestDraftInput,
+  RequestTab,
+} from "@/model/domain/application";
+
+class WorkflowError extends Error {
+  readonly code: ApplicationErrorCode;
+
+  constructor(code: ApplicationErrorCode) {
+    super(code);
+    this.code = code;
+  }
+}
 
 /**
  * Coordinates backend commands with application view state.
@@ -348,7 +362,7 @@ export class ApplicationController {
     try {
       await operation();
     } catch (cause) {
-      store.error = errorMessage(cause);
+      store.error = applicationError(cause);
       throw cause;
     } finally {
       store.busy = false;
@@ -363,7 +377,7 @@ export class ApplicationController {
     try {
       await operation();
     } catch (cause) {
-      store.error = errorMessage(cause);
+      store.error = applicationError(cause);
       throw cause;
     } finally {
       this.#updateTab(tabId, (tab) => ({ ...tab, busy: false }));
@@ -434,7 +448,7 @@ export class ApplicationController {
 /** Returns a required selection or raises a user-facing workflow error. */
 function requireSelection(value: string | null): string {
   if (value === null) {
-    throw new Error("Select the required parent first.");
+    throw new WorkflowError("parentRequired");
   }
   return value;
 }
@@ -445,7 +459,7 @@ function requireTab(tabId: string): RequestTab {
     (candidate) => candidate.tabId === tabId,
   );
   if (tab === undefined) {
-    throw new Error("The request tab is no longer open.");
+    throw new WorkflowError("requestTabClosed");
   }
   return tab;
 }
@@ -464,7 +478,7 @@ function activeRequestTab(store: {
 /** Creates the initial editable content for a temporary request. */
 function emptyDraft(): RequestDraftInput {
   return {
-    name: "Untitled request",
+    name: "",
     method: "GET",
     targetUrl: "",
     query: [],
@@ -534,7 +548,12 @@ function replaceRequestNode(
   );
 }
 
-/** Maps an unknown operation failure to a user-facing message. */
-function errorMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : "The operation failed.";
+/** Maps an operation failure to a localizable code or backend fallback text. */
+function applicationError(cause: unknown): ApplicationError {
+  if (cause instanceof WorkflowError) {
+    return { code: cause.code, message: null };
+  }
+  return cause instanceof Error
+    ? { code: null, message: cause.message }
+    : { code: "operationFailed", message: null };
 }

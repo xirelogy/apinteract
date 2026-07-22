@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { Check, ChevronDown, LoaderCircle, Plus, X } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 
 import { isRequestTabDirty, type RequestTab } from "@/model/domain/application";
 
@@ -8,6 +9,7 @@ const props = defineProps<{
   tabs: readonly RequestTab[];
   activeTabId: string | null;
 }>();
+const { t } = useI18n();
 
 const emit = defineEmits<{
   activate: [tabId: string];
@@ -31,8 +33,17 @@ onBeforeUnmount(() => {
 
 /** Formats one request for the compact mobile tab switcher. */
 function requestTabLabel(tab: RequestTab): string {
-  const name = tab.draft.name.trim() || "Untitled request";
+  const name = tab.draft.name.trim() || t("request.untitled");
   return `${tab.draft.method} ${name}${isRequestTabDirty(tab) ? " *" : ""}`;
+}
+
+/** Formats the close action for the active mobile request. */
+function closeTabLabel(tab: RequestTab | null): string {
+  return tab === null
+    ? t("request.close")
+    : t("request.closeNamed", {
+        name: tab.draft.name || t("request.untitled"),
+      });
 }
 
 /** Toggles the anchored mobile request menu. */
@@ -61,7 +72,11 @@ function closeMobileMenuFromOutside(event: PointerEvent): void {
 
 <template>
   <div class="request-tab-strip">
-    <div class="request-tab-list" role="tablist" aria-label="Open requests">
+    <div
+      class="request-tab-list"
+      role="tablist"
+      :aria-label="t('request.openRequests')"
+    >
       <div
         v-for="tab in tabs"
         :key="tab.tabId"
@@ -82,19 +97,29 @@ function closeMobileMenuFromOutside(event: PointerEvent): void {
             aria-hidden="true"
           />
           <span v-else class="request-tab-method">{{ tab.draft.method }}</span>
-          <span class="request-tab-name">{{ tab.draft.name }}</span>
+          <span class="request-tab-name">
+            {{ tab.draft.name.trim() || t("request.untitled") }}
+          </span>
           <span
             v-if="isRequestTabDirty(tab)"
             class="request-tab-dirty"
-            title="Unsaved changes"
-            aria-label="Unsaved changes"
+            :title="t('request.unsavedChanges')"
+            :aria-label="t('request.unsavedChanges')"
           ></span>
         </button>
         <button
           class="request-tab-close"
           type="button"
-          :title="`Close ${tab.draft.name}`"
-          :aria-label="`Close ${tab.draft.name}`"
+          :title="
+            t('request.closeNamed', {
+              name: tab.draft.name || t('request.untitled'),
+            })
+          "
+          :aria-label="
+            t('request.closeNamed', {
+              name: tab.draft.name || t('request.untitled'),
+            })
+          "
           @click="emit('close', tab.tabId)"
         >
           <X :size="14" aria-hidden="true" />
@@ -114,8 +139,8 @@ function closeMobileMenuFromOutside(event: PointerEvent): void {
           :aria-expanded="mobileMenuOpen"
           :aria-label="
             activeTab === null
-              ? 'No open requests'
-              : `Current request: ${requestTabLabel(activeTab)}`
+              ? t('request.noOpenRequests')
+              : t('request.current', { name: requestTabLabel(activeTab) })
           "
           :disabled="tabs.length === 0"
           @click="toggleMobileMenu"
@@ -132,15 +157,15 @@ function closeMobileMenuFromOutside(event: PointerEvent): void {
           <span class="request-tab-name">
             {{
               activeTab === null
-                ? "No open requests"
-                : activeTab.draft.name.trim() || "Untitled request"
+                ? t("request.noOpenRequests")
+                : activeTab.draft.name.trim() || t("request.untitled")
             }}
           </span>
           <span
             v-if="activeTab && isRequestTabDirty(activeTab)"
             class="request-tab-dirty"
-            title="Unsaved changes"
-            aria-label="Unsaved changes"
+            :title="t('request.unsavedChanges')"
+            :aria-label="t('request.unsavedChanges')"
           ></span>
           <ChevronDown
             class="request-tab-menu-chevron"
@@ -153,7 +178,7 @@ function closeMobileMenuFromOutside(event: PointerEvent): void {
           v-if="mobileMenuOpen"
           class="request-tab-menu"
           role="menu"
-          aria-label="Open requests"
+          :aria-label="t('request.openRequests')"
         >
           <button
             v-for="tab in tabs"
@@ -182,13 +207,13 @@ function closeMobileMenuFromOutside(event: PointerEvent): void {
               {{ tab.draft.method }}
             </span>
             <span class="request-tab-name">
-              {{ tab.draft.name.trim() || "Untitled request" }}
+              {{ tab.draft.name.trim() || t("request.untitled") }}
             </span>
             <span
               v-if="isRequestTabDirty(tab)"
               class="request-tab-dirty"
-              title="Unsaved changes"
-              aria-label="Unsaved changes"
+              :title="t('request.unsavedChanges')"
+              :aria-label="t('request.unsavedChanges')"
             ></span>
           </button>
         </div>
@@ -196,16 +221,8 @@ function closeMobileMenuFromOutside(event: PointerEvent): void {
       <button
         class="icon-button request-tab-mobile-close"
         type="button"
-        :title="
-          activeTab === null
-            ? 'Close request'
-            : `Close ${activeTab.draft.name || 'Untitled request'}`
-        "
-        :aria-label="
-          activeTab === null
-            ? 'Close request'
-            : `Close ${activeTab.draft.name || 'Untitled request'}`
-        "
+        :title="closeTabLabel(activeTab)"
+        :aria-label="closeTabLabel(activeTab)"
         :disabled="activeTab === null"
         @click="activeTab && emit('close', activeTab.tabId)"
       >
@@ -215,8 +232,8 @@ function closeMobileMenuFromOutside(event: PointerEvent): void {
     <button
       class="icon-button request-tab-add"
       type="button"
-      title="New temporary request"
-      aria-label="New temporary request"
+      :title="t('request.newTemporary')"
+      :aria-label="t('request.newTemporary')"
       @click="emit('create')"
     >
       <Plus :size="17" aria-hidden="true" />

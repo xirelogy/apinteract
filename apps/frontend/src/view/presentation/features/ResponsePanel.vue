@@ -1,20 +1,27 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { Download, LoaderCircle } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 
 import type { ExecutionView } from "@/model/contracts/backend";
 
 defineProps<{
   execution: ExecutionView | null;
 }>();
+const { t } = useI18n();
 
 const activeTab = ref<"headers" | "raw">("raw");
+
+/** Formats a byte count with locale-aware plural selection. */
+function formatBytes(count: number): string {
+  return t("response.bytes", { count }, count);
+}
 </script>
 
 <template>
   <section class="response-panel" aria-labelledby="response-heading">
     <div class="response-heading-row">
-      <h2 id="response-heading">Response</h2>
+      <h2 id="response-heading">{{ t("response.heading") }}</h2>
       <div v-if="execution" class="response-metadata">
         <span
           v-if="execution.state === 'running'"
@@ -22,7 +29,7 @@ const activeTab = ref<"headers" | "raw">("raw");
           role="status"
         >
           <LoaderCircle :size="14" aria-hidden="true" />
-          In progress
+          {{ t("response.inProgress") }}
         </span>
         <span
           v-if="execution.status"
@@ -31,27 +38,31 @@ const activeTab = ref<"headers" | "raw">("raw");
         >
           {{ execution.status }}
         </span>
-        <span>{{ execution.bodyBytes ?? 0 }} bytes</span>
+        <span>{{ formatBytes(execution.bodyBytes ?? 0) }}</span>
         <a
           v-if="execution.bodyBlobId"
           class="icon-button"
           :href="`/api/executions/${execution.executionId}/body`"
-          title="Download response body"
-          aria-label="Download response body"
+          :title="t('response.downloadBody')"
+          :aria-label="t('response.downloadBody')"
         >
           <Download :size="17" aria-hidden="true" />
         </a>
       </div>
     </div>
     <div v-if="execution === null" class="response-empty">
-      Send the request to inspect its response.
+      {{ t("response.empty") }}
     </div>
     <div v-else-if="execution.error" class="execution-error" role="alert">
       <strong>{{ execution.error.code }}</strong>
       <span>{{ execution.error.message }}</span>
     </div>
     <template v-else>
-      <div class="response-tabs" role="tablist" aria-label="Response details">
+      <div
+        class="response-tabs"
+        role="tablist"
+        :aria-label="t('response.details')"
+      >
         <button
           class="tab-button"
           :class="{ 'is-active': activeTab === 'raw' }"
@@ -60,7 +71,7 @@ const activeTab = ref<"headers" | "raw">("raw");
           :aria-selected="activeTab === 'raw'"
           @click="activeTab = 'raw'"
         >
-          Raw
+          {{ t("response.raw") }}
         </button>
         <button
           class="tab-button"
@@ -70,7 +81,7 @@ const activeTab = ref<"headers" | "raw">("raw");
           :aria-selected="activeTab === 'headers'"
           @click="activeTab = 'headers'"
         >
-          Headers
+          {{ t("response.headers") }}
           <span class="tab-count">{{ execution.headers?.length ?? 0 }}</span>
         </button>
       </div>
@@ -87,16 +98,16 @@ const activeTab = ref<"headers" | "raw">("raw");
           <div v-if="!execution.headers?.length" class="response-detail-empty">
             {{
               execution.state === "running"
-                ? "Waiting for response headers..."
-                : "No response headers."
+                ? t("response.waitingHeaders")
+                : t("response.noHeaders")
             }}
           </div>
         </div>
         <pre v-else class="body-preview">{{
           execution.bodyPreview ??
           (execution.state === "running"
-            ? "Waiting for response body..."
-            : "Binary or non-previewable response body.")
+            ? t("response.waitingBody")
+            : t("response.binaryBody"))
         }}</pre>
       </div>
     </template>

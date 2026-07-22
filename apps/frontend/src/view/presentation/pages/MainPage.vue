@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
+import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
 import { useApplicationController } from "@/app/dependencies";
@@ -20,6 +21,7 @@ import WorkspaceNavigator from "@/view/presentation/features/WorkspaceNavigator.
 const controller = useApplicationController();
 const store = useApplicationStore();
 const router = useRouter();
+const { t } = useI18n();
 const navigatorOpen = ref(false);
 const saveDialogTab = ref<RequestTab | null>(null);
 const discardDialogTab = ref<RequestTab | null>(null);
@@ -47,6 +49,14 @@ const visibleRequestTabs = computed(() =>
     (tab) => tab.workspaceId === selectedWorkspaceId.value,
   ),
 );
+const errorMessage = computed(() => {
+  if (error.value === null) {
+    return null;
+  }
+  return error.value.code === null
+    ? error.value.message
+    : t(`errors.${error.value.code}`);
+});
 
 onMounted(async () => {
   window.addEventListener("beforeunload", protectUnsavedTabs);
@@ -163,7 +173,9 @@ function discardRequestTab(): void {
       @logout="logout"
       @toggle-navigator="toggleNavigator"
     />
-    <div v-if="error" class="global-error" role="alert">{{ error }}</div>
+    <div v-if="errorMessage" class="global-error" role="alert">
+      {{ errorMessage }}
+    </div>
     <div class="application-body">
       <WorkspaceNavigator
         id="workspace-navigator"
@@ -191,7 +203,7 @@ function discardRequestTab(): void {
         v-if="navigatorOpen"
         class="navigator-scrim"
         type="button"
-        aria-label="Close workspace navigator"
+        :aria-label="t('header.closeNavigator')"
         @click="closeNavigator"
       ></button>
       <div class="request-area">
@@ -229,7 +241,9 @@ function discardRequestTab(): void {
     />
     <DiscardChangesDialog
       v-if="discardDialogTab"
-      :request-name="discardDialogTab.draft.name"
+      :request-name="
+        discardDialogTab.draft.name.trim() || t('request.untitled')
+      "
       @close="discardDialogTab = null"
       @discard="discardRequestTab"
     />

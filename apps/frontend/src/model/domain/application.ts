@@ -10,6 +10,16 @@ import type {
 
 export type ConnectionState = "disconnected" | "connecting" | "authenticated";
 
+export type ApplicationErrorCode =
+  | "operationFailed"
+  | "parentRequired"
+  | "requestTabClosed";
+
+export interface ApplicationError {
+  readonly code: ApplicationErrorCode | null;
+  readonly message: string | null;
+}
+
 export interface RequestDraftInput {
   readonly name: string;
   readonly method: HttpMethod;
@@ -50,5 +60,5 @@ export interface ApplicationSnapshot {
   readonly requestTabs: readonly RequestTab[];
   readonly activeRequestTabId: string | null;
   readonly busy: boolean;
-  readonly error: string | null;
+  readonly error: ApplicationError | null;
 }

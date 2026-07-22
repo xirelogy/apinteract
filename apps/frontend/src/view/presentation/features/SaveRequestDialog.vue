@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { X } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 
 import type { TreeNode } from "@/model/contracts/backend";
 import type { RequestTab } from "@/model/domain/application";
@@ -12,6 +13,7 @@ const props = defineProps<{
   collectionChildren: Readonly<Record<string, readonly TreeNode[]>>;
   busy: boolean;
 }>();
+const { t } = useI18n();
 
 const emit = defineEmits<{
   close: [];
@@ -110,12 +112,12 @@ function collectionPath(
   >
     <div class="resource-dialog-surface">
       <header class="resource-dialog-header">
-        <h2 id="save-request-title">Save request</h2>
+        <h2 id="save-request-title">{{ t("request.saveDialog") }}</h2>
         <button
           class="icon-button"
           type="button"
-          title="Close"
-          aria-label="Close"
+          :title="t('common.actions.close')"
+          :aria-label="t('common.actions.close')"
           :disabled="busy"
           @click="close"
         >
@@ -124,23 +126,23 @@ function collectionPath(
       </header>
       <form class="resource-dialog-form" @submit.prevent="save">
         <label class="input-field">
-          <span>Request name</span>
+          <span>{{ t("request.name") }}</span>
           <input
             v-model="name"
             class="text-input"
-            aria-label="Saved request name"
+            :aria-label="t('request.savedName')"
             autocomplete="off"
             autofocus
             :disabled="busy"
           />
         </label>
         <fieldset class="collection-picker-field">
-          <legend>Collection</legend>
+          <legend>{{ t("collection.label") }}</legend>
           <div
             v-if="collectionRoots.length > 0"
             class="collection-picker"
             role="tree"
-            aria-label="Destination collection"
+            :aria-label="t('collection.destination')"
           >
             <ul class="workspace-tree-root" role="group">
               <CollectionPickerTreeNode
@@ -158,7 +160,7 @@ function collectionPath(
           </div>
         </fieldset>
         <p v-if="collectionRoots.length === 0" class="dialog-empty-message">
-          Create a collection before saving this request.
+          {{ t("collection.createBeforeSaving") }}
         </p>
         <footer class="resource-dialog-actions">
           <button
@@ -167,14 +169,14 @@ function collectionPath(
             :disabled="busy"
             @click="close"
           >
-            Cancel
+            {{ t("common.actions.cancel") }}
           </button>
           <button
             class="primary-button"
             type="submit"
             :disabled="busy || !canSave"
           >
-            Save
+            {{ t("common.actions.save") }}
           </button>
         </footer>
       </form>
