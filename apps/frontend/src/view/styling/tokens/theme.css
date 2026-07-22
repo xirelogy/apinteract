@@ -6,6 +6,7 @@
   --surface-secondary: light-dark(#eef1f2, #222c2e);
   --surface-selected: light-dark(#dff3f0, #173a37);
   --surface-inverse: light-dark(#1e2729, #0d1213);
+  --surface-inverse-hover: light-dark(#2a3638, #182022);
   --surface-code: light-dark(#fafbfb, #12191b);
   --surface-danger-subtle: light-dark(#fff1f0, #351b1b);
   --surface-success-subtle: light-dark(#edf8f0, #163022);
@@ -18,6 +19,7 @@
   --border-subtle: light-dark(#d8dfe1, #344144);
   --border-strong: light-dark(#aeb9bc, #506064);
   --border-inverse: light-dark(#344144, #2b3739);
+  --border-inverse-hover: light-dark(#506064, #46565a);
   --border-selected: light-dark(#b5ded8, #28645e);
   --border-danger: light-dark(#f2b8b5, #7c3d3a);
   --border-success: light-dark(#b9d9c4, #376d49);

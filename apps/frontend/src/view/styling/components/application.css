@@ -132,6 +132,9 @@
 }
 
 .locale-selector {
+  --select-trigger-color: var(--text-secondary);
+  --select-trigger-hover-color: var(--text-primary);
+
   display: block;
   min-width: 0;
   color: var(--text-secondary);
@@ -142,19 +145,22 @@
   min-height: var(--control-height-compact);
   gap: var(--space-1);
   padding-inline: var(--space-2);
-  color: inherit;
   font-size: var(--font-size-xs);
 }
 
 :where(.app-header) .locale-selector {
+  --select-trigger-color: var(--text-inverse);
+  --select-trigger-background: var(--surface-inverse);
+  --select-trigger-border: var(--border-inverse);
+  --select-trigger-hover-color: var(--text-inverse);
+  --select-trigger-hover-background: var(--surface-inverse-hover);
+  --select-trigger-hover-border: var(--border-inverse-hover);
+
   color: var(--text-inverse-subtle);
 }
 
 :where(.app-header) .locale-selector .select-menu-trigger {
   max-width: 12rem;
-  color: var(--text-inverse);
-  border-color: var(--border-inverse);
-  background: var(--surface-inverse);
 }
 
 .header-actions .icon-button {
@@ -484,9 +490,13 @@
 }
 
 .method-badge,
-.method-picker .select-menu-trigger,
 .method-option {
   color: var(--success);
+}
+
+.method-badge,
+.method-picker .select-menu-trigger,
+.method-option {
   font-family: var(--font-mono);
   font-size: var(--font-size-2xs);
   font-weight: var(--font-weight-bold);
@@ -566,9 +576,16 @@
 .method-picker .select-menu-trigger {
   min-height: var(--control-height);
   padding: 0 var(--space-2);
-  border: 1px solid var(--border-success);
   border-radius: var(--radius-control);
-  background: var(--surface-success-subtle);
+}
+
+.method-picker {
+  --select-trigger-color: var(--success);
+  --select-trigger-background: var(--surface-success-subtle);
+  --select-trigger-border: var(--border-success);
+  --select-trigger-hover-color: var(--success);
+  --select-trigger-hover-background: var(--surface-selected);
+  --select-trigger-hover-border: var(--success);
 }
 
 .url-input {
