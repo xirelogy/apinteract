@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
+
 import type { components } from "@apinteract/api-contracts/proxy";
 
 type HeaderField = components["schemas"]["HeaderField"];
+type TargetRequest = components["schemas"]["TargetRequest"];
 type ResponseHead = components["schemas"]["ResponseHead"];
 type ResponseComplete = components["schemas"]["ResponseComplete"];
 type StreamError = components["schemas"]["ExecutionStreamError"];
@@ -66,12 +69,23 @@ export class ProxyClient {
     }
   }
 
-  /** Executes a bodyless GET and streams decoded response frames to the sink. */
-  async executeGet(
+  /** Executes one HTTP request and streams decoded response frames to the sink. */
+  async execute(
     idempotencyKey: string,
+    method: string,
     url: string,
+    headers: readonly HeaderField[],
+    body: Buffer,
     sink: ProxyResponseSink,
   ): Promise<void> {
+    const bodyDescriptor: TargetRequest["body"] =
+      body.byteLength === 0
+        ? { mode: "none", length: 0, sha256: null }
+        : {
+            mode: "stream",
+            length: body.byteLength,
+            sha256: createHash("sha256").update(body).digest("hex"),
+          };
     const creation = await fetch(`${this.#endpoint}/executions`, {
       method: "POST",
       headers: {
@@ -81,10 +95,10 @@ export class ProxyClient {
       },
       body: JSON.stringify({
         request: {
-          method: "GET",
+          method,
           url,
-          headers: [] satisfies HeaderField[],
-          body: { mode: "none", length: 0, sha256: null },
+          headers,
+          body: bodyDescriptor,
           behavior: {
             connectTimeoutMs: 10_000,
             responseHeaderTimeoutMs: 30_000,
@@ -107,6 +121,22 @@ export class ProxyClient {
     };
 
     try {
+      if (body.byteLength > 0) {
+        const upload = await fetch(
+          `${this.#endpoint}/executions/${session.executionId}/request-body`,
+          {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${this.#bearerToken}`,
+              "Content-Type": "application/octet-stream",
+            },
+            body: body.toString("utf8"),
+          },
+        );
+        if (!upload.ok) {
+          throw new Error(`Proxy rejected request body with ${upload.status}`);
+        }
+      }
       const response = await fetch(
         `${this.#endpoint}/executions/${session.executionId}/response`,
         {

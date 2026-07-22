@@ -168,9 +168,17 @@ export class ExecutionService {
     try {
       // Sink callbacks are awaited by ProxyClient, so filesystem writes apply
       // backpressure to the proxy response stream.
-      await this.#proxy.executeGet(
+      await this.#proxy.execute(
         prepared.executionId,
-        prepared.request.targetUrl,
+        prepared.request.method,
+        materializeTargetUrl(
+          prepared.request.targetUrl,
+          prepared.request.query,
+        ),
+        prepared.request.headers
+          .filter((header) => header.enabled)
+          .map(({ name, value }) => ({ name, value })),
+        Buffer.from(prepared.request.body, "utf8"),
         {
           responseHead: async (value) => {
             head = value;
@@ -375,6 +383,20 @@ export class ExecutionService {
       ...(error === null ? {} : { error: { ...error, errors: [] as const } }),
     };
   }
+}
+
+/** Materializes enabled structured query fields into the final target URL. */
+function materializeTargetUrl(
+  targetUrl: string,
+  query: PreparedExecution["request"]["query"],
+): string {
+  const url = new URL(targetUrl);
+  for (const field of query) {
+    if (field.enabled) {
+      url.searchParams.append(field.name, field.value);
+    }
+  }
+  return url.toString();
 }
 
 /** Maps proxy and internal failures to a stable execution error contract. */

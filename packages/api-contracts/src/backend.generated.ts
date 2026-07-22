@@ -329,8 +329,12 @@ export interface components {
         requestId: components["schemas"]["RequestId"];
         expectedDraftRevision: number;
         name: string;
+        method: components["schemas"]["HttpMethod"];
         /** Format: uri */
         targetUrl: string;
+        query: components["schemas"]["RequestField"][];
+        headers: components["schemas"]["RequestField"][];
+        body: string;
       };
     } & {
       /**
@@ -392,19 +396,22 @@ export interface components {
       kind: "collection" | "request";
       name: string;
       position: number;
+      method?: components["schemas"]["HttpMethod"];
     };
     RequestView: {
       requestId: components["schemas"]["RequestId"];
       workspaceId: components["schemas"]["WorkspaceId"];
       name: string;
-      /** @constant */
-      method: "GET";
+      method: components["schemas"]["HttpMethod"];
       /** @constant */
       targetMode: "absolute";
       /** Format: uri */
       targetUrl: string;
       /** @constant */
       queryMode: "structured";
+      query: components["schemas"]["RequestField"][];
+      headers: components["schemas"]["RequestField"][];
+      body: string;
       draftRevision: number;
     };
     ExecutionView: {
@@ -426,6 +433,20 @@ export interface components {
     HeaderField: {
       name: string;
       value: string;
+    };
+    /** @enum {string} */
+    HttpMethod:
+      | "GET"
+      | "POST"
+      | "PUT"
+      | "PATCH"
+      | "DELETE"
+      | "HEAD"
+      | "OPTIONS";
+    RequestField: {
+      name: string;
+      value: string;
+      enabled: boolean;
     };
   };
   responses: {

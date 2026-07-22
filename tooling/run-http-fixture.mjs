@@ -28,11 +28,37 @@ function handleRequest(request, response) {
     response.end(body);
     return;
   }
+  if (request.method === "POST" && request.url?.startsWith("/echo?")) {
+    void handleEcho(request, response);
+    return;
+  }
 
   response.writeHead(404, {
     "content-type": "text/plain; charset=utf-8",
   });
   response.end("Not found");
+}
+
+/** Echoes request semantics after a delay so running response UI is observable. */
+async function handleEcho(request, response) {
+  const chunks = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.from(chunk));
+  }
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
+  const body = JSON.stringify({
+    method: request.method,
+    query: [...url.searchParams.entries()],
+    requestHeader: request.headers["x-fixture-request"] ?? null,
+    body: Buffer.concat(chunks).toString("utf8"),
+  });
+  response.writeHead(201, {
+    "content-type": "application/json; charset=utf-8",
+    "content-length": Buffer.byteLength(body),
+    "x-fixture-response": "echoed",
+  });
+  response.end(body);
 }
 
 /** Stops the fixture after allowing active responses to finish. */

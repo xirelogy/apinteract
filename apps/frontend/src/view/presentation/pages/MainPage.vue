@@ -105,10 +105,8 @@ async function selectRequest(requestId: string): Promise<void> {
         :request="request"
         :execution="execution"
         :busy="busy"
-        @save="(name, targetUrl) => controller.saveRequest(name, targetUrl)"
-        @execute="
-          (name, targetUrl) => controller.executeRequest(name, targetUrl)
-        "
+        @save="controller.saveRequest($event)"
+        @execute="controller.executeRequest($event)"
       />
     </div>
   </div>

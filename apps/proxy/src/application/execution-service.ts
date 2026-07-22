@@ -25,14 +25,19 @@ interface ManagedExecution {
   readonly createdAt: string;
   readonly frameStore: FrameStore;
   state: ExecutionSession["state"];
+  requestBodyState: ExecutionSession["requestBodyState"];
   responseState: ExecutionSession["responseState"];
   error: ExecutionStreamError | null;
   expiresAt: string | null;
   request?: ReturnType<typeof httpRequest>;
+  target: TargetRequest;
 }
 
 /** Raised when one principal reuses an idempotency key for different input. */
 export class IdempotencyConflictError extends Error {}
+
+/** Raised when a request body upload conflicts with execution state or metadata. */
+export class RequestBodyUploadError extends Error {}
 
 /**
  * Owns transient target executions and their replayable response frames.
@@ -92,17 +97,62 @@ export class ExecutionService {
       frameStore: await FrameStore.create(
         join(this.#cachePath, `${id}.frames`),
       ),
-      state: "active",
+      state: descriptor.request.body.mode === "none" ? "active" : "accepted",
+      requestBodyState:
+        descriptor.request.body.mode === "none"
+          ? "not_required"
+          : "awaiting_upload",
       responseState: "waiting",
       error: null,
       expiresAt: null,
+      target: descriptor.request,
     };
     this.#executions.set(id, execution);
     this.#idempotency.set(key, id);
     // Creation returns as soon as the replay state exists. Target I/O continues
     // independently and is observed through the response data plane.
-    void this.#run(execution, descriptor.request);
+    if (descriptor.request.body.mode === "none") {
+      void this.#run(execution, Buffer.alloc(0));
+    }
     return { session: this.#toSession(execution), replayed: false };
+  }
+
+  /** Accepts and validates one complete raw request body before target I/O. */
+  upload(
+    principalId: string,
+    executionId: string,
+    body: Buffer,
+  ): ExecutionSession | undefined {
+    const execution = this.#owned(principalId, executionId);
+    if (execution === undefined) {
+      return undefined;
+    }
+    if (
+      execution.requestBodyState !== "awaiting_upload" ||
+      execution.target.body.mode !== "stream"
+    ) {
+      throw new RequestBodyUploadError(
+        "Execution is not accepting a request body",
+      );
+    }
+    const descriptor = execution.target.body;
+    if (descriptor.length !== null && descriptor.length !== body.byteLength) {
+      throw new RequestBodyUploadError(
+        "Request body length does not match its descriptor",
+      );
+    }
+    if (
+      descriptor.sha256 !== null &&
+      createHash("sha256").update(body).digest("hex") !== descriptor.sha256
+    ) {
+      throw new RequestBodyUploadError(
+        "Request body digest does not match its descriptor",
+      );
+    }
+    execution.requestBodyState = "complete";
+    execution.state = "active";
+    void this.#run(execution, body);
+    return this.#toSession(execution);
   }
 
   /** Returns current execution state only to its owning principal. */
@@ -162,16 +212,16 @@ export class ExecutionService {
   }
 
   /** Performs target HTTP I/O and records its terminal framed response. */
-  async #run(
-    execution: ManagedExecution,
-    target: TargetRequest,
-  ): Promise<void> {
+  async #run(execution: ManagedExecution, requestBody: Buffer): Promise<void> {
     try {
-      if (target.body.mode !== "none") {
-        throw new Error("Streaming request bodies are not implemented");
-      }
+      const target = execution.target;
       const url = new URL(target.url);
       const headers = this.#toNodeHeaders(target.headers);
+      if (target.body.mode === "stream" && target.body.length !== null) {
+        // Content-Length is transport-owned and derived only from the validated
+        // descriptor, never from a user-supplied header field.
+        headers["Content-Length"] = String(target.body.length);
+      }
       const requestFunction =
         url.protocol === "https:" ? httpsRequest : httpRequest;
 
@@ -188,7 +238,7 @@ export class ExecutionService {
         );
         execution.request = request;
         request.once("error", reject);
-        request.end();
+        request.end(requestBody);
       });
 
       execution.responseState = "streaming";
@@ -307,7 +357,7 @@ export class ExecutionService {
     return {
       executionId: execution.id,
       state: execution.state,
-      requestBodyState: "not_required",
+      requestBodyState: execution.requestBodyState,
       responseState: execution.responseState,
       createdAt: execution.createdAt,
       expiresAt: execution.expiresAt,

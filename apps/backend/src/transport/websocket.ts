@@ -5,7 +5,11 @@ import type { RawData } from "ws";
 import type { Application } from "../bootstrap/application.js";
 import type { BackendConfiguration } from "../config.js";
 import { createEntityId } from "../foundation/id.js";
-import { DraftConflictError } from "../requests/request-service.js";
+import {
+  DraftConflictError,
+  type HttpMethod,
+  type RequestField,
+} from "../requests/request-service.js";
 import type { SessionIdentity } from "../sessions/session-service.js";
 import {
   AccessDeniedError,
@@ -187,7 +191,11 @@ async function dispatch(
           "expectedDraftRevision",
         ),
         requireString(command.payload.name, "name"),
+        requireMethod(command.payload.method),
         requireString(command.payload.targetUrl, "targetUrl"),
+        requireRequestFields(command.payload.query, "query"),
+        requireRequestFields(command.payload.headers, "headers"),
+        requireBody(command.payload.body),
       );
     case "execution.start":
       return application.executions.start(
@@ -335,6 +343,53 @@ function requireInteger(value: unknown, name: string): number {
     );
   }
   return value as number;
+}
+
+/** Requires a method token supported by saved request drafts. */
+function requireMethod(value: unknown): HttpMethod {
+  if (
+    value === "GET" ||
+    value === "POST" ||
+    value === "PUT" ||
+    value === "PATCH" ||
+    value === "DELETE" ||
+    value === "HEAD" ||
+    value === "OPTIONS"
+  ) {
+    return value;
+  }
+  throw new CommandError("validation_failed", "method is not supported.");
+}
+
+/** Validates the shape of editable query or header field arrays. */
+function requireRequestFields(value: unknown, name: string): RequestField[] {
+  if (!Array.isArray(value)) {
+    throw new CommandError("validation_failed", `${name} must be an array.`);
+  }
+  return value.map((field) => {
+    if (
+      typeof field !== "object" ||
+      field === null ||
+      Array.isArray(field) ||
+      typeof (field as Record<string, unknown>).name !== "string" ||
+      typeof (field as Record<string, unknown>).value !== "string" ||
+      typeof (field as Record<string, unknown>).enabled !== "boolean"
+    ) {
+      throw new CommandError(
+        "validation_failed",
+        `${name} contains an invalid field.`,
+      );
+    }
+    return field as unknown as RequestField;
+  });
+}
+
+/** Requires a raw request body string, including the valid empty body. */
+function requireBody(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new CommandError("validation_failed", "body must be a string.");
+  }
+  return value;
 }
 
 /** Converts any supported ws text-frame representation to UTF-8 text. */

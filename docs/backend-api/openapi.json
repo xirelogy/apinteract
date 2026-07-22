@@ -844,7 +844,11 @@
                   "requestId",
                   "expectedDraftRevision",
                   "name",
-                  "targetUrl"
+                  "method",
+                  "targetUrl",
+                  "query",
+                  "headers",
+                  "body"
                 ],
                 "properties": {
                   "requestId": {
@@ -859,10 +863,29 @@
                     "minLength": 1,
                     "maxLength": 200
                   },
+                  "method": {
+                    "$ref": "#/components/schemas/HttpMethod"
+                  },
                   "targetUrl": {
                     "type": "string",
                     "format": "uri",
                     "pattern": "^https?://[^?#]+$"
+                  },
+                  "query": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/RequestField"
+                    }
+                  },
+                  "headers": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/RequestField"
+                    }
+                  },
+                  "body": {
+                    "type": "string",
+                    "maxLength": 786432
                   }
                 }
               }
@@ -1020,6 +1043,9 @@
           "position": {
             "type": "integer",
             "minimum": 0
+          },
+          "method": {
+            "$ref": "#/components/schemas/HttpMethod"
           }
         }
       },
@@ -1034,6 +1060,9 @@
           "targetMode",
           "targetUrl",
           "queryMode",
+          "query",
+          "headers",
+          "body",
           "draftRevision"
         ],
         "properties": {
@@ -1047,8 +1076,7 @@
             "type": "string"
           },
           "method": {
-            "type": "string",
-            "const": "GET"
+            "$ref": "#/components/schemas/HttpMethod"
           },
           "targetMode": {
             "type": "string",
@@ -1061,6 +1089,22 @@
           "queryMode": {
             "type": "string",
             "const": "structured"
+          },
+          "query": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestField"
+            }
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestField"
+            }
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 786432
           },
           "draftRevision": {
             "type": "integer",
@@ -1139,6 +1183,26 @@
           },
           "value": {
             "type": "string"
+          }
+        }
+      },
+      "HttpMethod": {
+        "type": "string",
+        "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+      },
+      "RequestField": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "value", "enabled"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
           }
         }
       }

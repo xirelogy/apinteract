@@ -5,12 +5,16 @@ import Fastify, {
   type FastifyReply,
   type FastifyRequest,
 } from "fastify";
+import type { components } from "@apinteract/api-contracts/proxy";
 
 import type { ProxyConfiguration } from "../config.js";
 import {
   ExecutionService,
   IdempotencyConflictError,
+  RequestBodyUploadError,
 } from "../application/execution-service.js";
+
+type CreateExecutionRequest = components["schemas"]["CreateExecutionRequest"];
 
 interface AuthenticatedRequest extends FastifyRequest {
   principalId: string;
@@ -75,6 +79,11 @@ export function createProxyServer(
     configuration.cache.path,
     configuration.cache.retentionMs,
   );
+  server.addContentTypeParser(
+    "application/octet-stream",
+    { parseAs: "buffer" },
+    (_request, body, done) => done(null, body),
+  );
 
   /** Reports unauthenticated proxy process readiness and API version. */
   server.get("/health", () => ({
@@ -124,7 +133,7 @@ export function createProxyServer(
     limits: {
       maxMetadataBytes: 1_048_576,
       maxRequestHeaderCount: 1024,
-      maxRequestBodyBytes: 0,
+      maxRequestBodyBytes: 786_432,
       maxResponseBodyBytes: 1_073_741_824,
       maxCacheBytesPerPrincipal: 2_147_483_648,
       maxConcurrentExecutionsPerPrincipal: 16,
@@ -134,48 +143,63 @@ export function createProxyServer(
   }));
 
   /** Creates or replays a principal-scoped idempotent target execution. */
-  server.post<{
-    Body: {
-      request: {
-        method: string;
-        url: string;
-        headers: { name: string; value: string }[];
-        body: { mode: "none"; length: 0; sha256: null };
-        behavior: {
-          connectTimeoutMs: number;
-          responseHeaderTimeoutMs: number;
-          responseIdleTimeoutMs: number;
-          totalTimeoutMs: number;
-          redirectMode: "manual";
-          tlsVerification: "strict" | "insecure";
-          maxResponseBodyBytes: number;
-        };
-      };
-    };
-  }>("/executions", async (request, reply) => {
-    const idempotencyKey = request.headers["idempotency-key"];
-    if (typeof idempotencyKey !== "string" || idempotencyKey.length === 0) {
+  server.post<{ Body: CreateExecutionRequest }>(
+    "/executions",
+    async (request, reply) => {
+      const idempotencyKey = request.headers["idempotency-key"];
+      if (typeof idempotencyKey !== "string" || idempotencyKey.length === 0) {
+        return problem(
+          reply,
+          400,
+          "idempotency_key_required",
+          "Idempotency-Key is required.",
+        );
+      }
+      try {
+        const result = await executions.create(
+          (request as AuthenticatedRequest).principalId,
+          idempotencyKey,
+          request.body,
+        );
+        return reply
+          .code(201)
+          .header("Location", `/executions/${result.session.executionId}`)
+          .header("Idempotency-Replayed", result.replayed)
+          .send(result.session);
+      } catch (cause) {
+        if (cause instanceof IdempotencyConflictError) {
+          return problem(reply, 409, "idempotency_conflict", cause.message);
+        }
+        throw cause;
+      }
+    },
+  );
+
+  /** Accepts one complete raw body for an owned awaiting execution. */
+  server.put<{
+    Params: { executionId: string };
+    Body: Buffer;
+  }>("/executions/:executionId/request-body", async (request, reply) => {
+    if (!Buffer.isBuffer(request.body)) {
       return problem(
         reply,
         400,
-        "idempotency_key_required",
-        "Idempotency-Key is required.",
+        "request_body_required",
+        "An application/octet-stream request body is required.",
       );
     }
     try {
-      const result = await executions.create(
+      const session = executions.upload(
         (request as AuthenticatedRequest).principalId,
-        idempotencyKey,
+        request.params.executionId,
         request.body,
       );
-      return reply
-        .code(201)
-        .header("Location", `/executions/${result.session.executionId}`)
-        .header("Idempotency-Replayed", result.replayed)
-        .send(result.session);
+      return session === undefined
+        ? problem(reply, 404, "execution_not_found", "Execution not found.")
+        : reply.code(204).send();
     } catch (cause) {
-      if (cause instanceof IdempotencyConflictError) {
-        return problem(reply, 409, "idempotency_conflict", cause.message);
+      if (cause instanceof RequestBodyUploadError) {
+        return problem(reply, 422, "request_body_invalid", cause.message);
       }
       throw cause;
     }

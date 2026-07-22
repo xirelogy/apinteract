@@ -8,7 +8,7 @@ test("creates, restores, and sends the first workspace request", async ({
   const collectionName = `Getting started ${suffix}`;
   const subcollectionName = `Examples ${suffix}`;
   const requestName = `Hello fixture ${suffix}`;
-  const targetUrl = "http://127.0.0.1:8090/hello";
+  const targetUrl = "http://127.0.0.1:8090/echo";
   const mobile = testInfo.project.name === "mobile-chromium";
 
   await login(page);
@@ -102,18 +102,47 @@ test("creates, restores, and sends the first workspace request", async ({
     requestName,
   );
   await expect(page.getByLabel("Target URL")).toHaveValue(targetUrl);
-  const draftRevision = page
-    .locator(".request-summary dl > div")
-    .filter({ hasText: "Draft revision" })
-    .locator("dd");
-  await expect(draftRevision).toHaveText("0");
+  const draftRevision = page.locator(".draft-revision");
+  await expect(draftRevision).toHaveText("Draft 0");
+
+  await page.getByLabel("HTTP method").selectOption("POST");
+  await page.getByRole("button", { name: "Add parameter" }).click();
+  await page.getByLabel("Query name 1").fill("source");
+  await page.getByLabel("Query value 1").fill(suffix);
+  await page.getByRole("tab", { name: "Headers 0" }).click();
+  await page.getByRole("button", { name: "Add header" }).click();
+  await page.getByLabel("Header name 1").fill("X-Fixture-Request");
+  await page.getByLabel("Header value 1").fill("browser-test");
+  await page.getByRole("tab", { name: "Body" }).click();
+  await page.getByLabel("Raw request body").fill(`payload-${suffix}`);
   await page.getByRole("button", { name: "Send" }).click();
 
-  await expect(page.locator(".status-code")).toHaveText("200");
+  await expect(page.getByRole("status")).toHaveText("In progress");
+  await expect(page.locator(".status-code")).toHaveText("201");
+  await expect(page.locator(".body-preview")).toContainText(`"method":"POST"`);
   await expect(page.locator(".body-preview")).toContainText(
-    "Hello from the APInteract fixture.",
+    `"query":[["source","${suffix}"]]`,
   );
-  await expect(draftRevision).toHaveText("0");
+  await expect(page.locator(".body-preview")).toContainText(
+    `"requestHeader":"browser-test"`,
+  );
+  await expect(page.locator(".body-preview")).toContainText(
+    `"body":"payload-${suffix}"`,
+  );
+  await expect(draftRevision).toHaveText("Draft 1");
+
+  await page
+    .getByRole("tablist", { name: "Response details" })
+    .getByRole("tab", { name: /Headers/u })
+    .click();
+  await expect(page.locator(".response-headers")).toContainText(
+    "x-fixture-response",
+  );
+  await expect(page.locator(".response-headers")).toContainText("echoed");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByRole("status")).toHaveText("In progress");
+  await expect(page.locator(".status-code")).toHaveText("201");
+  await expect(draftRevision).toHaveText("Draft 1");
 });
 
 /** Authenticates the isolated browser-test administrator. */

@@ -49,7 +49,11 @@ describe("RequestService draft updates", () => {
         original.requestId,
         original.draftRevision,
         "  Example request  ",
+        "GET",
         "https://example.test/hello",
+        [],
+        [],
+        "",
       );
 
       expect(unchanged.draftRevision).toBe(0);
@@ -61,11 +65,23 @@ describe("RequestService draft updates", () => {
         original.requestId,
         unchanged.draftRevision,
         "Updated request",
+        "POST",
         "https://example.test/hello",
+        [{ name: "page", value: "2", enabled: true }],
+        [{ name: "Content-Type", value: "application/json", enabled: true }],
+        '{"hello":"world"}',
       );
 
       expect(changed.draftRevision).toBe(1);
       expect(changed.name).toBe("Updated request");
+      expect(changed.method).toBe("POST");
+      expect(changed.query).toEqual([
+        { name: "page", value: "2", enabled: true },
+      ]);
+      expect(changed.headers).toEqual([
+        { name: "Content-Type", value: "application/json", enabled: true },
+      ]);
+      expect(changed.body).toBe('{"hello":"world"}');
       expect(await audit.pendingCount()).toBe(3);
     } finally {
       await database.close();

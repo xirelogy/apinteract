@@ -84,7 +84,7 @@ const children = computed(
       @click="emit('selectRequest', node.nodeId)"
     >
       <span class="tree-toggle-spacer" aria-hidden="true"></span>
-      <span class="method-badge">GET</span>
+      <span class="method-badge">{{ node.method ?? "GET" }}</span>
       <span class="tree-node-name">{{ node.name }}</span>
     </button>
 

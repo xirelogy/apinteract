@@ -21,16 +21,35 @@ export interface TreeNodeView {
   readonly kind: "collection" | "request";
   readonly name: string;
   readonly position: number;
+  readonly method?: HttpMethod;
+}
+
+export type HttpMethod =
+  | "GET"
+  | "POST"
+  | "PUT"
+  | "PATCH"
+  | "DELETE"
+  | "HEAD"
+  | "OPTIONS";
+
+export interface RequestField {
+  readonly name: string;
+  readonly value: string;
+  readonly enabled: boolean;
 }
 
 export interface RequestView {
   readonly requestId: EntityId;
   readonly workspaceId: EntityId;
   readonly name: string;
-  readonly method: "GET";
+  readonly method: HttpMethod;
   readonly targetMode: "absolute";
   readonly targetUrl: string;
   readonly queryMode: "structured";
+  readonly query: readonly RequestField[];
+  readonly headers: readonly RequestField[];
+  readonly body: string;
   readonly draftRevision: number;
 }
 
@@ -74,7 +93,8 @@ export class RequestService {
     await this.#workspaces.requireCanRead(this.#database, userId, workspaceId);
     const query = this.#database
       .selectFrom("workspace_tree_nodes")
-      .select(["id", "kind", "name", "position"])
+      .leftJoin("request_drafts", "request_drafts.request_id", "id")
+      .select(["id", "kind", "name", "position", "request_drafts.method"])
       .where("workspace_id", "=", idToBytes(workspaceId));
     const rows =
       parentCollectionId === null
@@ -91,6 +111,7 @@ export class RequestService {
       kind: row.kind,
       name: row.name,
       position: row.position,
+      ...(row.method === null ? {} : { method: row.method }),
     }));
   }
 
@@ -181,6 +202,9 @@ export class RequestService {
           target_mode: "absolute",
           target_url: normalizedUrl,
           query_mode: "structured",
+          query_json: "[]",
+          headers_json: "[]",
+          body_text: "",
           updated_by: idToBytes(userId),
           updated_at: now,
         })
@@ -199,6 +223,9 @@ export class RequestService {
         targetMode: "absolute",
         targetUrl: normalizedUrl,
         queryMode: "structured",
+        query: [],
+        headers: [],
+        body: "",
         draftRevision: 0,
       };
     });
@@ -221,10 +248,20 @@ export class RequestService {
     requestId: EntityId,
     expectedDraftRevision: number,
     name: string,
+    method: HttpMethod,
     targetUrl: string,
+    query: readonly RequestField[],
+    headers: readonly RequestField[],
+    body: string,
   ): Promise<RequestView> {
     const normalizedName = normalizeName(name);
     const normalizedUrl = validateTargetUrl(targetUrl);
+    const normalizedMethod = validateMethod(method);
+    const normalizedQuery = validateQuery(query);
+    const normalizedHeaders = validateHeaders(headers);
+    const normalizedBody = validateBody(body);
+    const queryJson = JSON.stringify(normalizedQuery);
+    const headersJson = JSON.stringify(normalizedHeaders);
     return this.#database.transaction().execute(async (transaction) => {
       const row = await this.#requestRow(transaction, requestId);
       const workspaceId = bytesToId(row.workspace_id);
@@ -232,7 +269,14 @@ export class RequestService {
       if (row.draft_revision !== expectedDraftRevision) {
         throw new DraftConflictError("The request draft changed");
       }
-      if (row.name === normalizedName && row.target_url === normalizedUrl) {
+      if (
+        row.name === normalizedName &&
+        row.method === normalizedMethod &&
+        row.target_url === normalizedUrl &&
+        row.query_json === queryJson &&
+        row.headers_json === headersJson &&
+        row.body_text === normalizedBody
+      ) {
         return mapRequest(row);
       }
       await transaction
@@ -243,7 +287,11 @@ export class RequestService {
       await transaction
         .updateTable("request_drafts")
         .set({
+          method: normalizedMethod,
           target_url: normalizedUrl,
+          query_json: queryJson,
+          headers_json: headersJson,
+          body_text: normalizedBody,
           draft_revision: expectedDraftRevision + 1,
           updated_by: idToBytes(userId),
           updated_at: Date.now(),
@@ -259,7 +307,11 @@ export class RequestService {
       return {
         ...mapRequest(row),
         name: normalizedName,
+        method: normalizedMethod,
         targetUrl: normalizedUrl,
+        query: normalizedQuery,
+        headers: normalizedHeaders,
+        body: normalizedBody,
         draftRevision: expectedDraftRevision + 1,
       };
     });
@@ -283,6 +335,9 @@ export class RequestService {
         targetMode: request.targetMode,
         targetUrl: request.targetUrl,
         queryMode: request.queryMode,
+        query: request.query,
+        headers: request.headers,
+        body: request.body,
       });
       const fingerprint = createHash("sha256").update(content).digest("hex");
       const latest = await transaction
@@ -379,6 +434,9 @@ export class RequestService {
         "draft.target_mode",
         "draft.target_url",
         "draft.query_mode",
+        "draft.query_json",
+        "draft.headers_json",
+        "draft.body_text",
         "node.workspace_id",
         "node.name",
       ])
@@ -453,15 +511,102 @@ function validateTargetUrl(value: string): string {
   return url.toString();
 }
 
+/** Accepts one method from the request editor's supported HTTP method set. */
+function validateMethod(value: string): HttpMethod {
+  switch (value) {
+    case "GET":
+    case "POST":
+    case "PUT":
+    case "PATCH":
+    case "DELETE":
+    case "HEAD":
+    case "OPTIONS":
+      return value;
+    default:
+      throw new Error("HTTP method is not supported");
+  }
+}
+
+/** Validates structured query fields while preserving order and disabled rows. */
+function validateQuery(fields: readonly RequestField[]): RequestField[] {
+  return fields.map((field) => {
+    if (
+      typeof field.name !== "string" ||
+      typeof field.value !== "string" ||
+      typeof field.enabled !== "boolean"
+    ) {
+      throw new Error("Query fields are invalid");
+    }
+    return { name: field.name, value: field.value, enabled: field.enabled };
+  });
+}
+
+/** Validates ordered request headers and rejects unsafe transport-owned names. */
+function validateHeaders(fields: readonly RequestField[]): RequestField[] {
+  const forbidden = new Set([
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "keep-alive",
+    "proxy-connection",
+    "upgrade",
+    "te",
+    "trailer",
+    "expect",
+    "proxy-authorization",
+  ]);
+  return fields.map((field) => {
+    if (
+      typeof field.name !== "string" ||
+      typeof field.value !== "string" ||
+      typeof field.enabled !== "boolean"
+    ) {
+      throw new Error("Header fields are invalid");
+    }
+    if (
+      field.enabled &&
+      (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(field.name) ||
+        hasInvalidHeaderValue(field.value) ||
+        forbidden.has(field.name.toLowerCase()))
+    ) {
+      throw new Error(`Header ${field.name || "(empty)"} is not allowed`);
+    }
+    return { name: field.name, value: field.value, enabled: field.enabled };
+  });
+}
+
+/** Detects HTTP header value control characters forbidden by the proxy API. */
+function hasInvalidHeaderValue(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code <= 8 || (code >= 10 && code <= 31) || code === 127) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Bounds the raw UTF-8 request body to the control-channel payload limit. */
+function validateBody(value: string): string {
+  if (Buffer.byteLength(value, "utf8") > 786_432) {
+    throw new Error("Request body is too large");
+  }
+  return value;
+}
+
 /** Maps persistence naming and binary identifiers to the request view contract. */
 function mapRequest(row: {
   readonly request_id: Uint8Array;
   readonly workspace_id: Uint8Array;
   readonly name: string;
-  readonly method: "GET";
+  readonly method: HttpMethod;
   readonly target_mode: "absolute";
   readonly target_url: string;
   readonly query_mode: "structured";
+  readonly query_json: string;
+  readonly headers_json: string;
+  readonly body_text: string;
   readonly draft_revision: number;
 }): RequestView {
   return {
@@ -472,6 +617,9 @@ function mapRequest(row: {
     targetMode: row.target_mode,
     targetUrl: row.target_url,
     queryMode: row.query_mode,
+    query: JSON.parse(row.query_json) as RequestField[],
+    headers: JSON.parse(row.headers_json) as RequestField[],
+    body: row.body_text,
     draftRevision: row.draft_revision,
   };
 }

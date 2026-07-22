@@ -7,6 +7,7 @@ import { Kysely, SqliteDialect } from "kysely";
 import type { DatabaseSchema } from "./schema.js";
 
 const INITIAL_MIGRATION = "0001_quick_verification";
+const EXPANDED_REQUEST_MIGRATION = "0002_expanded_request_profile";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -230,18 +231,89 @@ export class SqliteDatabase {
     this.#driver.exec(
       "CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL) STRICT",
     );
-    const applied = this.#driver
+    const initialApplied = this.#driver
       .prepare("SELECT id FROM schema_migrations WHERE id = ?")
       .get(INITIAL_MIGRATION);
-    if (applied !== undefined) {
-      return;
+    if (initialApplied === undefined) {
+      this.#driver.transaction(() => {
+        this.#driver.exec(INITIAL_SCHEMA_SQL);
+        this.#recordMigration(INITIAL_MIGRATION);
+      })();
     }
 
-    this.#driver.transaction(() => {
-      this.#driver.exec(INITIAL_SCHEMA_SQL);
-      this.#driver
-        .prepare("INSERT INTO schema_migrations(id, applied_at) VALUES (?, ?)")
-        .run(INITIAL_MIGRATION, Date.now());
-    })();
+    const expandedRequestApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(EXPANDED_REQUEST_MIGRATION);
+    if (expandedRequestApplied === undefined) {
+      this.#migrateExpandedRequestProfile();
+    }
+  }
+
+  /** Rebuilds GET-only drafts with expanded request content columns. */
+  #migrateExpandedRequestProfile(): void {
+    this.#driver.pragma("foreign_keys = OFF");
+    try {
+      this.#driver.transaction(() => {
+        this.#driver.exec(`
+          CREATE TABLE request_drafts_expanded (
+            request_id BLOB PRIMARY KEY REFERENCES workspace_tree_nodes(id) ON DELETE CASCADE,
+            draft_revision INTEGER NOT NULL CHECK(draft_revision >= 0),
+            method TEXT NOT NULL CHECK(method IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS')),
+            target_mode TEXT NOT NULL CHECK(target_mode = 'absolute'),
+            target_url TEXT NOT NULL,
+            query_mode TEXT NOT NULL CHECK(query_mode = 'structured'),
+            query_json TEXT NOT NULL,
+            headers_json TEXT NOT NULL,
+            body_text TEXT NOT NULL,
+            updated_by BLOB NOT NULL REFERENCES users(id),
+            updated_at INTEGER NOT NULL
+          ) STRICT;
+
+          INSERT INTO request_drafts_expanded (
+            request_id,
+            draft_revision,
+            method,
+            target_mode,
+            target_url,
+            query_mode,
+            query_json,
+            headers_json,
+            body_text,
+            updated_by,
+            updated_at
+          )
+          SELECT
+            request_id,
+            draft_revision,
+            method,
+            target_mode,
+            target_url,
+            query_mode,
+            '[]',
+            '[]',
+            '',
+            updated_by,
+            updated_at
+          FROM request_drafts;
+
+          DROP TABLE request_drafts;
+          ALTER TABLE request_drafts_expanded RENAME TO request_drafts;
+        `);
+        this.#recordMigration(EXPANDED_REQUEST_MIGRATION);
+      })();
+    } finally {
+      this.#driver.pragma("foreign_keys = ON");
+    }
+    const violation = this.#driver.prepare("PRAGMA foreign_key_check").get();
+    if (violation !== undefined) {
+      throw new Error("Expanded request migration violated a foreign key");
+    }
+  }
+
+  /** Records one successfully applied schema migration. */
+  #recordMigration(id: string): void {
+    this.#driver
+      .prepare("INSERT INTO schema_migrations(id, applied_at) VALUES (?, ?)")
+      .run(id, Date.now());
   }
 }

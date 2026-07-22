@@ -1,12 +1,23 @@
 import type {
   CurrentSession,
   ExecutionView,
+  HttpMethod,
+  RequestField,
   RequestView,
   TreeNode,
   WorkspaceSummary,
 } from "../contracts/backend";
 
 export type ConnectionState = "disconnected" | "connecting" | "authenticated";
+
+export interface RequestDraftInput {
+  readonly name: string;
+  readonly method: HttpMethod;
+  readonly targetUrl: string;
+  readonly query: readonly RequestField[];
+  readonly headers: readonly RequestField[];
+  readonly body: string;
+}
 
 export interface ApplicationSnapshot {
   readonly session: CurrentSession | null;

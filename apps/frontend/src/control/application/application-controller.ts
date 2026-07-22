@@ -7,6 +7,7 @@ import type {
 import { useApplicationStore } from "@/control/state/application-store";
 import type { SessionController } from "@/control/session/session-controller";
 import type { BackendWebSocketClient } from "@/control/transport/websocket-client";
+import type { RequestDraftInput } from "@/model/domain/application";
 
 /**
  * Coordinates backend commands with application view state.
@@ -190,30 +191,39 @@ export class ApplicationController {
   }
 
   /** Persists current request edits using optimistic draft revision matching. */
-  async saveRequest(name: string, targetUrl: string): Promise<void> {
+  async saveRequest(draft: RequestDraftInput): Promise<void> {
     const store = useApplicationStore();
     const request = store.request;
     if (request === null) {
       return;
     }
     await this.#run(async () => {
-      store.request = await this.#webSocket.command<RequestView>(
+      const updated = await this.#webSocket.command<RequestView>(
         "request.update",
         {
           requestId: request.requestId,
           expectedDraftRevision: request.draftRevision,
-          name,
-          targetUrl,
+          ...draft,
         },
+      );
+      store.request = updated;
+      store.rootNodes = replaceRequestNode(store.rootNodes, updated);
+      store.collectionChildren = Object.fromEntries(
+        Object.entries(store.collectionChildren).map(
+          ([collectionId, nodes]) => [
+            collectionId,
+            replaceRequestNode(nodes, updated),
+          ],
+        ),
       );
     });
   }
 
   /** Saves current edits and starts execution from the persisted request. */
-  async executeRequest(name: string, targetUrl: string): Promise<void> {
+  async executeRequest(draft: RequestDraftInput): Promise<void> {
     // Execution always uses the latest persisted draft. The backend creates an
     // immutable execution revision only when that draft differs.
-    await this.saveRequest(name, targetUrl);
+    await this.saveRequest(draft);
     const store = useApplicationStore();
     if (store.request === null) {
       return;
@@ -284,4 +294,16 @@ function requireSelection(value: string | null): string {
 /** Returns an array containing the value exactly once. */
 function includeOnce(values: readonly string[], value: string): string[] {
   return values.includes(value) ? [...values] : [...values, value];
+}
+
+/** Updates request labels and methods in every loaded tree branch. */
+function replaceRequestNode(
+  nodes: readonly TreeNode[],
+  request: RequestView,
+): TreeNode[] {
+  return nodes.map((node) =>
+    node.nodeId === request.requestId
+      ? { ...node, name: request.name, method: request.method }
+      : node,
+  );
 }
