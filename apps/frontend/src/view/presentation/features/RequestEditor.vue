@@ -10,6 +10,7 @@ import type {
   RequestView,
 } from "@/model/contracts/backend";
 import type { RequestDraftInput } from "@/model/domain/application";
+import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import ResponsePanel from "./ResponsePanel.vue";
 
 const props = defineProps<{
@@ -36,6 +37,10 @@ const methods: readonly HttpMethod[] = [
   "HEAD",
   "OPTIONS",
 ];
+const methodOptions = methods.map((option) => ({
+  value: option,
+  label: option,
+}));
 const requestTabs = ["query", "headers", "body"] as const;
 const name = ref("");
 const method = ref<HttpMethod>("GET");
@@ -132,6 +137,12 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
   );
 }
 
+/** Applies a method selected from the shared option menu. */
+function selectMethod(value: string): void {
+  method.value = value as HttpMethod;
+  emitChange();
+}
+
 /** Returns the translated label for a request settings tab. */
 function requestTabLabel(tab: (typeof requestTabs)[number]): string {
   if (tab === "query") {
@@ -193,17 +204,18 @@ function activeFieldKind(): string {
         </div>
 
         <div class="target-row">
-          <select
-            v-model="method"
-            class="method-control"
-            :aria-label="t('request.httpMethod')"
+          <SelectMenu
+            class="method-picker"
+            :model-value="method"
+            :options="methodOptions"
+            :label="t('request.httpMethod')"
             :disabled="busy"
-            @change="emitChange"
+            @update:model-value="selectMethod"
           >
-            <option v-for="option in methods" :key="option" :value="option">
-              {{ option }}
-            </option>
-          </select>
+            <template #option="{ option }">
+              <span class="method-option">{{ option.label }}</span>
+            </template>
+          </SelectMenu>
           <input
             v-model="targetUrl"
             class="url-input"

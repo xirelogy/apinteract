@@ -1,36 +1,38 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { Languages } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import { useTranslationService } from "@/app/i18n/translation-service";
+import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 
 const { t } = useI18n();
 const translation = useTranslationService();
+const localeOptions = computed(() => [
+  { value: "system", label: t("common.language.system") },
+  ...translation.locales.value.map((option) => ({
+    value: option.locale,
+    label: option.name,
+  })),
+]);
 
-/** Applies the locale preference selected from the native language control. */
-async function changeLocale(event: Event): Promise<void> {
-  await translation.setPreference((event.target as HTMLSelectElement).value);
+/** Applies the locale preference selected from the language menu. */
+async function changeLocale(locale: string): Promise<void> {
+  await translation.setPreference(locale);
 }
 </script>
 
 <template>
-  <label class="locale-selector" :title="t('common.language.label')">
-    <Languages :size="17" aria-hidden="true" />
-    <span class="visually-hidden">{{ t("common.language.label") }}</span>
-    <select
-      class="locale-select"
-      :value="translation.preference.value"
-      :aria-label="t('common.language.label')"
-      @change="changeLocale"
-    >
-      <option value="system">{{ t("common.language.system") }}</option>
-      <option
-        v-for="option in translation.locales.value"
-        :key="option.locale"
-        :value="option.locale"
-      >
-        {{ option.name }}
-      </option>
-    </select>
-  </label>
+  <SelectMenu
+    class="locale-selector"
+    :model-value="translation.preference.value"
+    :options="localeOptions"
+    :label="t('common.language.label')"
+    @update:model-value="changeLocale"
+  >
+    <template #selected="{ option }">
+      <Languages :size="17" aria-hidden="true" />
+      <span>{{ option?.label ?? t("common.language.system") }}</span>
+    </template>
+  </SelectMenu>
 </template>

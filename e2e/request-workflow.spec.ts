@@ -19,7 +19,7 @@ test("creates, restores, and sends the first workspace request", async ({
   const workspaceDialog = page.getByRole("dialog", { name: "New workspace" });
   await workspaceDialog.getByLabel("Workspace name").fill(workspaceName);
   await workspaceDialog.getByRole("button", { name: "Create" }).click();
-  await expect(page.locator("#workspace-select option:checked")).toHaveText(
+  await expect(page.getByLabel("Workspace", { exact: true })).toContainText(
     workspaceName,
   );
 
@@ -67,7 +67,7 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(draftRevision).toHaveText("Temporary");
   await page.getByLabel("Request name", { exact: true }).fill(requestName);
   await page.getByLabel("Target URL").fill(targetUrl);
-  await page.getByLabel("HTTP method").selectOption("POST");
+  await selectMenuOption(page, "HTTP method", "POST");
   await page.getByRole("button", { name: "Add parameter" }).click();
   await page.getByLabel("Query name 1").fill("source");
   await page.getByLabel("Query value 1").fill(suffix);
@@ -179,9 +179,7 @@ test("creates, restores, and sends the first workspace request", async ({
 
   await page.reload();
   await openNavigator(page, mobile);
-  await page
-    .getByLabel("Workspace", { exact: true })
-    .selectOption({ label: workspaceName });
+  await selectMenuOption(page, "Workspace", workspaceName);
   await workspaceTree
     .getByRole("button", { name: collectionName, exact: true })
     .click();
@@ -201,7 +199,10 @@ test("creates, restores, and sends the first workspace request", async ({
     requestName,
   );
   await expect(page.getByLabel("Target URL")).toHaveValue(targetUrl);
-  await expect(page.getByLabel("HTTP method")).toHaveValue("POST");
+  await expect(page.getByLabel("HTTP method")).toHaveAttribute(
+    "data-value",
+    "POST",
+  );
   await page.getByRole("tab", { name: "Body" }).click();
   await expect(page.getByLabel("Raw request body")).toHaveValue(
     `payload-${suffix}`,
@@ -230,6 +231,19 @@ async function openNavigator(page: Page, mobile: boolean): Promise<void> {
       .getByRole("button", { name: "Open workspace navigator" })
       .click();
   }
+}
+
+/** Selects one option from an application-rendered select menu. */
+async function selectMenuOption(
+  page: Page,
+  label: string,
+  option: string,
+): Promise<void> {
+  await page.getByLabel(label, { exact: true }).click();
+  await page
+    .getByRole("listbox", { name: label })
+    .getByRole("option", { name: option, exact: true })
+    .click();
 }
 
 /** Verifies the application work area consumes all space below the header. */

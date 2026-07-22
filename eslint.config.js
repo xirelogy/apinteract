@@ -50,6 +50,14 @@ export default tseslint.config(
     rules: {
       "vue/html-self-closing": "off",
       "vue/max-attributes-per-line": "off",
+      "vue/no-restricted-syntax": [
+        "error",
+        {
+          selector: "VElement[name='select']",
+          message:
+            "Use SelectMenu so option presentation remains application-controlled.",
+        },
+      ],
       "vue/singleline-html-element-content-newline": "off",
     },
   },

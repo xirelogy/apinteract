@@ -132,29 +132,25 @@
 }
 
 .locale-selector {
-  display: inline-flex;
+  display: block;
   min-width: 0;
-  align-items: center;
-  gap: var(--space-1);
   color: var(--text-secondary);
 }
 
-.locale-select {
+.locale-selector .select-menu-trigger {
   min-width: 0;
   min-height: var(--control-height-compact);
-  padding: 0 var(--space-2);
+  gap: var(--space-1);
+  padding-inline: var(--space-2);
   color: inherit;
   font-size: var(--font-size-xs);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-control);
-  background: var(--surface-primary);
 }
 
-.app-header .locale-selector {
+:where(.app-header) .locale-selector {
   color: var(--text-inverse-subtle);
 }
 
-.app-header .locale-select {
+:where(.app-header) .locale-selector .select-menu-trigger {
   max-width: 12rem;
   color: var(--text-inverse);
   border-color: var(--border-inverse);
@@ -488,7 +484,8 @@
 }
 
 .method-badge,
-.method-control {
+.method-picker .select-menu-trigger,
+.method-option {
   color: var(--success);
   font-family: var(--font-mono);
   font-size: var(--font-size-2xs);
@@ -566,7 +563,7 @@
   margin-top: var(--space-4);
 }
 
-.method-control {
+.method-picker .select-menu-trigger {
   min-height: var(--control-height);
   padding: 0 var(--space-2);
   border: 1px solid var(--border-success);
@@ -932,11 +929,14 @@
     gap: var(--space-1);
   }
 
-  .app-header .locale-selector svg {
+  :where(
+      .app-header .locale-selector .select-menu-trigger .select-menu-selected
+    )
+    > svg {
     display: none;
   }
 
-  .app-header .locale-select {
+  :where(.app-header) .locale-selector .select-menu-trigger {
     max-width: 7rem;
   }
 

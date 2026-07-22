@@ -4,6 +4,7 @@ import { FilePlus, FolderPlus, Plus } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type { TreeNode, WorkspaceSummary } from "@/model/contracts/backend";
+import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import CreateResourceDialog from "./CreateResourceDialog.vue";
 import WorkspaceTreeNode from "./WorkspaceTreeNode.vue";
 
@@ -33,6 +34,12 @@ const emit = defineEmits<{
 
 const creationKind = ref<CreationKind | null>(null);
 const creationParentCollectionId = ref<string | null>(null);
+const workspaceOptions = computed(() =>
+  props.workspaces.map((workspace) => ({
+    value: workspace.workspaceId,
+    label: workspace.name,
+  })),
+);
 const creationParentName = computed(() =>
   creationParentCollectionId.value === null
     ? null
@@ -88,24 +95,16 @@ function findLoadedNodeName(nodeId: string): string | null {
         {{ t("workspace.label") }}
       </label>
       <div class="workspace-select-row">
-        <select
-          id="workspace-select"
-          class="select-input"
-          :value="selectedWorkspaceId ?? ''"
+        <SelectMenu
+          input-id="workspace-select"
+          class="workspace-picker"
+          :model-value="selectedWorkspaceId ?? ''"
+          :options="workspaceOptions"
+          :label="t('workspace.label')"
+          :placeholder="t('workspace.select')"
           :disabled="busy"
-          @change="
-            emit('selectWorkspace', ($event.target as HTMLSelectElement).value)
-          "
-        >
-          <option value="" disabled>{{ t("workspace.select") }}</option>
-          <option
-            v-for="workspace in workspaces"
-            :key="workspace.workspaceId"
-            :value="workspace.workspaceId"
-          >
-            {{ workspace.name }}
-          </option>
-        </select>
+          @update:model-value="emit('selectWorkspace', $event)"
+        />
         <button
           class="icon-button"
           type="button"
