@@ -13,6 +13,7 @@ import {
   IdempotencyConflictError,
   RequestBodyUploadError,
 } from "../application/execution-service.js";
+import { PROXY_APPLICATION_VERSION } from "../version.js";
 
 type CreateExecutionRequest = components["schemas"]["CreateExecutionRequest"];
 
@@ -89,7 +90,7 @@ export function createProxyServer(
   server.get("/health", () => ({
     status: "ready",
     apiVersion: "0.1.1",
-    componentVersion: "0.0.0",
+    componentVersion: PROXY_APPLICATION_VERSION,
   }));
 
   server.addHook("preHandler", async (request, reply) => {

@@ -11,6 +11,7 @@ import {
   FrameType,
   MAX_FRAME_PAYLOAD_BYTES,
 } from "../protocol/frame-store.js";
+import { DEFAULT_PROXY_USER_AGENT } from "../version.js";
 
 type CreateExecutionRequest = components["schemas"]["CreateExecutionRequest"];
 type ExecutionSession = components["schemas"]["ExecutionSession"];
@@ -217,6 +218,11 @@ export class ExecutionService {
       const target = execution.target;
       const url = new URL(target.url);
       const headers = this.#toNodeHeaders(target.headers);
+      if (
+        !target.headers.some(({ name }) => name.toLowerCase() === "user-agent")
+      ) {
+        headers["User-Agent"] = DEFAULT_PROXY_USER_AGENT;
+      }
       if (target.body.mode === "stream" && target.body.length !== null) {
         // Content-Length is transport-owned and derived only from the validated
         // descriptor, never from a user-supplied header field.

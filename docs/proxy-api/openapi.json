@@ -54,6 +54,7 @@
   "x-apinteract-http-semantics": {
     "requestTarget": "Semantic valid HTTP/1.1 derived from the final URL.",
     "derivedHeaders": ["Host", "Content-Length"],
+    "defaultUserAgent": "When no User-Agent field is supplied, the proxy sends apinteract-proxy/{componentVersion}. A caller-supplied User-Agent is preserved.",
     "automaticRedirects": false,
     "automaticContentDecompression": false,
     "cookieJar": false,
