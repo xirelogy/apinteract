@@ -222,8 +222,9 @@ function discardRequestTab(): void {
       :tab="saveDialogTab"
       :root-nodes="rootNodes"
       :collection-children="collectionChildren"
-      :busy="saveDialogTab.busy"
+      :busy="saveDialogTab.busy || busy"
       @close="saveDialogTab = null"
+      @expand-collection="controller.loadCollectionChildren($event)"
       @save="saveTemporaryRequest"
     />
     <DiscardChangesDialog

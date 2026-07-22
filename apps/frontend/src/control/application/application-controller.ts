@@ -150,6 +150,16 @@ export class ApplicationController {
     }
   }
 
+  /** Loads collection children for a secondary tree without changing selection. */
+  async loadCollectionChildren(collectionId: string): Promise<void> {
+    const store = useApplicationStore();
+    if (store.collectionChildren[collectionId] !== undefined) {
+      return;
+    }
+    const workspaceId = requireSelection(store.selectedWorkspaceId);
+    await this.#run(() => this.#reloadCollection(workspaceId, collectionId));
+  }
+
   /** Expands an unloaded collection or collapses its currently visible branch. */
   async toggleCollection(collectionId: string): Promise<void> {
     const store = useApplicationStore();

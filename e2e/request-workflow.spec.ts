@@ -110,9 +110,35 @@ test("creates, restores, and sends the first workspace request", async ({
 
   await page.getByRole("button", { name: "New temporary request" }).click();
   await expect(page.locator(".request-tab")).toHaveCount(2);
+  if (mobile) {
+    const requestMenuTrigger = page.getByRole("button", {
+      name: /Current request:/u,
+    });
+    await requestMenuTrigger.click();
+    const requestMenu = page.getByRole("menu", { name: "Open requests" });
+    await expect(requestMenu.getByRole("menuitemradio")).toHaveCount(2);
+    const triggerBox = await requestMenuTrigger.boundingBox();
+    const menuBox = await requestMenu.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    expect(menuBox).not.toBeNull();
+    expect(
+      Math.abs((menuBox?.x ?? 0) - (triggerBox?.x ?? 0)),
+    ).toBeLessThanOrEqual(1);
+    expect(menuBox?.y ?? 0).toBeGreaterThanOrEqual(
+      (triggerBox?.y ?? 0) + (triggerBox?.height ?? 0),
+    );
+    await requestMenuTrigger.click();
+  }
   await page
     .getByLabel("Request name", { exact: true })
     .fill(`Scratch ${suffix}`);
+  if (mobile) {
+    await expect(
+      page.getByRole("button", {
+        name: new RegExp(`Current request: GET Scratch ${suffix}`, "u"),
+      }),
+    ).toBeVisible();
+  }
   await page.getByLabel("Target URL").fill("http://127.0.0.1:8090/hello");
   await page.getByRole("button", { name: `Close Scratch ${suffix}` }).click();
   const discardDialog = page.getByRole("dialog", {
@@ -134,11 +160,14 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(saveDialog.getByLabel("Saved request name")).toHaveValue(
     requestName,
   );
-  await expect(
-    saveDialog.locator(
-      "select[aria-label='Destination collection'] option:checked",
-    ),
-  ).toHaveText(subcollectionName);
+  const destinationTree = saveDialog.getByRole("tree", {
+    name: "Destination collection",
+  });
+  const destinationCollection = destinationTree.getByRole("button", {
+    name: subcollectionName,
+    exact: true,
+  });
+  await expect(destinationCollection.locator("..")).toHaveClass(/is-selected/u);
   await saveDialog.getByRole("button", { name: "Save" }).click();
   const requestNode = workspaceTree.getByRole("button", {
     name: `POST ${requestName}`,

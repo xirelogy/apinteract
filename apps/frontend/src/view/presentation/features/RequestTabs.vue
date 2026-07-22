@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { LoaderCircle, Plus, X } from "@lucide/vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { Check, ChevronDown, LoaderCircle, Plus, X } from "@lucide/vue";
 
 import { isRequestTabDirty, type RequestTab } from "@/model/domain/application";
 
-defineProps<{
+const props = defineProps<{
   tabs: readonly RequestTab[];
   activeTabId: string | null;
 }>();
@@ -13,6 +14,49 @@ const emit = defineEmits<{
   close: [tabId: string];
   create: [];
 }>();
+
+const activeTab = computed(
+  () => props.tabs.find((tab) => tab.tabId === props.activeTabId) ?? null,
+);
+const mobileSwitcher = ref<HTMLElement | null>(null);
+const mobileMenuOpen = ref(false);
+
+onMounted(() => {
+  document.addEventListener("pointerdown", closeMobileMenuFromOutside);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", closeMobileMenuFromOutside);
+});
+
+/** Formats one request for the compact mobile tab switcher. */
+function requestTabLabel(tab: RequestTab): string {
+  const name = tab.draft.name.trim() || "Untitled request";
+  return `${tab.draft.method} ${name}${isRequestTabDirty(tab) ? " *" : ""}`;
+}
+
+/** Toggles the anchored mobile request menu. */
+function toggleMobileMenu(): void {
+  if (props.tabs.length > 0) {
+    mobileMenuOpen.value = !mobileMenuOpen.value;
+  }
+}
+
+/** Activates one mobile request and closes the request menu. */
+function activateMobileTab(tabId: string): void {
+  emit("activate", tabId);
+  mobileMenuOpen.value = false;
+}
+
+/** Closes the mobile request menu when interaction leaves its anchor. */
+function closeMobileMenuFromOutside(event: PointerEvent): void {
+  if (
+    event.target instanceof Node &&
+    !mobileSwitcher.value?.contains(event.target)
+  ) {
+    mobileMenuOpen.value = false;
+  }
+}
 </script>
 
 <template>
@@ -56,6 +100,117 @@ const emit = defineEmits<{
           <X :size="14" aria-hidden="true" />
         </button>
       </div>
+    </div>
+    <div class="request-tab-mobile">
+      <div
+        ref="mobileSwitcher"
+        class="request-tab-mobile-switcher"
+        @keydown.esc.stop="mobileMenuOpen = false"
+      >
+        <button
+          class="request-tab-trigger"
+          type="button"
+          aria-haspopup="menu"
+          :aria-expanded="mobileMenuOpen"
+          :aria-label="
+            activeTab === null
+              ? 'No open requests'
+              : `Current request: ${requestTabLabel(activeTab)}`
+          "
+          :disabled="tabs.length === 0"
+          @click="toggleMobileMenu"
+        >
+          <LoaderCircle
+            v-if="activeTab?.execution?.state === 'running'"
+            class="request-tab-spinner"
+            :size="14"
+            aria-hidden="true"
+          />
+          <span v-else-if="activeTab" class="request-tab-method">
+            {{ activeTab.draft.method }}
+          </span>
+          <span class="request-tab-name">
+            {{
+              activeTab === null
+                ? "No open requests"
+                : activeTab.draft.name.trim() || "Untitled request"
+            }}
+          </span>
+          <span
+            v-if="activeTab && isRequestTabDirty(activeTab)"
+            class="request-tab-dirty"
+            title="Unsaved changes"
+            aria-label="Unsaved changes"
+          ></span>
+          <ChevronDown
+            class="request-tab-menu-chevron"
+            :class="{ 'is-open': mobileMenuOpen }"
+            :size="16"
+            aria-hidden="true"
+          />
+        </button>
+        <div
+          v-if="mobileMenuOpen"
+          class="request-tab-menu"
+          role="menu"
+          aria-label="Open requests"
+        >
+          <button
+            v-for="tab in tabs"
+            :key="tab.tabId"
+            class="request-tab-menu-item"
+            :class="{ 'is-active': tab.tabId === activeTabId }"
+            type="button"
+            role="menuitemradio"
+            :aria-checked="tab.tabId === activeTabId"
+            @click="activateMobileTab(tab.tabId)"
+          >
+            <Check
+              v-if="tab.tabId === activeTabId"
+              :size="15"
+              aria-hidden="true"
+            />
+            <span v-else class="request-tab-menu-spacer" aria-hidden="true">
+            </span>
+            <LoaderCircle
+              v-if="tab.execution?.state === 'running'"
+              class="request-tab-spinner"
+              :size="13"
+              aria-hidden="true"
+            />
+            <span v-else class="request-tab-method">
+              {{ tab.draft.method }}
+            </span>
+            <span class="request-tab-name">
+              {{ tab.draft.name.trim() || "Untitled request" }}
+            </span>
+            <span
+              v-if="isRequestTabDirty(tab)"
+              class="request-tab-dirty"
+              title="Unsaved changes"
+              aria-label="Unsaved changes"
+            ></span>
+          </button>
+        </div>
+      </div>
+      <button
+        class="icon-button request-tab-mobile-close"
+        type="button"
+        :title="
+          activeTab === null
+            ? 'Close request'
+            : `Close ${activeTab.draft.name || 'Untitled request'}`
+        "
+        :aria-label="
+          activeTab === null
+            ? 'Close request'
+            : `Close ${activeTab.draft.name || 'Untitled request'}`
+        "
+        :disabled="activeTab === null"
+        @click="activeTab && emit('close', activeTab.tabId)"
+      >
+        <X :size="16" aria-hidden="true" />
+      </button>
     </div>
     <button
       class="icon-button request-tab-add"

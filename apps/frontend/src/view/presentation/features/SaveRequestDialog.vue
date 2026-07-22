@@ -4,11 +4,7 @@ import { X } from "@lucide/vue";
 
 import type { TreeNode } from "@/model/contracts/backend";
 import type { RequestTab } from "@/model/domain/application";
-
-interface CollectionOption {
-  readonly collectionId: string;
-  readonly label: string;
-}
+import CollectionPickerTreeNode from "./CollectionPickerTreeNode.vue";
 
 const props = defineProps<{
   tab: RequestTab;
@@ -19,14 +15,24 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: [];
+  expandCollection: [collectionId: string];
   save: [name: string, parentCollectionId: string];
 }>();
 
 const dialog = ref<HTMLDialogElement | null>(null);
 const name = ref(props.tab.draft.name);
-const options = computed(() => collectionOptions(props));
+const collectionRoots = computed(() =>
+  props.rootNodes.filter((node) => node.kind === "collection"),
+);
 const parentCollectionId = ref(
-  props.tab.pendingParentCollectionId ?? options.value[0]?.collectionId ?? "",
+  props.tab.pendingParentCollectionId ?? collectionRoots.value[0]?.nodeId ?? "",
+);
+const expandedCollectionIds = ref(
+  collectionPath(
+    props.rootNodes,
+    props.collectionChildren,
+    parentCollectionId.value,
+  ),
 );
 const canSave = computed(
   () => name.value.trim() !== "" && parentCollectionId.value !== "",
@@ -54,29 +60,43 @@ function save(): void {
   emit("save", name.value.trim(), parentCollectionId.value);
 }
 
-/** Flattens currently loaded collection branches into indented select options. */
-function collectionOptions(input: {
-  readonly rootNodes: readonly TreeNode[];
-  readonly collectionChildren: Readonly<Record<string, readonly TreeNode[]>>;
-}): CollectionOption[] {
-  const result: CollectionOption[] = [];
+/** Expands or collapses one picker branch and requests unloaded children. */
+function toggleCollection(collectionId: string): void {
+  if (expandedCollectionIds.value.includes(collectionId)) {
+    expandedCollectionIds.value = expandedCollectionIds.value.filter(
+      (candidate) => candidate !== collectionId,
+    );
+    return;
+  }
+  expandedCollectionIds.value = [...expandedCollectionIds.value, collectionId];
+  if (props.collectionChildren[collectionId] === undefined) {
+    emit("expandCollection", collectionId);
+  }
+}
 
-  /** Visits one loaded tree level while retaining collection hierarchy. */
-  function visit(nodes: readonly TreeNode[], depth: number): void {
-    for (const node of nodes) {
-      if (node.kind !== "collection") {
-        continue;
-      }
-      result.push({
-        collectionId: node.nodeId,
-        label: `${"  ".repeat(depth)}${node.name}`,
-      });
-      visit(input.collectionChildren[node.nodeId] ?? [], depth + 1);
+/** Finds the loaded collection path leading to a selected destination. */
+function collectionPath(
+  nodes: readonly TreeNode[],
+  children: Readonly<Record<string, readonly TreeNode[]>>,
+  collectionId: string,
+): string[] {
+  for (const node of nodes) {
+    if (node.kind !== "collection") {
+      continue;
+    }
+    if (node.nodeId === collectionId) {
+      return [node.nodeId];
+    }
+    const childPath = collectionPath(
+      children[node.nodeId] ?? [],
+      children,
+      collectionId,
+    );
+    if (childPath.length > 0) {
+      return [node.nodeId, ...childPath];
     }
   }
-
-  visit(input.rootNodes, 0);
-  return result;
+  return [];
 }
 </script>
 
@@ -114,25 +134,30 @@ function collectionOptions(input: {
             :disabled="busy"
           />
         </label>
-        <label class="input-field">
-          <span>Collection</span>
-          <select
-            v-model="parentCollectionId"
-            class="select-input"
+        <fieldset class="collection-picker-field">
+          <legend>Collection</legend>
+          <div
+            v-if="collectionRoots.length > 0"
+            class="collection-picker"
+            role="tree"
             aria-label="Destination collection"
-            :disabled="busy || options.length === 0"
           >
-            <option value="" disabled>Select a collection</option>
-            <option
-              v-for="option in options"
-              :key="option.collectionId"
-              :value="option.collectionId"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <p v-if="options.length === 0" class="dialog-empty-message">
+            <ul class="workspace-tree-root" role="group">
+              <CollectionPickerTreeNode
+                v-for="node in collectionRoots"
+                :key="node.nodeId"
+                :node="node"
+                :collection-children="collectionChildren"
+                :expanded-collection-ids="expandedCollectionIds"
+                :selected-collection-id="parentCollectionId"
+                :busy="busy"
+                @select="parentCollectionId = $event"
+                @toggle="toggleCollection"
+              />
+            </ul>
+          </div>
+        </fieldset>
+        <p v-if="collectionRoots.length === 0" class="dialog-empty-message">
           Create a collection before saving this request.
         </p>
         <footer class="resource-dialog-actions">
