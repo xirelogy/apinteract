@@ -19,6 +19,25 @@ export interface RequestDraftInput {
   readonly body: string;
 }
 
+export interface RequestTab {
+  readonly tabId: string;
+  readonly workspaceId: string;
+  readonly request: RequestView | null;
+  readonly draft: RequestDraftInput;
+  readonly baseline: RequestDraftInput | null;
+  readonly pendingParentCollectionId: string | null;
+  readonly execution: ExecutionView | null;
+  readonly busy: boolean;
+}
+
+/** Reports whether a tab contains content not represented by its saved baseline. */
+export function isRequestTabDirty(tab: RequestTab): boolean {
+  return (
+    tab.baseline === null ||
+    JSON.stringify(tab.draft) !== JSON.stringify(tab.baseline)
+  );
+}
+
 export interface ApplicationSnapshot {
   readonly session: CurrentSession | null;
   readonly connection: ConnectionState;
@@ -28,8 +47,8 @@ export interface ApplicationSnapshot {
   readonly selectedCollectionId: string | null;
   readonly collectionChildren: Readonly<Record<string, readonly TreeNode[]>>;
   readonly expandedCollectionIds: readonly string[];
-  readonly request: RequestView | null;
-  readonly execution: ExecutionView | null;
+  readonly requestTabs: readonly RequestTab[];
+  readonly activeRequestTabId: string | null;
   readonly busy: boolean;
   readonly error: string | null;
 }

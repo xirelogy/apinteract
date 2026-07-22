@@ -557,6 +557,9 @@
           },
           {
             "$ref": "#/components/schemas/ExecutionStartCommand"
+          },
+          {
+            "$ref": "#/components/schemas/ExecutionStartTemporaryCommand"
           }
         ],
         "discriminator": {
@@ -769,7 +772,11 @@
                   "workspaceId",
                   "parentCollectionId",
                   "name",
-                  "targetUrl"
+                  "method",
+                  "targetUrl",
+                  "query",
+                  "headers",
+                  "body"
                 ],
                 "properties": {
                   "workspaceId": {
@@ -790,10 +797,29 @@
                     "minLength": 1,
                     "maxLength": 200
                   },
+                  "method": {
+                    "$ref": "#/components/schemas/HttpMethod"
+                  },
                   "targetUrl": {
                     "type": "string",
                     "format": "uri",
                     "pattern": "^https?://[^?#]+$"
+                  },
+                  "query": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/RequestField"
+                    }
+                  },
+                  "headers": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/RequestField"
+                    }
+                  },
+                  "body": {
+                    "type": "string",
+                    "maxLength": 786432
                   }
                 }
               }
@@ -911,6 +937,34 @@
                 "properties": {
                   "requestId": {
                     "$ref": "#/components/schemas/RequestId"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ExecutionStartTemporaryCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "execution.start_temporary"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["workspaceId", "request"],
+                "properties": {
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/WorkspaceId"
+                  },
+                  "request": {
+                    "$ref": "#/components/schemas/RequestExecutionInput"
                   }
                 }
               }
@@ -1115,13 +1169,7 @@
       "ExecutionView": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "executionId",
-          "requestId",
-          "state",
-          "bodyComplete",
-          "createdAt"
-        ],
+        "required": ["executionId", "state", "bodyComplete", "createdAt"],
         "properties": {
           "executionId": {
             "$ref": "#/components/schemas/ExecutionId"
@@ -1183,6 +1231,37 @@
           },
           "value": {
             "type": "string"
+          }
+        }
+      },
+      "RequestExecutionInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["method", "targetUrl", "query", "headers", "body"],
+        "properties": {
+          "method": {
+            "$ref": "#/components/schemas/HttpMethod"
+          },
+          "targetUrl": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https?://[^?#]+$"
+          },
+          "query": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestField"
+            }
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestField"
+            }
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 786432
           }
         }
       },

@@ -32,6 +32,7 @@
   --control-height-dense: 2.125rem;
   --control-height: 2.25rem;
   --panel-header-height: 3rem;
+  --request-tabs-height: 2.5rem;
   --header-height: 3.25rem;
   --navigator-width: clamp(16rem, 20vw, 19rem);
   --duration-fast: 120ms;

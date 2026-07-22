@@ -36,6 +36,7 @@
 
 .primary-button,
 .secondary-button,
+.danger-button,
 .icon-button {
   display: inline-flex;
   flex: 0 0 auto;
@@ -47,10 +48,17 @@
 }
 
 .primary-button,
-.secondary-button {
+.secondary-button,
+.danger-button {
   gap: var(--space-2);
   padding: 0 var(--space-4);
   font-weight: var(--font-weight-semibold);
+}
+
+.danger-button {
+  color: var(--text-inverse);
+  border: 1px solid var(--danger);
+  background: var(--danger);
 }
 
 .primary-button {

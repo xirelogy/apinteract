@@ -97,8 +97,9 @@ export interface RequestRevisionTable {
 
 export interface ExecutionTable {
   id: BinaryId;
-  request_id: BinaryId;
-  request_revision_id: BinaryId;
+  workspace_id: BinaryId;
+  request_id: BinaryId | null;
+  request_revision_id: BinaryId | null;
   created_by: BinaryId;
   state: "created" | "running" | "completed" | "failed";
   snapshot_json: string;

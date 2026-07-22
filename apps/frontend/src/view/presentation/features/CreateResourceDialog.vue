@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { X } from "@lucide/vue";
 
-type CreationKind = "workspace" | "collection" | "request";
+type CreationKind = "workspace" | "collection";
 
 const props = defineProps<{
   kind: CreationKind;
@@ -12,12 +12,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: [];
-  submit: [name: string, targetUrl: string | null];
+  submit: [name: string];
 }>();
 
 const dialog = ref<HTMLDialogElement | null>(null);
 const name = ref("");
-const targetUrl = ref("http://127.0.0.1:8090/hello");
 
 const title = computed(() =>
   props.kind === "collection" && props.context != null
@@ -27,11 +26,7 @@ const title = computed(() =>
 const nameLabel = computed(
   () => `${props.kind[0]?.toUpperCase()}${props.kind.slice(1)} name`,
 );
-const canSubmit = computed(
-  () =>
-    name.value.trim() !== "" &&
-    (props.kind !== "request" || targetUrl.value.trim() !== ""),
-);
+const canSubmit = computed(() => name.value.trim() !== "");
 
 onMounted(() => dialog.value?.showModal());
 
@@ -52,11 +47,7 @@ function submit(): void {
   if (!canSubmit.value) {
     return;
   }
-  emit(
-    "submit",
-    name.value.trim(),
-    props.kind === "request" ? targetUrl.value.trim() : null,
-  );
+  emit("submit", name.value.trim());
   close();
 }
 </script>
@@ -96,19 +87,6 @@ function submit(): void {
             :aria-label="nameLabel"
             autocomplete="off"
             autofocus
-            :disabled="busy"
-          />
-        </label>
-
-        <label v-if="kind === 'request'" class="input-field">
-          <span>Target URL</span>
-          <input
-            v-model="targetUrl"
-            class="text-input dialog-url-input"
-            aria-label="New request URL"
-            inputmode="url"
-            autocomplete="off"
-            spellcheck="false"
             :disabled="busy"
           />
         </label>

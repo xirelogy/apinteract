@@ -1,3 +1,5 @@
+import { v7 as uuidV7 } from "uuid";
+
 import type {
   ExecutionView,
   RequestView,
@@ -7,13 +9,13 @@ import type {
 import { useApplicationStore } from "@/control/state/application-store";
 import type { SessionController } from "@/control/session/session-controller";
 import type { BackendWebSocketClient } from "@/control/transport/websocket-client";
-import type { RequestDraftInput } from "@/model/domain/application";
+import type { RequestDraftInput, RequestTab } from "@/model/domain/application";
 
 /**
  * Coordinates backend commands with application view state.
  *
- * The controller owns workflow sequencing and user-facing busy/error state. It
- * does not enforce authorization or duplicate backend domain rules.
+ * Workspace-tree operations use global foreground state. Request editing and
+ * execution use independent tab state so multiple requests remain interactive.
  */
 export class ApplicationController {
   readonly session: SessionController;
@@ -62,12 +64,12 @@ export class ApplicationController {
     });
   }
 
-  /** Selects a workspace and resets all descendant view state. */
+  /** Selects a workspace and loads its root tree. */
   async selectWorkspace(workspaceId: string): Promise<void> {
     await this.#run(() => this.#selectWorkspace(workspaceId));
   }
 
-  /** Loads a workspace root without creating a nested foreground operation. */
+  /** Loads a workspace root without nesting foreground busy state. */
   async #selectWorkspace(workspaceId: string): Promise<void> {
     const result = await this.#webSocket.command<{ children: TreeNode[] }>(
       "tree.list",
@@ -79,11 +81,15 @@ export class ApplicationController {
     store.selectedCollectionId = null;
     store.collectionChildren = {};
     store.expandedCollectionIds = [];
-    store.request = null;
-    store.execution = null;
+    const active = activeRequestTab(store);
+    if (active !== null && active.workspaceId !== workspaceId) {
+      store.activeRequestTabId =
+        store.requestTabs.find((tab) => tab.workspaceId === workspaceId)
+          ?.tabId ?? null;
+    }
   }
 
-  /** Creates a collection under the workspace root or a selected collection. */
+  /** Creates a collection under the workspace root or another collection. */
   async createCollection(
     name: string,
     parentCollectionId: string | null,
@@ -96,24 +102,13 @@ export class ApplicationController {
         parentCollectionId,
         name,
       });
-      const result = await this.#webSocket.command<{ children: TreeNode[] }>(
-        "tree.list",
-        { workspaceId, parentCollectionId },
-      );
-      if (parentCollectionId === null) {
-        store.rootNodes = result.children;
-      } else {
-        store.collectionChildren = {
-          ...store.collectionChildren,
-          [parentCollectionId]: result.children,
-        };
+      await this.#reloadCollection(workspaceId, parentCollectionId);
+      if (parentCollectionId !== null) {
         store.selectedCollectionId = parentCollectionId;
         store.expandedCollectionIds = includeOnce(
           store.expandedCollectionIds,
           parentCollectionId,
         );
-        store.request = null;
-        store.execution = null;
       }
     });
   }
@@ -127,21 +122,32 @@ export class ApplicationController {
   async #selectCollection(collectionId: string): Promise<void> {
     const store = useApplicationStore();
     const workspaceId = requireSelection(store.selectedWorkspaceId);
-    const result = await this.#webSocket.command<{ children: TreeNode[] }>(
-      "tree.list",
-      { workspaceId, parentCollectionId: collectionId },
-    );
+    await this.#reloadCollection(workspaceId, collectionId);
     store.selectedCollectionId = collectionId;
-    store.collectionChildren = {
-      ...store.collectionChildren,
-      [collectionId]: result.children,
-    };
     store.expandedCollectionIds = includeOnce(
       store.expandedCollectionIds,
       collectionId,
     );
-    store.request = null;
-    store.execution = null;
+  }
+
+  /** Refreshes one root or collection child list from the backend. */
+  async #reloadCollection(
+    workspaceId: string,
+    parentCollectionId: string | null,
+  ): Promise<void> {
+    const result = await this.#webSocket.command<{ children: TreeNode[] }>(
+      "tree.list",
+      { workspaceId, parentCollectionId },
+    );
+    const store = useApplicationStore();
+    if (parentCollectionId === null) {
+      store.rootNodes = result.children;
+    } else {
+      store.collectionChildren = {
+        ...store.collectionChildren,
+        [parentCollectionId]: result.children,
+      };
+    }
   }
 
   /** Expands an unloaded collection or collapses its currently visible branch. */
@@ -156,129 +162,261 @@ export class ApplicationController {
     await this.selectCollection(collectionId);
   }
 
-  /** Creates and selects a request under the current collection. */
-  async createRequest(name: string, targetUrl: string): Promise<void> {
+  /** Opens a new unsaved request tab in the selected workspace. */
+  createTemporaryRequest(parentCollectionId: string | null = null): void {
     const store = useApplicationStore();
     const workspaceId = requireSelection(store.selectedWorkspaceId);
-    const collectionId = requireSelection(store.selectedCollectionId);
-    await this.#run(async () => {
-      const request = await this.#webSocket.command<RequestView>(
-        "request.create",
-        {
-          workspaceId,
-          parentCollectionId: collectionId,
-          name,
-          targetUrl,
-        },
-      );
-      await this.#selectCollection(collectionId);
-      store.request = request;
-      store.selectedCollectionId = null;
-    });
+    const tab: RequestTab = {
+      tabId: uuidV7(),
+      workspaceId,
+      request: null,
+      draft: emptyDraft(),
+      baseline: null,
+      pendingParentCollectionId: parentCollectionId,
+      execution: null,
+      busy: false,
+    };
+    store.requestTabs.push(tab);
+    store.activeRequestTabId = tab.tabId;
+    store.selectedCollectionId = null;
   }
 
-  /** Loads a selected request draft and clears any previous execution view. */
+  /** Activates an already open request tab. */
+  activateRequestTab(tabId: string): void {
+    const store = useApplicationStore();
+    if (store.requestTabs.some((tab) => tab.tabId === tabId)) {
+      store.activeRequestTabId = tabId;
+      store.selectedCollectionId = null;
+    }
+  }
+
+  /** Closes one request tab and activates its nearest remaining neighbor. */
+  closeRequestTab(tabId: string): void {
+    const store = useApplicationStore();
+    const index = store.requestTabs.findIndex((tab) => tab.tabId === tabId);
+    if (index < 0) {
+      return;
+    }
+    store.requestTabs.splice(index, 1);
+    if (store.activeRequestTabId === tabId) {
+      store.activeRequestTabId =
+        store.requestTabs[index]?.tabId ??
+        store.requestTabs[index - 1]?.tabId ??
+        null;
+    }
+  }
+
+  /** Opens a saved request once or activates its existing tab. */
   async selectRequest(requestId: string): Promise<void> {
+    const store = useApplicationStore();
+    const existing = store.requestTabs.find(
+      (tab) => tab.request?.requestId === requestId,
+    );
+    if (existing !== undefined) {
+      this.activateRequestTab(existing.tabId);
+      return;
+    }
     await this.#run(async () => {
-      const store = useApplicationStore();
-      store.request = await this.#webSocket.command<RequestView>(
+      const request = await this.#webSocket.command<RequestView>(
         "request.get",
         { requestId },
       );
+      const draft = requestToDraft(request);
+      const tab: RequestTab = {
+        tabId: uuidV7(),
+        workspaceId: request.workspaceId,
+        request,
+        draft,
+        baseline: cloneDraft(draft),
+        pendingParentCollectionId: null,
+        execution: null,
+        busy: false,
+      };
+      store.requestTabs.push(tab);
+      store.activeRequestTabId = tab.tabId;
       store.selectedCollectionId = null;
-      store.execution = null;
     });
   }
 
-  /** Persists current request edits using optimistic draft revision matching. */
-  async saveRequest(draft: RequestDraftInput): Promise<void> {
-    const store = useApplicationStore();
-    const request = store.request;
-    if (request === null) {
+  /** Replaces editable content for one open request tab. */
+  updateRequestDraft(tabId: string, draft: RequestDraftInput): void {
+    this.#updateTab(tabId, (tab) => ({ ...tab, draft: cloneDraft(draft) }));
+  }
+
+  /** Persists edits for one already saved request tab. */
+  async saveRequest(tabId: string, draft: RequestDraftInput): Promise<void> {
+    this.updateRequestDraft(tabId, draft);
+    const tab = requireTab(tabId);
+    if (tab.request === null) {
       return;
     }
-    await this.#run(async () => {
+    await this.#runTab(tabId, async () => {
       const updated = await this.#webSocket.command<RequestView>(
         "request.update",
         {
-          requestId: request.requestId,
-          expectedDraftRevision: request.draftRevision,
+          requestId: tab.request?.requestId,
+          expectedDraftRevision: tab.request?.draftRevision,
           ...draft,
         },
       );
-      store.request = updated;
-      store.rootNodes = replaceRequestNode(store.rootNodes, updated);
-      store.collectionChildren = Object.fromEntries(
-        Object.entries(store.collectionChildren).map(
-          ([collectionId, nodes]) => [
-            collectionId,
-            replaceRequestNode(nodes, updated),
-          ],
-        ),
-      );
+      const savedDraft = requestToDraft(updated);
+      this.#updateTab(tabId, (current) => ({
+        ...current,
+        request: updated,
+        draft: savedDraft,
+        baseline: cloneDraft(savedDraft),
+      }));
+      replaceLoadedRequestNode(updated);
     });
   }
 
-  /** Saves current edits and starts execution from the persisted request. */
-  async executeRequest(draft: RequestDraftInput): Promise<void> {
-    // Execution always uses the latest persisted draft. The backend creates an
-    // immutable execution revision only when that draft differs.
-    await this.saveRequest(draft);
-    const store = useApplicationStore();
-    if (store.request === null) {
+  /** Saves a temporary tab into a selected collection without replacing it. */
+  async saveTemporaryRequest(
+    tabId: string,
+    name: string,
+    parentCollectionId: string,
+  ): Promise<void> {
+    const tab = requireTab(tabId);
+    if (tab.request !== null) {
       return;
     }
-    await this.#run(async () => {
-      store.execution = await this.#webSocket.command<ExecutionView>(
-        "execution.start",
-        { requestId: store.request?.requestId },
+    await this.#runTab(tabId, async () => {
+      const request = await this.#webSocket.command<RequestView>(
+        "request.create",
+        {
+          workspaceId: tab.workspaceId,
+          parentCollectionId,
+          ...tab.draft,
+          name,
+        },
       );
+      const savedDraft = requestToDraft(request);
+      this.#updateTab(tabId, (current) => ({
+        ...current,
+        request,
+        draft: savedDraft,
+        baseline: cloneDraft(savedDraft),
+        pendingParentCollectionId: null,
+      }));
+      await this.#reloadCollection(tab.workspaceId, parentCollectionId);
     });
   }
 
-  /** Runs one foreground operation while maintaining shared busy/error state. */
+  /** Executes saved or temporary content from one request tab. */
+  async executeRequest(tabId: string, draft: RequestDraftInput): Promise<void> {
+    this.updateRequestDraft(tabId, draft);
+    let tab = requireTab(tabId);
+    if (tab.request !== null) {
+      await this.saveRequest(tabId, draft);
+      tab = requireTab(tabId);
+    }
+    await this.#runTab(tabId, async () => {
+      const execution =
+        tab.request === null
+          ? await this.#webSocket.command<ExecutionView>(
+              "execution.start_temporary",
+              {
+                workspaceId: tab.workspaceId,
+                request: executableDraft(tab.draft),
+              },
+            )
+          : await this.#webSocket.command<ExecutionView>("execution.start", {
+              requestId: tab.request.requestId,
+            });
+      this.#updateTab(tabId, (current) => ({
+        ...current,
+        execution,
+      }));
+    });
+  }
+
+  /** Runs one workspace-tree operation with shared busy and error state. */
   async #run(operation: () => Promise<void>): Promise<void> {
-    // Quick verification exposes one foreground operation at a time, so one
-    // application-level busy flag represents the complete interaction state.
     const store = useApplicationStore();
     store.busy = true;
     store.error = null;
     try {
       await operation();
     } catch (cause) {
-      store.error =
-        cause instanceof Error ? cause.message : "The operation failed.";
+      store.error = errorMessage(cause);
       throw cause;
     } finally {
       store.busy = false;
     }
   }
 
-  /** Merges asynchronous execution events into the active response view. */
-  #applyExecutionEvent(type: string, payload: unknown): void {
+  /** Runs one tab operation without blocking unrelated request tabs. */
+  async #runTab(tabId: string, operation: () => Promise<void>): Promise<void> {
     const store = useApplicationStore();
-    if (
-      store.execution === null ||
-      typeof payload !== "object" ||
-      payload === null
-    ) {
+    store.error = null;
+    this.#updateTab(tabId, (tab) => ({ ...tab, busy: true }));
+    try {
+      await operation();
+    } catch (cause) {
+      store.error = errorMessage(cause);
+      throw cause;
+    } finally {
+      this.#updateTab(tabId, (tab) => ({ ...tab, busy: false }));
+    }
+  }
+
+  /** Replaces one tab through a mutation-safe state projection. */
+  #updateTab(tabId: string, project: (tab: RequestTab) => RequestTab): void {
+    const store = useApplicationStore();
+    const index = store.requestTabs.findIndex((tab) => tab.tabId === tabId);
+    const tab = store.requestTabs[index];
+    if (tab !== undefined) {
+      store.requestTabs[index] = project(tab);
+    }
+  }
+
+  /** Routes asynchronous execution events to their owning request tab. */
+  #applyExecutionEvent(type: string, payload: unknown): void {
+    if (typeof payload !== "object" || payload === null) {
+      return;
+    }
+    const envelope = payload as {
+      readonly executionId?: unknown;
+      readonly data?: unknown;
+    };
+    if (typeof envelope.executionId !== "string") {
+      return;
+    }
+    const store = useApplicationStore();
+    const tab = store.requestTabs.find(
+      (candidate) => candidate.execution?.executionId === envelope.executionId,
+    );
+    if (tab === undefined) {
+      return;
+    }
+    const execution = tab.execution;
+    if (execution === null) {
       return;
     }
     if (type === "execution.response_head") {
-      const head = payload as {
+      const head = envelope.data as {
         readonly status: number;
         readonly headers: ExecutionView["headers"];
       };
-      store.execution = {
-        ...store.execution,
-        status: head.status,
-        ...(head.headers === undefined ? {} : { headers: head.headers }),
-      };
+      this.#updateTab(tab.tabId, (current) => ({
+        ...current,
+        execution: {
+          ...execution,
+          status: head.status,
+          ...(head.headers === undefined ? {} : { headers: head.headers }),
+        },
+      }));
     } else if (type === "execution.progress") {
-      const progress = payload as { readonly bodyBytes: number };
-      store.execution = { ...store.execution, bodyBytes: progress.bodyBytes };
+      const progress = envelope.data as { readonly bodyBytes: number };
+      this.#updateTab(tab.tabId, (current) => ({
+        ...current,
+        execution: { ...execution, bodyBytes: progress.bodyBytes },
+      }));
     } else {
-      store.execution = payload as ExecutionView;
+      this.#updateTab(tab.tabId, (current) => ({
+        ...current,
+        execution: envelope.data as ExecutionView,
+      }));
     }
   }
 }
@@ -291,12 +429,90 @@ function requireSelection(value: string | null): string {
   return value;
 }
 
+/** Returns one open tab or raises a stale-interaction error. */
+function requireTab(tabId: string): RequestTab {
+  const tab = useApplicationStore().requestTabs.find(
+    (candidate) => candidate.tabId === tabId,
+  );
+  if (tab === undefined) {
+    throw new Error("The request tab is no longer open.");
+  }
+  return tab;
+}
+
+/** Returns the currently active request tab. */
+function activeRequestTab(store: {
+  readonly requestTabs: readonly RequestTab[];
+  readonly activeRequestTabId: string | null;
+}): RequestTab | null {
+  return (
+    store.requestTabs.find((tab) => tab.tabId === store.activeRequestTabId) ??
+    null
+  );
+}
+
+/** Creates the initial editable content for a temporary request. */
+function emptyDraft(): RequestDraftInput {
+  return {
+    name: "Untitled request",
+    method: "GET",
+    targetUrl: "",
+    query: [],
+    headers: [],
+    body: "",
+  };
+}
+
+/** Projects a saved backend request onto editable tab content. */
+function requestToDraft(request: RequestView): RequestDraftInput {
+  return {
+    name: request.name,
+    method: request.method,
+    targetUrl: request.targetUrl,
+    query: request.query.map((field) => ({ ...field })),
+    headers: request.headers.map((field) => ({ ...field })),
+    body: request.body,
+  };
+}
+
+/** Clones editable request content without sharing nested field objects. */
+function cloneDraft(draft: RequestDraftInput): RequestDraftInput {
+  return {
+    ...draft,
+    query: draft.query.map((field) => ({ ...field })),
+    headers: draft.headers.map((field) => ({ ...field })),
+  };
+}
+
+/** Removes the editor-only name from a temporary execution snapshot. */
+function executableDraft(draft: RequestDraftInput) {
+  return {
+    method: draft.method,
+    targetUrl: draft.targetUrl,
+    query: draft.query,
+    headers: draft.headers,
+    body: draft.body,
+  };
+}
+
 /** Returns an array containing the value exactly once. */
 function includeOnce(values: readonly string[], value: string): string[] {
   return values.includes(value) ? [...values] : [...values, value];
 }
 
 /** Updates request labels and methods in every loaded tree branch. */
+function replaceLoadedRequestNode(request: RequestView): void {
+  const store = useApplicationStore();
+  store.rootNodes = replaceRequestNode(store.rootNodes, request);
+  store.collectionChildren = Object.fromEntries(
+    Object.entries(store.collectionChildren).map(([collectionId, nodes]) => [
+      collectionId,
+      replaceRequestNode(nodes, request),
+    ]),
+  );
+}
+
+/** Updates one request label and method in a loaded child list. */
 function replaceRequestNode(
   nodes: readonly TreeNode[],
   request: RequestView,
@@ -306,4 +522,9 @@ function replaceRequestNode(
       ? { ...node, name: request.name, method: request.method }
       : node,
   );
+}
+
+/** Maps an unknown operation failure to a user-facing message. */
+function errorMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : "The operation failed.";
 }

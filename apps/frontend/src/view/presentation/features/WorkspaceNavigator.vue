@@ -6,7 +6,7 @@ import type { TreeNode, WorkspaceSummary } from "@/model/contracts/backend";
 import CreateResourceDialog from "./CreateResourceDialog.vue";
 import WorkspaceTreeNode from "./WorkspaceTreeNode.vue";
 
-type CreationKind = "workspace" | "collection" | "request";
+type CreationKind = "workspace" | "collection";
 
 const props = defineProps<{
   workspaces: readonly WorkspaceSummary[];
@@ -25,7 +25,7 @@ const emit = defineEmits<{
   createCollection: [name: string, parentCollectionId: string | null];
   selectCollection: [collectionId: string];
   toggleCollection: [collectionId: string];
-  createRequest: [name: string, targetUrl: string];
+  createRequest: [parentCollectionId: string | null];
   selectRequest: [requestId: string];
 }>();
 
@@ -58,13 +58,11 @@ function closeCreationDialog(): void {
 }
 
 /** Routes normalized modal fields to the existing creation events. */
-function submitCreation(name: string, targetUrl: string | null): void {
+function submitCreation(name: string): void {
   if (creationKind.value === "workspace") {
     emit("createWorkspace", name);
   } else if (creationKind.value === "collection") {
     emit("createCollection", name, creationParentCollectionId.value);
-  } else if (creationKind.value === "request" && targetUrl !== null) {
-    emit("createRequest", name, targetUrl);
   }
 }
 
@@ -137,7 +135,7 @@ function findLoadedNodeName(nodeId: string): string | null {
             title="Create request"
             aria-label="Create request"
             :disabled="busy || selectedCollectionId === null"
-            @click="openCreationDialog('request', selectedCollectionId)"
+            @click="emit('createRequest', selectedCollectionId)"
           >
             <FilePlus :size="16" aria-hidden="true" />
           </button>

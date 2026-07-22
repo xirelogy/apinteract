@@ -13,6 +13,7 @@ import type { DatabaseSchema } from "../persistence/schema.js";
 import type { ProxyClient } from "../proxy/proxy-client.js";
 import { ProxyExecutionError } from "../proxy/proxy-client.js";
 import type {
+  RequestExecutionInput,
   RequestService,
   PreparedExecution,
 } from "../requests/request-service.js";
@@ -34,7 +35,7 @@ export interface ExecutionEvent {
 
 export interface ExecutionView {
   readonly executionId: EntityId;
-  readonly requestId: EntityId;
+  readonly requestId?: EntityId;
   readonly state: "created" | "running" | "completed" | "failed";
   readonly status?: number;
   readonly headers?: readonly {
@@ -99,6 +100,30 @@ export class ExecutionService {
     publish: (event: ExecutionEvent) => void,
   ): Promise<ExecutionView> {
     const prepared = await this.#requests.prepareExecution(userId, requestId);
+    return this.#startPrepared(prepared, userId, publish);
+  }
+
+  /** Starts a workspace-owned execution without saving a reusable request. */
+  async startTemporary(
+    userId: EntityId,
+    workspaceId: EntityId,
+    request: RequestExecutionInput,
+    publish: (event: ExecutionEvent) => void,
+  ): Promise<ExecutionView> {
+    const prepared = await this.#requests.prepareTemporaryExecution(
+      userId,
+      workspaceId,
+      request,
+    );
+    return this.#startPrepared(prepared, userId, publish);
+  }
+
+  /** Marks one prepared execution running and starts asynchronous proxy work. */
+  async #startPrepared(
+    prepared: PreparedExecution,
+    userId: EntityId,
+    publish: (event: ExecutionEvent) => void,
+  ): Promise<ExecutionView> {
     await this.#database
       .updateTable("executions")
       .set({ state: "running" })
@@ -109,7 +134,9 @@ export class ExecutionService {
     void this.#run(prepared, userId, publish);
     return {
       executionId: prepared.executionId,
-      requestId,
+      ...(prepared.request.requestId === undefined
+        ? {}
+        : { requestId: prepared.request.requestId }),
       state: "running",
       bodyComplete: false,
       createdAt: new Date(prepared.createdAt).toISOString(),
@@ -123,14 +150,9 @@ export class ExecutionService {
   ): Promise<ExecutionBody> {
     const row = await this.#database
       .selectFrom("executions as execution")
-      .innerJoin(
-        "workspace_tree_nodes as node",
-        "node.id",
-        "execution.request_id",
-      )
       .innerJoin("blobs as blob", "blob.id", "execution.response_blob_id")
       .select([
-        "node.workspace_id",
+        "execution.workspace_id",
         "blob.storage_key",
         "blob.byte_length",
         "blob.sha256",
@@ -353,7 +375,7 @@ export class ExecutionService {
         workspaceId: prepared.request.workspaceId,
         data: {
           executionId: prepared.executionId,
-          requestId: prepared.request.requestId,
+          requestId: prepared.request.requestId ?? null,
           bodyComplete,
           bodyBytes: blob?.byteLength ?? 0,
           errorCode: error?.code,
@@ -367,7 +389,9 @@ export class ExecutionService {
         : safeTextPreview(head.headers, blob.previewBytes);
     return {
       executionId: prepared.executionId,
-      requestId: prepared.request.requestId,
+      ...(prepared.request.requestId === undefined
+        ? {}
+        : { requestId: prepared.request.requestId }),
       state: bodyComplete ? "completed" : "failed",
       ...(head === undefined
         ? {}

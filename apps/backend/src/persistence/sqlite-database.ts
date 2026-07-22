@@ -8,6 +8,7 @@ import type { DatabaseSchema } from "./schema.js";
 
 const INITIAL_MIGRATION = "0001_quick_verification";
 const EXPANDED_REQUEST_MIGRATION = "0002_expanded_request_profile";
+const TEMPORARY_EXECUTION_MIGRATION = "0003_temporary_executions";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -247,6 +248,13 @@ export class SqliteDatabase {
     if (expandedRequestApplied === undefined) {
       this.#migrateExpandedRequestProfile();
     }
+
+    const temporaryExecutionApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(TEMPORARY_EXECUTION_MIGRATION);
+    if (temporaryExecutionApplied === undefined) {
+      this.#migrateTemporaryExecutions();
+    }
   }
 
   /** Rebuilds GET-only drafts with expanded request content columns. */
@@ -307,6 +315,92 @@ export class SqliteDatabase {
     const violation = this.#driver.prepare("PRAGMA foreign_key_check").get();
     if (violation !== undefined) {
       throw new Error("Expanded request migration violated a foreign key");
+    }
+  }
+
+  /** Adds direct workspace ownership and optional saved-request references. */
+  #migrateTemporaryExecutions(): void {
+    this.#driver.pragma("foreign_keys = OFF");
+    try {
+      this.#driver.transaction(() => {
+        this.#driver.exec(`
+          CREATE TABLE executions_temporary (
+            id BLOB PRIMARY KEY CHECK(length(id) = 16),
+            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            request_id BLOB REFERENCES request_drafts(request_id),
+            request_revision_id BLOB REFERENCES request_revisions(id),
+            created_by BLOB NOT NULL REFERENCES users(id),
+            state TEXT NOT NULL CHECK(state IN ('created', 'running', 'completed', 'failed')),
+            snapshot_json TEXT NOT NULL,
+            response_status INTEGER,
+            response_headers_json TEXT,
+            response_blob_id BLOB REFERENCES blobs(id),
+            body_complete INTEGER NOT NULL CHECK(body_complete IN (0, 1)),
+            body_bytes INTEGER,
+            body_sha256 TEXT,
+            error_json TEXT,
+            created_at INTEGER NOT NULL,
+            completed_at INTEGER,
+            CHECK (
+              (request_id IS NULL AND request_revision_id IS NULL) OR
+              (request_id IS NOT NULL AND request_revision_id IS NOT NULL)
+            )
+          ) STRICT;
+
+          INSERT INTO executions_temporary (
+            id,
+            workspace_id,
+            request_id,
+            request_revision_id,
+            created_by,
+            state,
+            snapshot_json,
+            response_status,
+            response_headers_json,
+            response_blob_id,
+            body_complete,
+            body_bytes,
+            body_sha256,
+            error_json,
+            created_at,
+            completed_at
+          )
+          SELECT
+            execution.id,
+            node.workspace_id,
+            execution.request_id,
+            execution.request_revision_id,
+            execution.created_by,
+            execution.state,
+            execution.snapshot_json,
+            execution.response_status,
+            execution.response_headers_json,
+            execution.response_blob_id,
+            execution.body_complete,
+            execution.body_bytes,
+            execution.body_sha256,
+            execution.error_json,
+            execution.created_at,
+            execution.completed_at
+          FROM executions AS execution
+          INNER JOIN workspace_tree_nodes AS node
+            ON node.id = execution.request_id;
+
+          DROP TABLE executions;
+          ALTER TABLE executions_temporary RENAME TO executions;
+          CREATE INDEX executions_request_created
+            ON executions(request_id, created_at DESC, id DESC);
+          CREATE INDEX executions_workspace_created
+            ON executions(workspace_id, created_at DESC, id DESC);
+        `);
+        this.#recordMigration(TEMPORARY_EXECUTION_MIGRATION);
+      })();
+    } finally {
+      this.#driver.pragma("foreign_keys = ON");
+    }
+    const violation = this.#driver.prepare("PRAGMA foreign_key_check").get();
+    if (violation !== undefined) {
+      throw new Error("Temporary execution migration violated a foreign key");
     }
   }
 

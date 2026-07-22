@@ -53,10 +53,23 @@ export interface RequestView {
   readonly draftRevision: number;
 }
 
+export interface RequestExecutionInput {
+  readonly method: HttpMethod;
+  readonly targetUrl: string;
+  readonly query: readonly RequestField[];
+  readonly headers: readonly RequestField[];
+  readonly body: string;
+}
+
+export interface ExecutionRequestSnapshot extends RequestExecutionInput {
+  readonly workspaceId: EntityId;
+  readonly requestId?: EntityId;
+}
+
 export interface PreparedExecution {
   readonly executionId: EntityId;
-  readonly revisionId: EntityId;
-  readonly request: RequestView;
+  readonly revisionId?: EntityId;
+  readonly request: ExecutionRequestSnapshot;
   readonly createdAt: number;
 }
 
@@ -166,9 +179,20 @@ export class RequestService {
     workspaceId: EntityId,
     parentCollectionId: EntityId | null,
     name: string,
+    method: HttpMethod,
     targetUrl: string,
+    query: readonly RequestField[],
+    headers: readonly RequestField[],
+    body: string,
   ): Promise<RequestView> {
-    const normalizedUrl = validateTargetUrl(targetUrl);
+    const content = normalizeExecutionInput({
+      method,
+      targetUrl,
+      query,
+      headers,
+      body,
+    });
+    const normalizedName = normalizeName(name);
     return this.#database.transaction().execute(async (transaction) => {
       await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
       await this.#validateParent(transaction, workspaceId, parentCollectionId);
@@ -188,7 +212,7 @@ export class RequestService {
             parentCollectionId === null ? null : idToBytes(parentCollectionId),
           kind: "request",
           position,
-          name: normalizeName(name),
+          name: normalizedName,
           order_revision: 0,
           created_at: now,
         })
@@ -198,13 +222,13 @@ export class RequestService {
         .values({
           request_id: idToBytes(requestId),
           draft_revision: 0,
-          method: "GET",
+          method: content.method,
           target_mode: "absolute",
-          target_url: normalizedUrl,
+          target_url: content.targetUrl,
           query_mode: "structured",
-          query_json: "[]",
-          headers_json: "[]",
-          body_text: "",
+          query_json: JSON.stringify(content.query),
+          headers_json: JSON.stringify(content.headers),
+          body_text: content.body,
           updated_by: idToBytes(userId),
           updated_at: now,
         })
@@ -218,14 +242,14 @@ export class RequestService {
       return {
         requestId,
         workspaceId,
-        name: normalizeName(name),
-        method: "GET",
+        name: normalizedName,
+        method: content.method,
         targetMode: "absolute",
-        targetUrl: normalizedUrl,
+        targetUrl: content.targetUrl,
         queryMode: "structured",
-        query: [],
-        headers: [],
-        body: "",
+        query: content.query,
+        headers: content.headers,
+        body: content.body,
         draftRevision: 0,
       };
     });
@@ -255,13 +279,15 @@ export class RequestService {
     body: string,
   ): Promise<RequestView> {
     const normalizedName = normalizeName(name);
-    const normalizedUrl = validateTargetUrl(targetUrl);
-    const normalizedMethod = validateMethod(method);
-    const normalizedQuery = validateQuery(query);
-    const normalizedHeaders = validateHeaders(headers);
-    const normalizedBody = validateBody(body);
-    const queryJson = JSON.stringify(normalizedQuery);
-    const headersJson = JSON.stringify(normalizedHeaders);
+    const content = normalizeExecutionInput({
+      method,
+      targetUrl,
+      query,
+      headers,
+      body,
+    });
+    const queryJson = JSON.stringify(content.query);
+    const headersJson = JSON.stringify(content.headers);
     return this.#database.transaction().execute(async (transaction) => {
       const row = await this.#requestRow(transaction, requestId);
       const workspaceId = bytesToId(row.workspace_id);
@@ -271,11 +297,11 @@ export class RequestService {
       }
       if (
         row.name === normalizedName &&
-        row.method === normalizedMethod &&
-        row.target_url === normalizedUrl &&
+        row.method === content.method &&
+        row.target_url === content.targetUrl &&
         row.query_json === queryJson &&
         row.headers_json === headersJson &&
-        row.body_text === normalizedBody
+        row.body_text === content.body
       ) {
         return mapRequest(row);
       }
@@ -287,11 +313,11 @@ export class RequestService {
       await transaction
         .updateTable("request_drafts")
         .set({
-          method: normalizedMethod,
-          target_url: normalizedUrl,
+          method: content.method,
+          target_url: content.targetUrl,
           query_json: queryJson,
           headers_json: headersJson,
-          body_text: normalizedBody,
+          body_text: content.body,
           draft_revision: expectedDraftRevision + 1,
           updated_by: idToBytes(userId),
           updated_at: Date.now(),
@@ -307,11 +333,11 @@ export class RequestService {
       return {
         ...mapRequest(row),
         name: normalizedName,
-        method: normalizedMethod,
-        targetUrl: normalizedUrl,
-        query: normalizedQuery,
-        headers: normalizedHeaders,
-        body: normalizedBody,
+        method: content.method,
+        targetUrl: content.targetUrl,
+        query: content.query,
+        headers: content.headers,
+        body: content.body,
         draftRevision: expectedDraftRevision + 1,
       };
     });
@@ -366,6 +392,7 @@ export class RequestService {
         .insertInto("executions")
         .values({
           id: idToBytes(executionId),
+          workspace_id: idToBytes(request.workspaceId),
           request_id: idToBytes(requestId),
           request_revision_id: idToBytes(revisionId),
           created_by: idToBytes(userId),
@@ -389,6 +416,60 @@ export class RequestService {
         data: { executionId, requestId, revisionId },
       });
       return { executionId, revisionId, request, createdAt };
+    });
+  }
+
+  /** Creates a durable workspace-owned execution without saving a request. */
+  async prepareTemporaryExecution(
+    userId: EntityId,
+    workspaceId: EntityId,
+    input: RequestExecutionInput,
+  ): Promise<PreparedExecution> {
+    const request = {
+      workspaceId,
+      ...normalizeExecutionInput(input),
+    };
+    return this.#database.transaction().execute(async (transaction) => {
+      await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
+      const executionId = createEntityId();
+      const createdAt = Date.now();
+      const snapshot = JSON.stringify({
+        method: request.method,
+        targetMode: "absolute",
+        targetUrl: request.targetUrl,
+        queryMode: "structured",
+        query: request.query,
+        headers: request.headers,
+        body: request.body,
+      });
+      await transaction
+        .insertInto("executions")
+        .values({
+          id: idToBytes(executionId),
+          workspace_id: idToBytes(workspaceId),
+          request_id: null,
+          request_revision_id: null,
+          created_by: idToBytes(userId),
+          state: "created",
+          snapshot_json: snapshot,
+          response_status: null,
+          response_headers_json: null,
+          response_blob_id: null,
+          body_complete: 0,
+          body_bytes: null,
+          body_sha256: null,
+          error_json: null,
+          created_at: createdAt,
+          completed_at: null,
+        })
+        .execute();
+      await this.#audit.record(transaction, {
+        type: "execution.created",
+        actorUserId: userId,
+        workspaceId,
+        data: { executionId, requestId: null, revisionId: null },
+      });
+      return { executionId, request, createdAt };
     });
   }
 
@@ -593,6 +674,19 @@ function validateBody(value: string): string {
     throw new Error("Request body is too large");
   }
   return value;
+}
+
+/** Normalizes and validates content shared by saved and temporary executions. */
+function normalizeExecutionInput(
+  input: RequestExecutionInput,
+): RequestExecutionInput {
+  return {
+    method: validateMethod(input.method),
+    targetUrl: validateTargetUrl(input.targetUrl),
+    query: validateQuery(input.query),
+    headers: validateHeaders(input.headers),
+    body: validateBody(input.body),
+  };
 }
 
 /** Maps persistence naming and binary identifiers to the request view contract. */

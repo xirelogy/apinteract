@@ -205,7 +205,8 @@ export interface components {
       | components["schemas"]["RequestCreateCommand"]
       | components["schemas"]["RequestGetCommand"]
       | components["schemas"]["RequestUpdateCommand"]
-      | components["schemas"]["ExecutionStartCommand"];
+      | components["schemas"]["ExecutionStartCommand"]
+      | components["schemas"]["ExecutionStartTemporaryCommand"];
     CommandEnvelope: {
       /** @constant */
       protocolVersion: 1;
@@ -299,8 +300,12 @@ export interface components {
         workspaceId: components["schemas"]["WorkspaceId"];
         parentCollectionId: components["schemas"]["CollectionId"] | null;
         name: string;
+        method: components["schemas"]["HttpMethod"];
         /** Format: uri */
         targetUrl: string;
+        query: components["schemas"]["RequestField"][];
+        headers: components["schemas"]["RequestField"][];
+        body: string;
       };
     } & {
       /**
@@ -355,6 +360,20 @@ export interface components {
        * @enum {string}
        */
       type: "ExecutionStartCommand";
+    };
+    ExecutionStartTemporaryCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "execution.start_temporary";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+        request: components["schemas"]["RequestExecutionInput"];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "ExecutionStartTemporaryCommand";
     };
     WebSocketReply: {
       /** @constant */
@@ -416,7 +435,7 @@ export interface components {
     };
     ExecutionView: {
       executionId: components["schemas"]["ExecutionId"];
-      requestId: components["schemas"]["RequestId"];
+      requestId?: components["schemas"]["RequestId"];
       /** @enum {string} */
       state: "created" | "running" | "completed" | "failed";
       status?: number;
@@ -433,6 +452,14 @@ export interface components {
     HeaderField: {
       name: string;
       value: string;
+    };
+    RequestExecutionInput: {
+      method: components["schemas"]["HttpMethod"];
+      /** Format: uri */
+      targetUrl: string;
+      query: components["schemas"]["RequestField"][];
+      headers: components["schemas"]["RequestField"][];
+      body: string;
     };
     /** @enum {string} */
     HttpMethod:

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { Play, Plus, Save, Trash2 } from "@lucide/vue";
 
 import type {
@@ -13,13 +13,16 @@ import ResponsePanel from "./ResponsePanel.vue";
 
 const props = defineProps<{
   request: RequestView | null;
+  draft: RequestDraftInput | null;
   execution: ExecutionView | null;
+  temporary: boolean;
   busy: boolean;
 }>();
 
 const emit = defineEmits<{
   save: [draft: RequestDraftInput];
   execute: [draft: RequestDraftInput];
+  change: [draft: RequestDraftInput];
 }>();
 
 const methods: readonly HttpMethod[] = [
@@ -41,17 +44,26 @@ const body = ref("");
 const activeTab = ref<"query" | "headers" | "body">("query");
 
 watch(
-  () => props.request,
-  (request) => {
-    name.value = request?.name ?? "";
-    method.value = request?.method ?? "GET";
-    targetUrl.value = request?.targetUrl ?? "";
-    query.value = cloneFields(request?.query ?? []);
-    headers.value = cloneFields(request?.headers ?? []);
-    body.value = request?.body ?? "";
+  () => props.draft,
+  (draft) => {
+    name.value = draft?.name ?? "";
+    method.value = draft?.method ?? "GET";
+    targetUrl.value = draft?.targetUrl ?? "";
+    query.value = cloneFields(draft?.query ?? []);
+    headers.value = cloneFields(draft?.headers ?? []);
+    body.value = draft?.body ?? "";
   },
   { immediate: true },
 );
+const validTarget = computed(() => {
+  try {
+    const url = new URL(targetUrl.value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+});
+const canSave = computed(() => name.value.trim() !== "" && validTarget.value);
 
 /** Returns mutable field copies without sharing generated contract objects. */
 function cloneFields(fields: readonly RequestField[]): RequestField[] {
@@ -62,6 +74,7 @@ function cloneFields(fields: readonly RequestField[]): RequestField[] {
 function addField(kind: "query" | "headers"): void {
   const fields = kind === "query" ? query : headers;
   fields.value.push({ name: "", value: "", enabled: true });
+  emitChange();
 }
 
 /** Appends a field to the currently visible structured editor. */
@@ -73,6 +86,7 @@ function addActiveField(): void {
 function removeField(kind: "query" | "headers", index: number): void {
   const fields = kind === "query" ? query : headers;
   fields.value.splice(index, 1);
+  emitChange();
 }
 
 /** Removes a field from the currently visible structured editor. */
@@ -92,6 +106,18 @@ function currentDraft(): RequestDraftInput {
   };
 }
 
+/** Publishes current editor content to its owning request tab. */
+function emitChange(): void {
+  emit("change", {
+    name: name.value,
+    method: method.value,
+    targetUrl: targetUrl.value,
+    query: cloneFields(query.value),
+    headers: cloneFields(headers.value),
+    body: body.value,
+  });
+}
+
 /** Omits untouched placeholder rows while preserving meaningful disabled fields. */
 function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
   return cloneFields(
@@ -102,7 +128,7 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
 
 <template>
   <main class="request-workbench">
-    <div v-if="request === null" class="empty-workbench">
+    <div v-if="draft === null" class="empty-workbench">
       <h1>Select a request</h1>
       <p>Choose a collection and request from the workspace navigator.</p>
     </div>
@@ -116,16 +142,19 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
               class="request-name-input"
               aria-label="Request name"
               :disabled="busy"
+              @input="emitChange"
             />
             <span class="draft-revision">
-              Draft {{ request.draftRevision }}
+              {{
+                temporary ? "Temporary" : `Draft ${request?.draftRevision ?? 0}`
+              }}
             </span>
           </div>
           <div class="command-bar">
             <button
               class="secondary-button"
               type="button"
-              :disabled="busy"
+              :disabled="busy || !canSave"
               @click="emit('save', currentDraft())"
             >
               <Save :size="16" aria-hidden="true" />
@@ -134,7 +163,7 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
             <button
               class="primary-button"
               type="button"
-              :disabled="busy"
+              :disabled="busy || !validTarget"
               @click="emit('execute', currentDraft())"
             >
               <Play :size="16" aria-hidden="true" />
@@ -149,6 +178,7 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
             class="method-control"
             aria-label="HTTP method"
             :disabled="busy"
+            @change="emitChange"
           >
             <option v-for="option in methods" :key="option" :value="option">
               {{ option }}
@@ -162,6 +192,7 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
             autocomplete="off"
             spellcheck="false"
             :disabled="busy"
+            @input="emitChange"
           />
         </div>
 
@@ -202,6 +233,7 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
               type="checkbox"
               :aria-label="`Enable ${activeTab} field ${index + 1}`"
               :disabled="busy"
+              @change="emitChange"
             />
             <input
               v-model="field.name"
@@ -211,6 +243,7 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
               autocomplete="off"
               spellcheck="false"
               :disabled="busy"
+              @input="emitChange"
             />
             <input
               v-model="field.value"
@@ -220,6 +253,7 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
               autocomplete="off"
               spellcheck="false"
               :disabled="busy"
+              @input="emitChange"
             />
             <button
               class="icon-button compact-icon-button"
@@ -251,6 +285,7 @@ function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
             placeholder="Raw request body"
             spellcheck="false"
             :disabled="busy"
+            @input="emitChange"
           ></textarea>
         </div>
       </section>

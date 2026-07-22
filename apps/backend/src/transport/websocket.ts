@@ -8,6 +8,7 @@ import { createEntityId } from "../foundation/id.js";
 import {
   DraftConflictError,
   type HttpMethod,
+  type RequestExecutionInput,
   type RequestField,
 } from "../requests/request-service.js";
 import type { SessionIdentity } from "../sessions/session-service.js";
@@ -175,7 +176,11 @@ async function dispatch(
         requireString(command.payload.workspaceId, "workspaceId"),
         optionalString(command.payload.parentCollectionId),
         requireString(command.payload.name, "name"),
+        requireMethod(command.payload.method),
         requireString(command.payload.targetUrl, "targetUrl"),
+        requireRequestFields(command.payload.query, "query"),
+        requireRequestFields(command.payload.headers, "headers"),
+        requireBody(command.payload.body),
       );
     case "request.get":
       return application.requests.get(
@@ -201,7 +206,14 @@ async function dispatch(
       return application.executions.start(
         userId,
         requireString(command.payload.requestId, "requestId"),
-        (event) => publish(event.type, event.payload),
+        (event) => publishExecutionEvent(event, publish),
+      );
+    case "execution.start_temporary":
+      return application.executions.startTemporary(
+        userId,
+        requireString(command.payload.workspaceId, "workspaceId"),
+        requireExecutionInput(command.payload.request),
+        (event) => publishExecutionEvent(event, publish),
       );
     default:
       throw new CommandError(
@@ -390,6 +402,36 @@ function requireBody(value: unknown): string {
     throw new CommandError("validation_failed", "body must be a string.");
   }
   return value;
+}
+
+/** Validates a complete executable request snapshot from a command payload. */
+function requireExecutionInput(value: unknown): RequestExecutionInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new CommandError("validation_failed", "request must be an object.");
+  }
+  const request = value as Record<string, unknown>;
+  return {
+    method: requireMethod(request.method),
+    targetUrl: requireString(request.targetUrl, "targetUrl"),
+    query: requireRequestFields(request.query, "query"),
+    headers: requireRequestFields(request.headers, "headers"),
+    body: requireBody(request.body),
+  };
+}
+
+/** Publishes execution identity alongside incremental or terminal event data. */
+function publishExecutionEvent(
+  event: {
+    readonly type: string;
+    readonly executionId: string;
+    readonly payload: unknown;
+  },
+  publish: (type: string, payload: unknown) => void,
+): void {
+  publish(event.type, {
+    executionId: event.executionId,
+    data: event.payload,
+  });
 }
 
 /** Converts any supported ws text-frame representation to UTF-8 text. */

@@ -1,18 +1,28 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
 
 import { useApplicationController } from "@/app/dependencies";
 import { useApplicationStore } from "@/control/state/application-store";
+import {
+  isRequestTabDirty,
+  type RequestDraftInput,
+  type RequestTab,
+} from "@/model/domain/application";
 import AppHeader from "@/view/presentation/layout/AppHeader.vue";
+import DiscardChangesDialog from "@/view/presentation/features/DiscardChangesDialog.vue";
 import RequestEditor from "@/view/presentation/features/RequestEditor.vue";
+import RequestTabs from "@/view/presentation/features/RequestTabs.vue";
+import SaveRequestDialog from "@/view/presentation/features/SaveRequestDialog.vue";
 import WorkspaceNavigator from "@/view/presentation/features/WorkspaceNavigator.vue";
 
 const controller = useApplicationController();
 const store = useApplicationStore();
 const router = useRouter();
 const navigatorOpen = ref(false);
+const saveDialogTab = ref<RequestTab | null>(null);
+const discardDialogTab = ref<RequestTab | null>(null);
 const {
   session,
   connection,
@@ -22,15 +32,37 @@ const {
   selectedCollectionId,
   collectionChildren,
   expandedCollectionIds,
-  request,
-  execution,
+  requestTabs,
+  activeRequestTabId,
   busy,
   error,
 } = storeToRefs(store);
+const activeTab = computed(
+  () =>
+    requestTabs.value.find((tab) => tab.tabId === activeRequestTabId.value) ??
+    null,
+);
+const visibleRequestTabs = computed(() =>
+  requestTabs.value.filter(
+    (tab) => tab.workspaceId === selectedWorkspaceId.value,
+  ),
+);
 
 onMounted(async () => {
+  window.addEventListener("beforeunload", protectUnsavedTabs);
   await controller.initializeWorkspace().catch(() => undefined);
 });
+
+onBeforeUnmount(() => {
+  window.removeEventListener("beforeunload", protectUnsavedTabs);
+});
+
+/** Warns before browser navigation would discard unsaved request tabs. */
+function protectUnsavedTabs(event: BeforeUnloadEvent): void {
+  if (requestTabs.value.some(isRequestTabDirty)) {
+    event.preventDefault();
+  }
+}
 
 /** Ends the current session and returns to the login view. */
 async function logout(): Promise<void> {
@@ -48,16 +80,77 @@ function closeNavigator(): void {
   navigatorOpen.value = false;
 }
 
-/** Creates a request and reveals its editor after closing the mobile drawer. */
-async function createRequest(name: string, targetUrl: string): Promise<void> {
-  await controller.createRequest(name, targetUrl);
+/** Opens a temporary tab with an optional eventual collection destination. */
+function createTemporaryRequest(
+  parentCollectionId: string | null = null,
+): void {
+  controller.createTemporaryRequest(parentCollectionId);
   closeNavigator();
 }
 
-/** Selects a request and reveals its editor after closing the mobile drawer. */
+/** Selects a request and reveals its tab after closing the mobile drawer. */
 async function selectRequest(requestId: string): Promise<void> {
   await controller.selectRequest(requestId);
   closeNavigator();
+}
+
+/** Saves a tab or asks for a temporary request destination. */
+async function saveRequest(draft: RequestDraftInput): Promise<void> {
+  const tab = activeTab.value;
+  if (tab === null) {
+    return;
+  }
+  controller.updateRequestDraft(tab.tabId, draft);
+  if (tab.request === null) {
+    saveDialogTab.value =
+      requestTabs.value.find((candidate) => candidate.tabId === tab.tabId) ??
+      null;
+    return;
+  }
+  await controller.saveRequest(tab.tabId, draft);
+}
+
+/** Saves one temporary tab and closes its destination dialog. */
+async function saveTemporaryRequest(
+  name: string,
+  parentCollectionId: string,
+): Promise<void> {
+  const tab = saveDialogTab.value;
+  if (tab === null) {
+    return;
+  }
+  await controller.saveTemporaryRequest(tab.tabId, name, parentCollectionId);
+  saveDialogTab.value = null;
+}
+
+/** Executes the active tab without affecting other open request tabs. */
+async function executeRequest(draft: RequestDraftInput): Promise<void> {
+  const tab = activeTab.value;
+  if (tab !== null) {
+    await controller.executeRequest(tab.tabId, draft);
+  }
+}
+
+/** Closes a clean tab or opens discard confirmation for unsaved content. */
+function requestTabClose(tabId: string): void {
+  const tab = requestTabs.value.find((candidate) => candidate.tabId === tabId);
+  if (tab === undefined) {
+    return;
+  }
+  if (isRequestTabDirty(tab)) {
+    discardDialogTab.value = tab;
+  } else {
+    controller.closeRequestTab(tabId);
+  }
+}
+
+/** Discards and closes the tab selected by the confirmation dialog. */
+function discardRequestTab(): void {
+  const tab = discardDialogTab.value;
+  if (tab !== null) {
+    controller.closeRequestTab(tab.tabId);
+  }
+  discardDialogTab.value = null;
 }
 </script>
 
@@ -81,7 +174,7 @@ async function selectRequest(requestId: string): Promise<void> {
         :selected-collection-id="selectedCollectionId"
         :collection-children="collectionChildren"
         :expanded-collection-ids="expandedCollectionIds"
-        :selected-request-id="request?.requestId ?? null"
+        :selected-request-id="activeTab?.request?.requestId ?? null"
         :busy="busy"
         @create-workspace="controller.createWorkspace($event)"
         @select-workspace="controller.selectWorkspace($event)"
@@ -91,7 +184,7 @@ async function selectRequest(requestId: string): Promise<void> {
         "
         @select-collection="controller.selectCollection($event)"
         @toggle-collection="controller.toggleCollection($event)"
-        @create-request="createRequest"
+        @create-request="createTemporaryRequest"
         @select-request="selectRequest"
       />
       <button
@@ -101,13 +194,43 @@ async function selectRequest(requestId: string): Promise<void> {
         aria-label="Close workspace navigator"
         @click="closeNavigator"
       ></button>
-      <RequestEditor
-        :request="request"
-        :execution="execution"
-        :busy="busy"
-        @save="controller.saveRequest($event)"
-        @execute="controller.executeRequest($event)"
-      />
+      <div class="request-area">
+        <RequestTabs
+          :tabs="visibleRequestTabs"
+          :active-tab-id="activeRequestTabId"
+          @activate="controller.activateRequestTab($event)"
+          @close="requestTabClose"
+          @create="createTemporaryRequest()"
+        />
+        <RequestEditor
+          :request="activeTab?.request ?? null"
+          :draft="activeTab?.draft ?? null"
+          :execution="activeTab?.execution ?? null"
+          :temporary="activeTab?.request === null"
+          :busy="activeTab?.busy ?? false"
+          @change="
+            activeTab && controller.updateRequestDraft(activeTab.tabId, $event)
+          "
+          @save="saveRequest"
+          @execute="executeRequest"
+        />
+      </div>
     </div>
+
+    <SaveRequestDialog
+      v-if="saveDialogTab"
+      :tab="saveDialogTab"
+      :root-nodes="rootNodes"
+      :collection-children="collectionChildren"
+      :busy="saveDialogTab.busy"
+      @close="saveDialogTab = null"
+      @save="saveTemporaryRequest"
+    />
+    <DiscardChangesDialog
+      v-if="discardDialogTab"
+      :request-name="discardDialogTab.draft.name"
+      @close="discardDialogTab = null"
+      @discard="discardRequestTab"
+    />
   </div>
 </template>

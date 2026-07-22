@@ -58,53 +58,15 @@ test("creates, restores, and sends the first workspace request", async ({
   await subcollection.click();
 
   await page.getByRole("button", { name: "Create request" }).click();
-  const requestDialog = page.getByRole("dialog", { name: "New request" });
-  await requestDialog.getByLabel("Request name").fill(requestName);
-  await requestDialog.getByLabel("New request URL").fill(targetUrl);
-  await requestDialog.getByRole("button", { name: "Create" }).click();
   if (mobile) {
     await expect(
       page.getByRole("button", { name: "Open workspace navigator" }),
     ).toBeVisible();
   }
-  const requestNode = workspaceTree.getByRole("button", {
-    name: `GET ${requestName}`,
-    exact: true,
-  });
-  await expect(requestNode).toHaveClass(/is-selected/u);
-  await expect(subcollection.locator("..")).not.toHaveClass(/is-selected/u);
-  await expect(page.getByLabel("Request name", { exact: true })).toHaveValue(
-    requestName,
-  );
-  await expect(page.getByLabel("Target URL")).toHaveValue(targetUrl);
-
-  await page.reload();
-  await openNavigator(page, mobile);
-  await page
-    .getByLabel("Workspace", { exact: true })
-    .selectOption({ label: workspaceName });
-  await workspaceTree
-    .getByRole("button", { name: collectionName, exact: true })
-    .click();
-  await workspaceTree
-    .getByRole("button", { name: subcollectionName, exact: true })
-    .click();
-  await workspaceTree
-    .getByRole("button", { name: `GET ${requestName}`, exact: true })
-    .click();
-  if (mobile) {
-    await expect(
-      page.getByRole("button", { name: "Open workspace navigator" }),
-    ).toBeVisible();
-  }
-
-  await expect(page.getByLabel("Request name", { exact: true })).toHaveValue(
-    requestName,
-  );
-  await expect(page.getByLabel("Target URL")).toHaveValue(targetUrl);
   const draftRevision = page.locator(".draft-revision");
-  await expect(draftRevision).toHaveText("Draft 0");
-
+  await expect(draftRevision).toHaveText("Temporary");
+  await page.getByLabel("Request name", { exact: true }).fill(requestName);
+  await page.getByLabel("Target URL").fill(targetUrl);
   await page.getByLabel("HTTP method").selectOption("POST");
   await page.getByRole("button", { name: "Add parameter" }).click();
   await page.getByLabel("Query name 1").fill("source");
@@ -129,7 +91,13 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.locator(".body-preview")).toContainText(
     `"body":"payload-${suffix}"`,
   );
-  await expect(draftRevision).toHaveText("Draft 1");
+  await expect(draftRevision).toHaveText("Temporary");
+  await expect(
+    workspaceTree.getByRole("button", {
+      name: `POST ${requestName}`,
+      exact: true,
+    }),
+  ).toHaveCount(0);
 
   await page
     .getByRole("tablist", { name: "Response details" })
@@ -139,10 +107,82 @@ test("creates, restores, and sends the first workspace request", async ({
     "x-fixture-response",
   );
   await expect(page.locator(".response-headers")).toContainText("echoed");
+
+  await page.getByRole("button", { name: "New temporary request" }).click();
+  await expect(page.locator(".request-tab")).toHaveCount(2);
+  await page
+    .getByLabel("Request name", { exact: true })
+    .fill(`Scratch ${suffix}`);
+  await page.getByLabel("Target URL").fill("http://127.0.0.1:8090/hello");
+  await page.getByRole("button", { name: `Close Scratch ${suffix}` }).click();
+  const discardDialog = page.getByRole("dialog", {
+    name: "Discard changes?",
+  });
+  await discardDialog.getByRole("button", { name: "Discard" }).click();
+  await expect(page.locator(".request-tab")).toHaveCount(1);
+  await expect(page.getByLabel("Request name", { exact: true })).toHaveValue(
+    requestName,
+  );
+  await page
+    .getByRole("tablist", { name: "Response details" })
+    .getByRole("tab", { name: "Raw" })
+    .click();
+  await expect(page.locator(".body-preview")).toContainText(`"method":"POST"`);
+
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const saveDialog = page.getByRole("dialog", { name: "Save request" });
+  await expect(saveDialog.getByLabel("Saved request name")).toHaveValue(
+    requestName,
+  );
+  await expect(
+    saveDialog.locator(
+      "select[aria-label='Destination collection'] option:checked",
+    ),
+  ).toHaveText(subcollectionName);
+  await saveDialog.getByRole("button", { name: "Save" }).click();
+  const requestNode = workspaceTree.getByRole("button", {
+    name: `POST ${requestName}`,
+    exact: true,
+  });
+  await expect(requestNode).toHaveClass(/is-selected/u);
+  await expect(subcollection.locator("..")).not.toHaveClass(/is-selected/u);
+  await expect(draftRevision).toHaveText("Draft 0");
+
+  await page.reload();
+  await openNavigator(page, mobile);
+  await page
+    .getByLabel("Workspace", { exact: true })
+    .selectOption({ label: workspaceName });
+  await workspaceTree
+    .getByRole("button", { name: collectionName, exact: true })
+    .click();
+  await workspaceTree
+    .getByRole("button", { name: subcollectionName, exact: true })
+    .click();
+  await workspaceTree
+    .getByRole("button", { name: `POST ${requestName}`, exact: true })
+    .click();
+  if (mobile) {
+    await expect(
+      page.getByRole("button", { name: "Open workspace navigator" }),
+    ).toBeVisible();
+  }
+
+  await expect(page.getByLabel("Request name", { exact: true })).toHaveValue(
+    requestName,
+  );
+  await expect(page.getByLabel("Target URL")).toHaveValue(targetUrl);
+  await expect(page.getByLabel("HTTP method")).toHaveValue("POST");
+  await page.getByRole("tab", { name: "Body" }).click();
+  await expect(page.getByLabel("Raw request body")).toHaveValue(
+    `payload-${suffix}`,
+  );
+  await expect(draftRevision).toHaveText("Draft 0");
+
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByRole("status")).toHaveText("In progress");
   await expect(page.locator(".status-code")).toHaveText("201");
-  await expect(draftRevision).toHaveText("Draft 1");
+  await expect(draftRevision).toHaveText("Draft 0");
 });
 
 /** Authenticates the isolated browser-test administrator. */

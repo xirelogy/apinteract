@@ -2,12 +2,10 @@ import { defineStore } from "pinia";
 
 import type {
   CurrentSession,
-  ExecutionView,
-  RequestView,
   TreeNode,
   WorkspaceSummary,
 } from "@/model/contracts/backend";
-import type { ConnectionState } from "@/model/domain/application";
+import type { ConnectionState, RequestTab } from "@/model/domain/application";
 
 export const useApplicationStore = defineStore("application", {
   state: () => ({
@@ -19,8 +17,8 @@ export const useApplicationStore = defineStore("application", {
     selectedCollectionId: null as string | null,
     collectionChildren: {} as Record<string, TreeNode[]>,
     expandedCollectionIds: [] as string[],
-    request: null as RequestView | null,
-    execution: null as ExecutionView | null,
+    requestTabs: [] as RequestTab[],
+    activeRequestTabId: null as string | null,
     busy: false,
     error: null as string | null,
   }),

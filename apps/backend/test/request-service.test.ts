@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { AuditService } from "../src/audit/audit-service.js";
-import { createEntityId, idToBytes } from "../src/foundation/id.js";
+import { bytesToId, createEntityId, idToBytes } from "../src/foundation/id.js";
 import { SqliteDatabase } from "../src/persistence/sqlite-database.js";
 import { RequestService } from "../src/requests/request-service.js";
 import { WorkspaceService } from "../src/workspaces/workspace-service.js";
@@ -41,7 +41,11 @@ describe("RequestService draft updates", () => {
         workspace.workspaceId,
         null,
         "Example request",
+        "GET",
         "https://example.test/hello",
+        [],
+        [],
+        "",
       );
 
       const unchanged = await requests.update(
@@ -83,6 +87,29 @@ describe("RequestService draft updates", () => {
       ]);
       expect(changed.body).toBe('{"hello":"world"}');
       expect(await audit.pendingCount()).toBe(3);
+
+      const temporary = await requests.prepareTemporaryExecution(
+        userId,
+        workspace.workspaceId,
+        {
+          method: "POST",
+          targetUrl: "https://example.test/temporary",
+          query: [],
+          headers: [],
+          body: "temporary body",
+        },
+      );
+      const execution = await database.db
+        .selectFrom("executions")
+        .select(["workspace_id", "request_id", "request_revision_id"])
+        .where("id", "=", idToBytes(temporary.executionId))
+        .executeTakeFirstOrThrow();
+
+      expect(temporary.request.requestId).toBeUndefined();
+      expect(bytesToId(execution.workspace_id)).toBe(workspace.workspaceId);
+      expect(execution.request_id).toBeNull();
+      expect(execution.request_revision_id).toBeNull();
+      expect(await audit.pendingCount()).toBe(4);
     } finally {
       await database.close();
       await rm(rootPath, { recursive: true, force: true });
