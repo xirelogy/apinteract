@@ -91,7 +91,7 @@ function findLoadedNodeName(nodeId: string): string | null {
 <template>
   <aside class="workspace-navigator" :aria-label="t('workspace.navigation')">
     <div class="navigator-section">
-      <label class="field-label" for="workspace-select">
+      <label class="navigator-heading" for="workspace-select">
         {{ t("workspace.label") }}
       </label>
       <div class="workspace-select-row">
@@ -120,7 +120,7 @@ function findLoadedNodeName(nodeId: string): string | null {
 
     <div v-if="selectedWorkspaceId" class="navigator-section navigator-grow">
       <div class="section-heading">
-        <span>{{ t("workspace.collections") }}</span>
+        <span class="navigator-heading">{{ t("workspace.collections") }}</span>
         <div class="section-actions">
           <button
             class="icon-button compact-icon-button"

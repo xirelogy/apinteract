@@ -31,14 +31,16 @@ function formatBytes(count: number): string {
           <LoaderCircle :size="14" aria-hidden="true" />
           {{ t("response.inProgress") }}
         </span>
-        <span
-          v-if="execution.status"
-          class="status-code"
-          :data-success="execution.status < 400"
-        >
-          {{ execution.status }}
+        <span class="response-summary">
+          <span
+            v-if="execution.status"
+            class="status-code"
+            :data-success="execution.status < 400"
+          >
+            {{ execution.status }}
+          </span>
+          <span>{{ formatBytes(execution.bodyBytes ?? 0) }}</span>
         </span>
-        <span>{{ formatBytes(execution.bodyBytes ?? 0) }}</span>
         <a
           v-if="execution.bodyBlobId"
           class="icon-button"

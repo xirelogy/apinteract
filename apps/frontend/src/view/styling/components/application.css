@@ -264,6 +264,14 @@
   text-align: start;
 }
 
+.request-tab-label {
+  display: inline-flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
 .request-tab-method {
   flex: 0 0 auto;
   color: var(--success);
@@ -274,6 +282,7 @@
 
 .request-tab-name {
   min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   font-size: var(--font-size-xs);
   text-overflow: ellipsis;
@@ -312,6 +321,7 @@
 
 .request-tab-spinner {
   flex: 0 0 auto;
+  align-self: center;
   color: var(--accent-primary);
   animation: response-spin 800ms linear infinite;
 }
@@ -352,10 +362,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.navigator-heading {
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-bold);
-  text-transform: uppercase;
+  font-weight: var(--font-weight-semibold);
 }
 
 .section-actions {
@@ -414,13 +426,17 @@
 }
 
 .request-tree-row {
-  grid-template-columns:
-    var(--tree-leading-width) var(--tree-method-width)
-    minmax(0, 1fr);
+  grid-template-columns: var(--tree-leading-width) minmax(0, 1fr);
   padding: 0;
   padding-inline-end: var(--space-2);
   text-align: start;
   cursor: pointer;
+}
+
+.request-tree-label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
 }
 
 .workspace-tree-row:hover {
@@ -504,6 +520,7 @@
 
 .method-badge {
   width: var(--tree-method-width);
+  flex: 0 0 var(--tree-method-width);
 }
 
 .request-workbench {
@@ -714,6 +731,12 @@
 .response-metadata {
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
+}
+
+.response-summary {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
 }
 
 .status-code {
@@ -1078,7 +1101,7 @@
     min-width: 0;
     min-height: var(--control-height-dense);
     grid-template-columns:
-      var(--control-height-compact) 3.5rem minmax(0, 1fr)
+      var(--control-height-compact) minmax(0, 1fr)
       var(--space-2);
     align-items: center;
     gap: var(--space-1);
@@ -1095,6 +1118,13 @@
   .request-tab-menu-item.is-active {
     color: var(--text-primary);
     background: var(--surface-selected);
+  }
+
+  .request-tab-menu-item .request-tab-label {
+    display: grid;
+    grid-template-columns: 3.5rem minmax(0, 1fr);
+    align-items: baseline;
+    gap: var(--space-1);
   }
 
   .request-tab-menu-item > svg:first-child,

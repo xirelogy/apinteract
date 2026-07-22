@@ -90,15 +90,19 @@ function closeMobileMenuFromOutside(event: PointerEvent): void {
           :aria-selected="tab.tabId === activeTabId"
           @click="emit('activate', tab.tabId)"
         >
-          <LoaderCircle
-            v-if="tab.execution?.state === 'running'"
-            class="request-tab-spinner"
-            :size="13"
-            aria-hidden="true"
-          />
-          <span v-else class="request-tab-method">{{ tab.draft.method }}</span>
-          <span class="request-tab-name">
-            {{ tab.draft.name.trim() || t("request.untitled") }}
+          <span class="request-tab-label">
+            <LoaderCircle
+              v-if="tab.execution?.state === 'running'"
+              class="request-tab-spinner"
+              :size="13"
+              aria-hidden="true"
+            />
+            <span v-else class="request-tab-method">{{
+              tab.draft.method
+            }}</span>
+            <span class="request-tab-name">
+              {{ tab.draft.name.trim() || t("request.untitled") }}
+            </span>
           </span>
           <span
             v-if="isRequestTabDirty(tab)"
@@ -145,21 +149,23 @@ function closeMobileMenuFromOutside(event: PointerEvent): void {
           :disabled="tabs.length === 0"
           @click="toggleMobileMenu"
         >
-          <LoaderCircle
-            v-if="activeTab?.execution?.state === 'running'"
-            class="request-tab-spinner"
-            :size="14"
-            aria-hidden="true"
-          />
-          <span v-else-if="activeTab" class="request-tab-method">
-            {{ activeTab.draft.method }}
-          </span>
-          <span class="request-tab-name">
-            {{
-              activeTab === null
-                ? t("request.noOpenRequests")
-                : activeTab.draft.name.trim() || t("request.untitled")
-            }}
+          <span class="request-tab-label">
+            <LoaderCircle
+              v-if="activeTab?.execution?.state === 'running'"
+              class="request-tab-spinner"
+              :size="14"
+              aria-hidden="true"
+            />
+            <span v-else-if="activeTab" class="request-tab-method">
+              {{ activeTab.draft.method }}
+            </span>
+            <span class="request-tab-name">
+              {{
+                activeTab === null
+                  ? t("request.noOpenRequests")
+                  : activeTab.draft.name.trim() || t("request.untitled")
+              }}
+            </span>
           </span>
           <span
             v-if="activeTab && isRequestTabDirty(activeTab)"
@@ -197,17 +203,19 @@ function closeMobileMenuFromOutside(event: PointerEvent): void {
             />
             <span v-else class="request-tab-menu-spacer" aria-hidden="true">
             </span>
-            <LoaderCircle
-              v-if="tab.execution?.state === 'running'"
-              class="request-tab-spinner"
-              :size="13"
-              aria-hidden="true"
-            />
-            <span v-else class="request-tab-method">
-              {{ tab.draft.method }}
-            </span>
-            <span class="request-tab-name">
-              {{ tab.draft.name.trim() || t("request.untitled") }}
+            <span class="request-tab-label">
+              <LoaderCircle
+                v-if="tab.execution?.state === 'running'"
+                class="request-tab-spinner"
+                :size="13"
+                aria-hidden="true"
+              />
+              <span v-else class="request-tab-method">
+                {{ tab.draft.method }}
+              </span>
+              <span class="request-tab-name">
+                {{ tab.draft.name.trim() || t("request.untitled") }}
+              </span>
             </span>
             <span
               v-if="isRequestTabDirty(tab)"
