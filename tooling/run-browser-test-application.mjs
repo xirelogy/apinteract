@@ -10,6 +10,10 @@ const runtimeRoot = await mkdtemp(
 const configurationRoot = resolve(runtimeRoot, "config");
 const backendConfigurationPath = resolve(configurationRoot, "backend.yaml");
 const proxyConfigurationPath = resolve(configurationRoot, "proxy.yaml");
+const backendPort = Number.parseInt(
+  process.env.APINTERACT_BROWSER_TEST_BACKEND_PORT ?? "8080",
+  10,
+);
 const children = [];
 let stopping = false;
 
@@ -43,7 +47,7 @@ try {
     "--config",
     backendConfigurationPath,
   ]);
-  await waitForUrl("http://127.0.0.1:8080/health");
+  await waitForUrl(`http://127.0.0.1:${backendPort}/health`);
 
   startProcess("frontend", [
     "--filter",
@@ -94,7 +98,7 @@ async function prepareRuntime() {
         configVersion: 1,
         server: {
           host: "127.0.0.1",
-          port: 8080,
+          port: backendPort,
           publicOrigin: "http://127.0.0.1:5173",
         },
         persistence: {

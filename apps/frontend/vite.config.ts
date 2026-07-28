@@ -3,6 +3,10 @@ import { fileURLToPath, URL } from "node:url";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
 
+const browserTestBackendPort =
+  process.env.APINTERACT_BROWSER_TEST_BACKEND_PORT ?? "8080";
+const backendOrigin = `http://127.0.0.1:${browserTestBackendPort}`;
+
 export default defineConfig({
   base: "/web-ui/",
   plugins: [vue()],
@@ -20,11 +24,11 @@ export default defineConfig({
       allow: ["../.."],
     },
     proxy: {
-      "/auth": "http://127.0.0.1:8080",
-      "/api": "http://127.0.0.1:8080",
-      "/health": "http://127.0.0.1:8080",
+      "/auth": backendOrigin,
+      "/api": backendOrigin,
+      "/health": backendOrigin,
       "/ws": {
-        target: "ws://127.0.0.1:8080",
+        target: backendOrigin.replace("http:", "ws:"),
         ws: true,
       },
     },
