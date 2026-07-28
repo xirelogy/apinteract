@@ -40,7 +40,7 @@ Commands:
   check         Run repository quality checks inside the workspace
   exec <cmd...> Run an arbitrary command inside the workspace
   logs          Follow workspace container logs
-  browser-test  Run Playwright through the optional browser profile
+  browser-test [args...]  Run Playwright through the optional browser profile
   config        Print the resolved Compose configuration
 USAGE
 }
@@ -104,7 +104,9 @@ case "${command}" in
     "${compose[@]}" logs --follow workspace
     ;;
   browser-test)
-    "${compose[@]}" --profile browser run --rm browser
+    shift
+    "${compose[@]}" --profile browser run --rm browser \
+      pnpm exec playwright test "$@"
     ;;
   config)
     "${compose[@]}" config

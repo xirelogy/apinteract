@@ -125,6 +125,13 @@ needed:
 deploy/scripts/development browser-test
 ```
 
+Optional Playwright arguments can select a focused file or browser project:
+
+```sh
+deploy/scripts/development browser-test \
+  e2e/request-workflow.spec.ts --project=mobile-chromium
+```
+
 This command pulls the pinned Playwright image on first use. The browser
 service starts an isolated proxy, backend, and Vite server with disposable
 state. It verifies rejected credentials, successful login, refresh-cookie
