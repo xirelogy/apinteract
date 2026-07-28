@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 import { X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
+
+import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
+import FormField from "@/view/presentation/controls/FormField.vue";
+import IconButton from "@/view/presentation/controls/IconButton.vue";
+import TextInput from "@/view/presentation/controls/TextInput.vue";
+import DialogControl from "@/view/presentation/controls/dialog/DialogControl.vue";
 
 type CreationKind = "workspace" | "collection";
 
@@ -17,7 +23,7 @@ const emit = defineEmits<{
   submit: [name: string];
 }>();
 
-const dialog = ref<HTMLDialogElement | null>(null);
+const open = ref(true);
 const name = ref("");
 
 const title = computed(() =>
@@ -34,18 +40,9 @@ const nameLabel = computed(() =>
 );
 const canSubmit = computed(() => name.value.trim() !== "");
 
-onMounted(() => dialog.value?.showModal());
-
-/** Closes the native modal and lets its close event notify the navigator. */
+/** Requests closure through the shared controlled dialog lifecycle. */
 function close(): void {
-  dialog.value?.close();
-}
-
-/** Closes the modal when its backdrop, rather than its content, is clicked. */
-function closeFromBackdrop(event: MouseEvent): void {
-  if (event.target === dialog.value) {
-    close();
-  }
+  open.value = false;
 }
 
 /** Emits normalized creation fields and closes the completed modal. */
@@ -59,11 +56,10 @@ function submit(): void {
 </script>
 
 <template>
-  <dialog
-    ref="dialog"
+  <DialogControl
+    v-model:open="open"
     class="resource-dialog"
     aria-labelledby="resource-dialog-title"
-    @click="closeFromBackdrop"
     @close="emit('close')"
   >
     <div class="resource-dialog-surface">
@@ -72,49 +68,44 @@ function submit(): void {
           <h2 id="resource-dialog-title">{{ title }}</h2>
           <p v-if="context" class="resource-dialog-context">{{ context }}</p>
         </div>
-        <button
-          class="icon-button"
-          type="button"
-          :title="t('common.actions.close')"
-          :aria-label="t('common.actions.close')"
+        <IconButton
+          :label="t('common.actions.close')"
           :disabled="busy"
           @click="close"
         >
           <X :size="18" aria-hidden="true" />
-        </button>
+        </IconButton>
       </header>
 
       <form class="resource-dialog-form" @submit.prevent="submit">
-        <label class="input-field">
-          <span>{{ nameLabel }}</span>
-          <input
+        <FormField
+          v-slot="{ controlId, describedBy, invalid }"
+          :label="nameLabel"
+        >
+          <TextInput
+            :id="controlId"
             v-model="name"
-            class="text-input"
-            :aria-label="nameLabel"
+            :aria-describedby="describedBy"
+            :invalid="invalid"
             autocomplete="off"
             autofocus
             :disabled="busy"
           />
-        </label>
+        </FormField>
 
         <footer class="resource-dialog-actions">
-          <button
-            class="secondary-button"
-            type="button"
-            :disabled="busy"
-            @click="close"
-          >
+          <ButtonControl variant="secondary" :disabled="busy" @click="close">
             {{ t("common.actions.cancel") }}
-          </button>
-          <button
-            class="primary-button"
+          </ButtonControl>
+          <ButtonControl
+            variant="primary"
             type="submit"
             :disabled="busy || !canSubmit"
           >
             {{ t("common.actions.create") }}
-          </button>
+          </ButtonControl>
         </footer>
       </form>
     </div>
-  </dialog>
+  </DialogControl>
 </template>

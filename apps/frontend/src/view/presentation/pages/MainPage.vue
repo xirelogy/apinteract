@@ -179,7 +179,6 @@ function discardRequestTab(): void {
     <div class="application-body">
       <WorkspaceNavigator
         id="workspace-navigator"
-        :class="{ 'is-mobile-open': navigatorOpen }"
         :workspaces="workspaces"
         :selected-workspace-id="selectedWorkspaceId"
         :root-nodes="rootNodes"
@@ -188,6 +187,7 @@ function discardRequestTab(): void {
         :expanded-collection-ids="expandedCollectionIds"
         :selected-request-id="activeTab?.request?.requestId ?? null"
         :busy="busy"
+        :mobile-open="navigatorOpen"
         @create-workspace="controller.createWorkspace($event)"
         @select-workspace="controller.selectWorkspace($event)"
         @create-collection="
@@ -198,6 +198,7 @@ function discardRequestTab(): void {
         @toggle-collection="controller.toggleCollection($event)"
         @create-request="createTemporaryRequest"
         @select-request="selectRequest"
+        @dismiss="closeNavigator"
       />
       <button
         v-if="navigatorOpen"
@@ -206,7 +207,11 @@ function discardRequestTab(): void {
         :aria-label="t('header.closeNavigator')"
         @click="closeNavigator"
       ></button>
-      <div class="request-area">
+      <div
+        class="request-area"
+        :inert="navigatorOpen"
+        :aria-hidden="navigatorOpen ? 'true' : undefined"
+      >
         <RequestTabs
           :tabs="visibleRequestTabs"
           :active-tab-id="activeRequestTabId"
@@ -218,6 +223,7 @@ function discardRequestTab(): void {
           :request="activeTab?.request ?? null"
           :draft="activeTab?.draft ?? null"
           :execution="activeTab?.execution ?? null"
+          :tab-id="activeTab?.tabId ?? null"
           :temporary="activeTab?.request === null"
           :busy="activeTab?.busy ?? false"
           @change="

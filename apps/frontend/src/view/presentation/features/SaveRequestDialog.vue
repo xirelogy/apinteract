@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 import { X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type { TreeNode } from "@/model/contracts/backend";
 import type { RequestTab } from "@/model/domain/application";
+import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
+import FormField from "@/view/presentation/controls/FormField.vue";
+import IconButton from "@/view/presentation/controls/IconButton.vue";
+import TextInput from "@/view/presentation/controls/TextInput.vue";
+import DialogControl from "@/view/presentation/controls/dialog/DialogControl.vue";
+import { useTreeNavigation } from "@/view/presentation/controls/tree/useTreeNavigation";
 import CollectionPickerTreeNode from "./CollectionPickerTreeNode.vue";
 
 const props = defineProps<{
@@ -21,7 +27,7 @@ const emit = defineEmits<{
   save: [name: string, parentCollectionId: string];
 }>();
 
-const dialog = ref<HTMLDialogElement | null>(null);
+const open = ref(true);
 const name = ref(props.tab.draft.name);
 const collectionRoots = computed(() =>
   props.rootNodes.filter((node) => node.kind === "collection"),
@@ -39,19 +45,11 @@ const expandedCollectionIds = ref(
 const canSave = computed(
   () => name.value.trim() !== "" && parentCollectionId.value !== "",
 );
+const treeNavigation = useTreeNavigation();
 
-onMounted(() => dialog.value?.showModal());
-
-/** Closes the native save dialog. */
+/** Requests closure through the shared controlled dialog lifecycle. */
 function close(): void {
-  dialog.value?.close();
-}
-
-/** Closes the dialog only when its backdrop is selected. */
-function closeFromBackdrop(event: MouseEvent): void {
-  if (event.target === dialog.value) {
-    close();
-  }
+  open.value = false;
 }
 
 /** Emits a normalized saved-request destination. */
@@ -103,48 +101,49 @@ function collectionPath(
 </script>
 
 <template>
-  <dialog
-    ref="dialog"
+  <DialogControl
+    v-model:open="open"
     class="resource-dialog"
     aria-labelledby="save-request-title"
-    @click="closeFromBackdrop"
     @close="emit('close')"
   >
     <div class="resource-dialog-surface">
       <header class="resource-dialog-header">
         <h2 id="save-request-title">{{ t("request.saveDialog") }}</h2>
-        <button
-          class="icon-button"
-          type="button"
-          :title="t('common.actions.close')"
-          :aria-label="t('common.actions.close')"
+        <IconButton
+          :label="t('common.actions.close')"
           :disabled="busy"
           @click="close"
         >
           <X :size="18" aria-hidden="true" />
-        </button>
+        </IconButton>
       </header>
       <form class="resource-dialog-form" @submit.prevent="save">
-        <label class="input-field">
-          <span>{{ t("request.name") }}</span>
-          <input
+        <FormField
+          v-slot="{ controlId, describedBy, invalid }"
+          :label="t('request.name')"
+        >
+          <TextInput
+            :id="controlId"
             v-model="name"
-            class="text-input"
+            :aria-describedby="describedBy"
+            :invalid="invalid"
             :aria-label="t('request.savedName')"
             autocomplete="off"
             autofocus
             :disabled="busy"
           />
-        </label>
+        </FormField>
         <fieldset class="collection-picker-field">
           <legend>{{ t("collection.label") }}</legend>
-          <div
-            v-if="collectionRoots.length > 0"
-            class="collection-picker"
-            role="tree"
-            :aria-label="t('collection.destination')"
-          >
-            <ul class="workspace-tree-root" role="group">
+          <div v-if="collectionRoots.length > 0" class="collection-picker">
+            <ul
+              class="workspace-tree-root"
+              role="tree"
+              :aria-label="t('collection.destination')"
+              @focusin="treeNavigation.handleFocusIn"
+              @keydown="treeNavigation.handleKeydown"
+            >
               <CollectionPickerTreeNode
                 v-for="node in collectionRoots"
                 :key="node.nodeId"
@@ -153,6 +152,8 @@ function collectionPath(
                 :expanded-collection-ids="expandedCollectionIds"
                 :selected-collection-id="parentCollectionId"
                 :busy="busy"
+                :parent-node-id="null"
+                :level="1"
                 @select="parentCollectionId = $event"
                 @toggle="toggleCollection"
               />
@@ -163,23 +164,18 @@ function collectionPath(
           {{ t("collection.createBeforeSaving") }}
         </p>
         <footer class="resource-dialog-actions">
-          <button
-            class="secondary-button"
-            type="button"
-            :disabled="busy"
-            @click="close"
-          >
+          <ButtonControl variant="secondary" :disabled="busy" @click="close">
             {{ t("common.actions.cancel") }}
-          </button>
-          <button
-            class="primary-button"
+          </ButtonControl>
+          <ButtonControl
+            variant="primary"
             type="submit"
             :disabled="busy || !canSave"
           >
             {{ t("common.actions.save") }}
-          </button>
+          </ButtonControl>
         </footer>
       </form>
     </div>
-  </dialog>
+  </DialogControl>
 </template>

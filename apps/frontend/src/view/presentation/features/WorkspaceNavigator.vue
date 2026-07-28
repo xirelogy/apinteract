@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { FilePlus, FolderPlus, Plus } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type { TreeNode, WorkspaceSummary } from "@/model/contracts/backend";
+import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
+import { useTreeNavigation } from "@/view/presentation/controls/tree/useTreeNavigation";
 import CreateResourceDialog from "./CreateResourceDialog.vue";
 import WorkspaceTreeNode from "./WorkspaceTreeNode.vue";
 
@@ -19,6 +21,7 @@ const props = defineProps<{
   expandedCollectionIds: readonly string[];
   selectedRequestId: string | null;
   busy: boolean;
+  mobileOpen: boolean;
 }>();
 const { t } = useI18n();
 
@@ -30,8 +33,11 @@ const emit = defineEmits<{
   toggleCollection: [collectionId: string];
   createRequest: [parentCollectionId: string | null];
   selectRequest: [requestId: string];
+  dismiss: [];
 }>();
 
+const navigator = ref<HTMLElement | null>(null);
+let returnFocus: HTMLElement | null = null;
 const creationKind = ref<CreationKind | null>(null);
 const creationParentCollectionId = ref<string | null>(null);
 const workspaceOptions = computed(() =>
@@ -50,6 +56,71 @@ const creationContext = computed(() =>
     ? null
     : t("collection.inside", { name: creationParentName.value }),
 );
+const focusableNodeId = computed(
+  () =>
+    props.selectedRequestId ??
+    props.selectedCollectionId ??
+    props.rootNodes[0]?.nodeId ??
+    null,
+);
+const treeNavigation = useTreeNavigation();
+
+watch(
+  () => props.mobileOpen,
+  async (open) => {
+    if (open) {
+      returnFocus =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      await nextTick();
+      const initialFocus = focusableElements()[0] ?? navigator.value;
+      initialFocus?.focus();
+    } else {
+      returnFocus?.focus();
+      returnFocus = null;
+    }
+  },
+);
+
+onBeforeUnmount(() => returnFocus?.focus());
+
+/** Returns enabled focus targets owned by the modal mobile navigator. */
+function focusableElements(): HTMLElement[] {
+  return [
+    ...(navigator.value?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    ) ?? []),
+  ];
+}
+
+/** Contains keyboard focus and handles expected mobile modal dismissal. */
+function handleNavigatorKeydown(event: KeyboardEvent): void {
+  if (!props.mobileOpen) {
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    emit("dismiss");
+    return;
+  }
+  if (event.key !== "Tab") {
+    return;
+  }
+  const focusable = focusableElements();
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (first === undefined || last === undefined) {
+    event.preventDefault();
+    navigator.value?.focus();
+  } else if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
 
 /** Opens the creation dialog for one navigator resource type. */
 function openCreationDialog(
@@ -89,7 +160,16 @@ function findLoadedNodeName(nodeId: string): string | null {
 </script>
 
 <template>
-  <aside class="workspace-navigator" :aria-label="t('workspace.navigation')">
+  <aside
+    ref="navigator"
+    class="workspace-navigator"
+    :class="{ 'is-mobile-open': mobileOpen }"
+    :role="mobileOpen ? 'dialog' : undefined"
+    :aria-modal="mobileOpen ? 'true' : undefined"
+    :aria-label="t('workspace.navigation')"
+    :tabindex="mobileOpen ? -1 : undefined"
+    @keydown="handleNavigatorKeydown"
+  >
     <div class="navigator-section">
       <label class="navigator-heading" for="workspace-select">
         {{ t("workspace.label") }}
@@ -105,16 +185,13 @@ function findLoadedNodeName(nodeId: string): string | null {
           :disabled="busy"
           @update:model-value="emit('selectWorkspace', $event)"
         />
-        <button
-          class="icon-button"
-          type="button"
-          :title="t('workspace.create')"
-          :aria-label="t('workspace.create')"
+        <IconButton
+          :label="t('workspace.create')"
           :disabled="busy"
           @click="openCreationDialog('workspace')"
         >
           <Plus :size="17" aria-hidden="true" />
-        </button>
+        </IconButton>
       </div>
     </div>
 
@@ -122,30 +199,35 @@ function findLoadedNodeName(nodeId: string): string | null {
       <div class="section-heading">
         <span class="navigator-heading">{{ t("workspace.collections") }}</span>
         <div class="section-actions">
-          <button
-            class="icon-button compact-icon-button"
-            type="button"
-            :title="t('workspace.createRootCollection')"
-            :aria-label="t('workspace.createRootCollection')"
+          <IconButton
+            class="compact-icon-button"
+            size="compact"
+            :label="t('workspace.createRootCollection')"
             :disabled="busy"
             @click="openCreationDialog('collection')"
           >
             <FolderPlus :size="16" aria-hidden="true" />
-          </button>
-          <button
-            class="icon-button compact-icon-button"
-            type="button"
-            :title="t('workspace.createRequest')"
-            :aria-label="t('workspace.createRequest')"
+          </IconButton>
+          <IconButton
+            class="compact-icon-button"
+            size="compact"
+            :label="t('workspace.createRequest')"
             :disabled="busy || selectedCollectionId === null"
             @click="emit('createRequest', selectedCollectionId)"
           >
             <FilePlus :size="16" aria-hidden="true" />
-          </button>
+          </IconButton>
         </div>
       </div>
       <nav class="workspace-tree" :aria-label="t('workspace.tree')">
-        <ul v-if="rootNodes.length > 0" class="workspace-tree-root">
+        <ul
+          v-if="rootNodes.length > 0"
+          class="workspace-tree-root"
+          role="tree"
+          :aria-label="t('workspace.tree')"
+          @focusin="treeNavigation.handleFocusIn"
+          @keydown="treeNavigation.handleKeydown"
+        >
           <WorkspaceTreeNode
             v-for="node in rootNodes"
             :key="node.nodeId"
@@ -155,6 +237,9 @@ function findLoadedNodeName(nodeId: string): string | null {
             :selected-collection-id="selectedCollectionId"
             :selected-request-id="selectedRequestId"
             :busy="busy"
+            :focusable-node-id="focusableNodeId"
+            :parent-node-id="null"
+            :level="1"
             @create-collection="openCreationDialog('collection', $event)"
             @select-collection="emit('selectCollection', $event)"
             @toggle-collection="emit('toggleCollection', $event)"

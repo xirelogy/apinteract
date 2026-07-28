@@ -28,6 +28,7 @@ async function changeLocale(locale: string): Promise<void> {
     :model-value="translation.preference.value"
     :options="localeOptions"
     :label="t('common.language.label')"
+    density="compact"
     @update:model-value="changeLocale"
   >
     <template #selected="{ option }">

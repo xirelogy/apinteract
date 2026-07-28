@@ -46,6 +46,7 @@ a {
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
+textarea:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -53,9 +54,21 @@ a:focus-visible {
 
 button:disabled,
 input:disabled,
-select:disabled {
+select:disabled,
+textarea:disabled {
   cursor: not-allowed;
   opacity: 0.58;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto;
+    transition-duration: 0.01ms;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+  }
 }
 
 h1,

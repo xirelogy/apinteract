@@ -12,6 +12,9 @@ const props = defineProps<{
   selectedCollectionId: string | null;
   selectedRequestId: string | null;
   busy: boolean;
+  focusableNodeId: string | null;
+  parentNodeId: string | null;
+  level: number;
 }>();
 const { t } = useI18n();
 
@@ -42,6 +45,7 @@ const children = computed(
       <button
         class="tree-toggle-button"
         type="button"
+        tabindex="-1"
         :title="
           expanded
             ? t('collection.collapse', { name: node.name })
@@ -66,6 +70,14 @@ const children = computed(
       <button
         class="tree-node-main"
         type="button"
+        role="treeitem"
+        :aria-level="level"
+        :aria-expanded="expanded"
+        :aria-selected="node.nodeId === selectedCollectionId"
+        :tabindex="node.nodeId === focusableNodeId ? 0 : -1"
+        :data-tree-node-id="node.nodeId"
+        :data-tree-parent-id="parentNodeId ?? undefined"
+        :data-tree-text="node.name"
         :disabled="busy"
         @click="emit('selectCollection', node.nodeId)"
       >
@@ -90,6 +102,13 @@ const children = computed(
       class="workspace-tree-row request-tree-row"
       :class="{ 'is-selected': node.nodeId === selectedRequestId }"
       type="button"
+      role="treeitem"
+      :aria-level="level"
+      :aria-selected="node.nodeId === selectedRequestId"
+      :tabindex="node.nodeId === focusableNodeId ? 0 : -1"
+      :data-tree-node-id="node.nodeId"
+      :data-tree-parent-id="parentNodeId ?? undefined"
+      :data-tree-text="node.name"
       :disabled="busy"
       @click="emit('selectRequest', node.nodeId)"
     >
@@ -103,6 +122,7 @@ const children = computed(
     <ul
       v-if="node.kind === 'collection' && expanded"
       class="workspace-tree-children"
+      role="group"
     >
       <WorkspaceTreeNode
         v-for="child in children"
@@ -113,6 +133,9 @@ const children = computed(
         :selected-collection-id="selectedCollectionId"
         :selected-request-id="selectedRequestId"
         :busy="busy"
+        :focusable-node-id="focusableNodeId"
+        :parent-node-id="node.nodeId"
+        :level="level + 1"
         @create-collection="emit('createCollection', $event)"
         @select-collection="emit('selectCollection', $event)"
         @toggle-collection="emit('toggleCollection', $event)"

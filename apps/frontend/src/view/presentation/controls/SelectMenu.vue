@@ -12,6 +12,8 @@ import {
 import { Check, ChevronDown, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
+import IconButton from "./IconButton.vue";
+
 export interface SelectMenuOption {
   readonly value: string;
   readonly label: string;
@@ -26,11 +28,15 @@ const props = withDefaults(
     inputId?: string;
     placeholder?: string;
     disabled?: boolean;
+    density?: "compact" | "default";
+    mobilePresentation?: "fullscreen" | "popover";
   }>(),
   {
     inputId: "",
     placeholder: "",
     disabled: false,
+    density: "default",
+    mobilePresentation: "fullscreen",
   },
 );
 
@@ -41,17 +47,19 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 defineSlots<{
-  selected(props: { option: SelectMenuOption | null }): unknown;
-  option(props: { option: SelectMenuOption; selected: boolean }): unknown;
+  selected?(props: { option: SelectMenuOption | null }): unknown;
+  option?(props: { option: SelectMenuOption; selected: boolean }): unknown;
 }>();
 
 const root = ref<HTMLElement | null>(null);
 const trigger = ref<HTMLButtonElement | null>(null);
 const popup = ref<HTMLElement | null>(null);
-const open = ref(false);
+const open = defineModel<boolean>("open", { default: false });
 const positioned = ref(false);
 const activeIndex = ref(-1);
 const popupStyle = ref<CSSProperties>({});
+let typeaheadQuery = "";
+let typeaheadResetTimer: number | undefined;
 const generatedId = useId();
 const popupId = `select-menu-${generatedId}`;
 const selectedOption = computed(
@@ -72,12 +80,19 @@ onMounted(() => {
   document.addEventListener("pointerdown", closeFromOutside);
   window.addEventListener("resize", repositionMenu);
   window.addEventListener("scroll", closeFromScroll, true);
+  window.visualViewport?.addEventListener("resize", repositionMenu);
+  window.visualViewport?.addEventListener("scroll", repositionMenu);
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("pointerdown", closeFromOutside);
   window.removeEventListener("resize", repositionMenu);
   window.removeEventListener("scroll", closeFromScroll, true);
+  window.visualViewport?.removeEventListener("resize", repositionMenu);
+  window.visualViewport?.removeEventListener("scroll", repositionMenu);
+  if (typeaheadResetTimer !== undefined) {
+    window.clearTimeout(typeaheadResetTimer);
+  }
 });
 
 /** Opens the option surface and focuses the requested or selected option. */
@@ -131,8 +146,16 @@ function selectOption(option: SelectMenuOption): void {
   closeMenu(true);
 }
 
-/** Opens the menu at an edge option when arrow keys target the trigger. */
+/** Opens the menu from trigger navigation or printable typeahead input. */
 function handleTriggerKeydown(event: KeyboardEvent): void {
+  if (event.key.length === 1 && event.key.trim() !== "") {
+    const match = updateTypeahead(event.key);
+    if (match !== -1) {
+      event.preventDefault();
+      void openMenu(match);
+    }
+    return;
+  }
   if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
     return;
   }
@@ -141,7 +164,7 @@ function handleTriggerKeydown(event: KeyboardEvent): void {
   void openMenu(selectableIndex(start, event.key === "ArrowDown" ? 1 : -1));
 }
 
-/** Provides listbox navigation, dismissal, and single-key typeahead. */
+/** Provides listbox navigation, dismissal, and accumulated typeahead. */
 function handlePopupKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape") {
     event.preventDefault();
@@ -166,7 +189,7 @@ function handlePopupKeydown(event: KeyboardEvent): void {
     return;
   }
   if (event.key.length === 1 && event.key.trim() !== "") {
-    const match = typeaheadIndex(event.key);
+    const match = updateTypeahead(event.key);
     if (match !== -1) {
       event.preventDefault();
       focusOption(match);
@@ -190,10 +213,32 @@ function selectableIndex(start: number, direction: 1 | -1): number {
   return -1;
 }
 
-/** Finds the next enabled option beginning with one typed character. */
-function typeaheadIndex(character: string): number {
-  const query = character.toLocaleLowerCase();
-  for (let offset = 1; offset <= props.options.length; offset += 1) {
+/** Updates the buffered typeahead query and returns its next enabled match. */
+function updateTypeahead(character: string): number {
+  if (typeaheadResetTimer !== undefined) {
+    window.clearTimeout(typeaheadResetTimer);
+  }
+  typeaheadQuery += character.toLocaleLowerCase();
+  let match = typeaheadIndex(typeaheadQuery);
+  if (match === -1 && typeaheadQuery.length > 1) {
+    typeaheadQuery = character.toLocaleLowerCase();
+    match = typeaheadIndex(typeaheadQuery);
+  }
+  typeaheadResetTimer = window.setTimeout(() => {
+    typeaheadQuery = "";
+    typeaheadResetTimer = undefined;
+  }, 700);
+  return match;
+}
+
+/** Finds the next enabled option beginning with the buffered query. */
+function typeaheadIndex(query: string): number {
+  const firstOffset = query.length > 1 ? 0 : 1;
+  for (
+    let offset = firstOffset;
+    offset < props.options.length + firstOffset;
+    offset += 1
+  ) {
     const index = (activeIndex.value + offset) % props.options.length;
     const option = props.options[index];
     if (
@@ -263,9 +308,10 @@ function positionMenu(): void {
 
 /** Reports whether the app's explicit mobile presentation breakpoint applies. */
 function usesMobilePresentation(): boolean {
-  return typeof window.matchMedia === "function"
+  return props.mobilePresentation === "fullscreen" &&
+    typeof window.matchMedia === "function"
     ? window.matchMedia("(width <= 47.5rem)").matches
-    : window.innerWidth <= 760;
+    : props.mobilePresentation === "fullscreen" && window.innerWidth <= 760;
 }
 
 /** Repositions an open menu when viewport dimensions change. */
@@ -299,12 +345,20 @@ function closeFromScroll(event: Event): void {
 </script>
 
 <template>
-  <div ref="root" class="select-menu">
+  <div
+    ref="root"
+    class="select-menu"
+    :data-state="open ? 'open' : 'closed'"
+    :data-disabled="disabled ? '' : undefined"
+    :data-density="density"
+  >
     <button
       :id="inputId === '' ? undefined : inputId"
       ref="trigger"
       class="select-menu-trigger"
       type="button"
+      role="combobox"
+      aria-autocomplete="none"
       aria-haspopup="listbox"
       :aria-label="label"
       :aria-expanded="open"
@@ -333,21 +387,22 @@ function closeFromScroll(event: Event): void {
         :id="popupId"
         ref="popup"
         class="select-menu-popup"
-        :class="{ 'is-positioned': positioned }"
+        :class="{
+          'is-positioned': positioned,
+          'select-menu-popup-popover-mobile': mobilePresentation === 'popover',
+        }"
+        data-state="open"
         :style="popupStyle"
         @keydown="handlePopupKeydown"
       >
         <header class="select-menu-mobile-header">
           <h2>{{ label }}</h2>
-          <button
-            class="icon-button"
-            type="button"
-            :title="t('common.actions.close')"
-            :aria-label="t('common.actions.close')"
+          <IconButton
+            :label="t('common.actions.close')"
             @click="closeMenu(true)"
           >
             <X :size="18" aria-hidden="true" />
-          </button>
+          </IconButton>
         </header>
         <div class="select-menu-options" role="listbox" :aria-label="label">
           <button

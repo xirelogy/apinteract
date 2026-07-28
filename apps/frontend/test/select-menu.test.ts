@@ -45,6 +45,7 @@ describe("SelectMenu", () => {
       .get(".select-menu-trigger")
       .trigger("keydown", { key: "ArrowDown" });
     await flushPromises();
+    expect(wrapper.emitted("update:open")).toEqual([[true]]);
 
     const options = [
       ...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]'),
@@ -62,6 +63,74 @@ describe("SelectMenu", () => {
     expect(wrapper.emitted("update:modelValue")).toEqual([["second"]]);
     expect(document.body.querySelector(".select-menu-popup")).toBeNull();
 
+    wrapper.unmount();
+  });
+
+  it("supports buffered typeahead and skips disabled options", async () => {
+    const wrapper = mount(SelectMenu, {
+      attachTo: document.body,
+      props: {
+        modelValue: "apple",
+        label: "Fruit",
+        options: [
+          { value: "apple", label: "Apple" },
+          { value: "banana", label: "Banana", disabled: true },
+          { value: "blueberry", label: "Blueberry" },
+          { value: "blackberry", label: "Blackberry" },
+        ],
+      },
+      global: {
+        plugins: [i18n],
+      },
+    });
+
+    await wrapper.get(".select-menu-trigger").trigger("click");
+    await flushPromises();
+    const options = [
+      ...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ];
+    options[0]?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "b", bubbles: true }),
+    );
+    await flushPromises();
+    expect(document.activeElement).toBe(options[2]);
+    options[2]?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "l", bubbles: true }),
+    );
+    await flushPromises();
+    expect(document.activeElement).toBe(options[2]);
+
+    options[2]?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+    );
+    await flushPromises();
+    expect(document.activeElement).toBe(options[3]);
+
+    wrapper.unmount();
+  });
+
+  it("opens a matching option from closed-trigger typeahead", async () => {
+    const wrapper = mount(SelectMenu, {
+      attachTo: document.body,
+      props: {
+        modelValue: "apple",
+        label: "Fruit",
+        options: [
+          { value: "apple", label: "Apple" },
+          { value: "banana", label: "Banana" },
+        ],
+      },
+      global: {
+        plugins: [i18n],
+      },
+    });
+
+    const trigger = wrapper.get('[role="combobox"]');
+    await trigger.trigger("keydown", { key: "b" });
+    await flushPromises();
+
+    expect(trigger.attributes("aria-expanded")).toBe("true");
+    expect(document.activeElement?.textContent).toContain("Banana");
     wrapper.unmount();
   });
 });

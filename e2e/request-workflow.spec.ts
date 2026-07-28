@@ -34,7 +34,7 @@ test("creates, restores, and sends the first workspace request", async ({
   });
   const collection = page
     .getByRole("navigation", { name: "Workspace tree" })
-    .getByRole("button", { name: collectionName, exact: true });
+    .getByRole("treeitem", { name: collectionName, exact: true });
   await expect(collection).toBeVisible();
   await collection.click();
 
@@ -50,7 +50,7 @@ test("creates, restores, and sends the first workspace request", async ({
     .getByLabel("Collection name")
     .fill(subcollectionName);
   await subcollectionDialog.getByRole("button", { name: "Create" }).click();
-  const subcollection = workspaceTree.getByRole("button", {
+  const subcollection = workspaceTree.getByRole("treeitem", {
     name: subcollectionName,
     exact: true,
   });
@@ -68,11 +68,17 @@ test("creates, restores, and sends the first workspace request", async ({
   await page.getByLabel("Request name", { exact: true }).fill(requestName);
   await page.getByLabel("Target URL").fill(targetUrl);
   await selectMenuOption(page, "HTTP method", "POST");
-  await page.getByRole("button", { name: "Add parameter" }).click();
+  const addParameterButton = page.getByRole("button", {
+    name: "Add parameter",
+  });
+  await expect(addParameterButton).toHaveCSS("white-space", "nowrap");
+  await addParameterButton.click();
   await page.getByLabel("Query name 1").fill("source");
   await page.getByLabel("Query value 1").fill(suffix);
   await page.getByRole("tab", { name: "Headers 0" }).click();
-  await page.getByRole("button", { name: "Add header" }).click();
+  const addHeaderButton = page.getByRole("button", { name: "Add header" });
+  await expect(addHeaderButton).toHaveCSS("white-space", "nowrap");
+  await addHeaderButton.click();
   await page.getByLabel("Header name 1").fill("X-Fixture-Request");
   await page.getByLabel("Header value 1").fill("browser-test");
   await page.getByRole("tab", { name: "Body" }).click();
@@ -93,7 +99,7 @@ test("creates, restores, and sends the first workspace request", async ({
   );
   await expect(draftRevision).toHaveText("Temporary");
   await expect(
-    workspaceTree.getByRole("button", {
+    workspaceTree.getByRole("treeitem", {
       name: `POST ${requestName}`,
       exact: true,
     }),
@@ -111,14 +117,15 @@ test("creates, restores, and sends the first workspace request", async ({
   await page.getByRole("button", { name: "New temporary request" }).click();
   await expect(page.locator(".request-tab")).toHaveCount(2);
   if (mobile) {
-    const requestMenuTrigger = page.getByRole("button", {
-      name: /Current request:/u,
+    const requestMenuTrigger = page.getByRole("combobox", {
+      name: "Open requests",
     });
     await requestMenuTrigger.click();
-    const requestMenu = page.getByRole("menu", { name: "Open requests" });
-    await expect(requestMenu.getByRole("menuitemradio")).toHaveCount(2);
+    const requestMenu = page.getByRole("listbox", { name: "Open requests" });
+    await expect(requestMenu.getByRole("option")).toHaveCount(2);
+    const requestPopup = requestMenu.locator("..");
     const triggerBox = await requestMenuTrigger.boundingBox();
-    const menuBox = await requestMenu.boundingBox();
+    const menuBox = await requestPopup.boundingBox();
     expect(triggerBox).not.toBeNull();
     expect(menuBox).not.toBeNull();
     expect(
@@ -133,11 +140,15 @@ test("creates, restores, and sends the first workspace request", async ({
     .getByLabel("Request name", { exact: true })
     .fill(`Scratch ${suffix}`);
   if (mobile) {
-    await expect(
-      page.getByRole("button", {
-        name: new RegExp(`Current request: GET Scratch ${suffix}`, "u"),
-      }),
-    ).toBeVisible();
+    const requestMenuTrigger = page.getByRole("combobox", {
+      name: "Open requests",
+    });
+    await expect(requestMenuTrigger.locator(".request-tab-method")).toHaveText(
+      "GET",
+    );
+    await expect(requestMenuTrigger.locator(".request-tab-name")).toHaveText(
+      `Scratch ${suffix}`,
+    );
   }
   await page.getByLabel("Target URL").fill("http://127.0.0.1:8090/hello");
   await page.getByRole("button", { name: `Close Scratch ${suffix}` }).click();
@@ -163,13 +174,13 @@ test("creates, restores, and sends the first workspace request", async ({
   const destinationTree = saveDialog.getByRole("tree", {
     name: "Destination collection",
   });
-  const destinationCollection = destinationTree.getByRole("button", {
+  const destinationCollection = destinationTree.getByRole("treeitem", {
     name: subcollectionName,
     exact: true,
   });
   await expect(destinationCollection.locator("..")).toHaveClass(/is-selected/u);
   await saveDialog.getByRole("button", { name: "Save" }).click();
-  const requestNode = workspaceTree.getByRole("button", {
+  const requestNode = workspaceTree.getByRole("treeitem", {
     name: `POST ${requestName}`,
     exact: true,
   });
@@ -181,13 +192,13 @@ test("creates, restores, and sends the first workspace request", async ({
   await openNavigator(page, mobile);
   await selectMenuOption(page, "Workspace", workspaceName);
   await workspaceTree
-    .getByRole("button", { name: collectionName, exact: true })
+    .getByRole("treeitem", { name: collectionName, exact: true })
     .click();
   await workspaceTree
-    .getByRole("button", { name: subcollectionName, exact: true })
+    .getByRole("treeitem", { name: subcollectionName, exact: true })
     .click();
   await workspaceTree
-    .getByRole("button", { name: `POST ${requestName}`, exact: true })
+    .getByRole("treeitem", { name: `POST ${requestName}`, exact: true })
     .click();
   if (mobile) {
     await expect(

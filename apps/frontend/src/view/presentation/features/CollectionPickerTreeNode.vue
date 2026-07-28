@@ -11,6 +11,8 @@ const props = defineProps<{
   expandedCollectionIds: readonly string[];
   selectedCollectionId: string;
   busy: boolean;
+  parentNodeId: string | null;
+  level: number;
 }>();
 const { t } = useI18n();
 
@@ -30,7 +32,7 @@ const children = computed(() =>
 </script>
 
 <template>
-  <li class="workspace-tree-node" role="treeitem" :aria-expanded="expanded">
+  <li class="workspace-tree-node">
     <div
       class="workspace-tree-row collection-picker-row"
       :class="{ 'is-selected': node.nodeId === selectedCollectionId }"
@@ -38,6 +40,7 @@ const children = computed(() =>
       <button
         class="tree-toggle-button"
         type="button"
+        tabindex="-1"
         :title="
           expanded
             ? t('collection.collapse', { name: node.name })
@@ -61,6 +64,14 @@ const children = computed(() =>
       <button
         class="tree-node-main"
         type="button"
+        role="treeitem"
+        :aria-level="level"
+        :aria-expanded="expanded"
+        :aria-selected="node.nodeId === selectedCollectionId"
+        :tabindex="node.nodeId === selectedCollectionId ? 0 : -1"
+        :data-tree-node-id="node.nodeId"
+        :data-tree-parent-id="parentNodeId ?? undefined"
+        :data-tree-text="node.name"
         :disabled="busy"
         @click="emit('select', node.nodeId)"
       >
@@ -83,6 +94,8 @@ const children = computed(() =>
         :expanded-collection-ids="expandedCollectionIds"
         :selected-collection-id="selectedCollectionId"
         :busy="busy"
+        :parent-node-id="node.nodeId"
+        :level="level + 1"
         @select="emit('select', $event)"
         @toggle="emit('toggle', $event)"
       />

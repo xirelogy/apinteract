@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { ref } from "vue";
 import { X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
+
+import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
+import IconButton from "@/view/presentation/controls/IconButton.vue";
+import AlertDialog from "@/view/presentation/controls/dialog/AlertDialog.vue";
 
 defineProps<{
   requestName: string;
@@ -13,19 +17,17 @@ const emit = defineEmits<{
   discard: [];
 }>();
 
-const dialog = ref<HTMLDialogElement | null>(null);
-
-onMounted(() => dialog.value?.showModal());
+const open = ref(true);
 
 /** Closes the discard confirmation without changing tab state. */
 function close(): void {
-  dialog.value?.close();
+  open.value = false;
 }
 </script>
 
 <template>
-  <dialog
-    ref="dialog"
+  <AlertDialog
+    v-model:open="open"
     class="resource-dialog discard-dialog"
     aria-labelledby="discard-dialog-title"
     @close="emit('close')"
@@ -33,27 +35,21 @@ function close(): void {
     <div class="resource-dialog-surface">
       <header class="resource-dialog-header">
         <h2 id="discard-dialog-title">{{ t("request.discard.title") }}</h2>
-        <button
-          class="icon-button"
-          type="button"
-          :title="t('common.actions.close')"
-          :aria-label="t('common.actions.close')"
-          @click="close"
-        >
+        <IconButton :label="t('common.actions.close')" @click="close">
           <X :size="18" aria-hidden="true" />
-        </button>
+        </IconButton>
       </header>
       <div class="discard-dialog-content">
         <p>{{ t("request.discard.message", { name: requestName }) }}</p>
         <footer class="resource-dialog-actions">
-          <button class="secondary-button" type="button" @click="close">
+          <ButtonControl variant="secondary" autofocus @click="close">
             {{ t("request.discard.keepEditing") }}
-          </button>
-          <button class="danger-button" type="button" @click="emit('discard')">
+          </ButtonControl>
+          <ButtonControl variant="danger" @click="emit('discard')">
             {{ t("common.actions.discard") }}
-          </button>
+          </ButtonControl>
         </footer>
       </div>
     </div>
-  </dialog>
+  </AlertDialog>
 </template>

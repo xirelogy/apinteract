@@ -10,13 +10,23 @@ import type {
   RequestView,
 } from "@/model/contracts/backend";
 import type { RequestDraftInput } from "@/model/domain/application";
+import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
+import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
+import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
+import TextArea from "@/view/presentation/controls/TextArea.vue";
+import TextInput from "@/view/presentation/controls/TextInput.vue";
+import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
+import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
+import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
+import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 import ResponsePanel from "./ResponsePanel.vue";
 
 const props = defineProps<{
   request: RequestView | null;
   draft: RequestDraftInput | null;
   execution: ExecutionView | null;
+  tabId: string | null;
   temporary: boolean;
   busy: boolean;
 }>();
@@ -160,7 +170,12 @@ function activeFieldKind(): string {
 </script>
 
 <template>
-  <main class="request-workbench">
+  <main
+    id="request-workbench"
+    class="request-workbench"
+    role="tabpanel"
+    :aria-labelledby="tabId === null ? undefined : `request-tab-${tabId}`"
+  >
     <div v-if="draft === null" class="empty-workbench">
       <h1>{{ t("request.selectTitle") }}</h1>
       <p>{{ t("request.selectDescription") }}</p>
@@ -169,7 +184,7 @@ function activeFieldKind(): string {
       <section class="request-editor" aria-labelledby="request-name">
         <div class="request-title-row">
           <div class="request-title">
-            <input
+            <TextInput
               id="request-name"
               v-model="name"
               class="request-name-input"
@@ -182,24 +197,26 @@ function activeFieldKind(): string {
             </span>
           </div>
           <div class="command-bar">
-            <button
-              class="secondary-button"
-              type="button"
+            <ButtonControl
+              variant="secondary"
               :disabled="busy || !canSave"
               @click="emit('save', currentDraft())"
             >
-              <Save :size="16" aria-hidden="true" />
+              <template #leading>
+                <Save :size="16" aria-hidden="true" />
+              </template>
               {{ t("common.actions.save") }}
-            </button>
-            <button
-              class="primary-button"
-              type="button"
+            </ButtonControl>
+            <ButtonControl
+              variant="primary"
               :disabled="busy || !validTarget"
               @click="emit('execute', currentDraft())"
             >
-              <Play :size="16" aria-hidden="true" />
+              <template #leading>
+                <Play :size="16" aria-hidden="true" />
+              </template>
               {{ t("request.send") }}
-            </button>
+            </ButtonControl>
           </div>
         </div>
 
@@ -216,9 +233,10 @@ function activeFieldKind(): string {
               <span class="method-option">{{ option.label }}</span>
             </template>
           </SelectMenu>
-          <input
+          <TextInput
             v-model="targetUrl"
             class="url-input"
+            font="mono"
             :aria-label="t('request.targetUrl')"
             inputmode="url"
             autocomplete="off"
@@ -228,132 +246,142 @@ function activeFieldKind(): string {
           />
         </div>
 
-        <div
-          class="request-tabs"
-          role="tablist"
-          :aria-label="t('request.requestSettings')"
+        <TabsRoot
+          v-model="activeTab"
+          class="request-settings-tabs"
+          activation-mode="manual"
         >
-          <button
-            v-for="tab in requestTabs"
-            :key="tab"
-            class="tab-button"
-            :class="{ 'is-active': activeTab === tab }"
-            type="button"
-            role="tab"
-            :aria-selected="activeTab === tab"
-            @click="activeTab = tab"
-          >
-            {{ requestTabLabel(tab) }}
-            <span v-if="tab !== 'body'" class="tab-count">
-              {{ tab === "query" ? query.length : headers.length }}
-            </span>
-          </button>
-        </div>
-
-        <div v-if="activeTab !== 'body'" class="request-fields">
-          <div class="request-field-heading" aria-hidden="true">
-            <span></span>
-            <span>{{ t("common.fields.name") }}</span>
-            <span>{{ t("common.fields.value") }}</span>
-            <span></span>
-          </div>
-          <div
-            v-for="(field, index) in activeTab === 'query' ? query : headers"
-            :key="index"
-            class="request-field-row"
-          >
-            <input
-              v-model="field.enabled"
-              type="checkbox"
-              :aria-label="
-                t('request.enableField', {
-                  kind: activeFieldKind(),
-                  index: index + 1,
-                })
-              "
-              :disabled="busy"
-              @change="emitChange"
-            />
-            <input
-              v-model="field.name"
-              class="field-cell-input"
-              :aria-label="
-                t(
-                  activeTab === 'query'
-                    ? 'request.queryName'
-                    : 'request.headerName',
-                  { index: index + 1 },
-                )
-              "
-              :placeholder="t('common.fields.name')"
-              autocomplete="off"
-              spellcheck="false"
-              :disabled="busy"
-              @input="emitChange"
-            />
-            <input
-              v-model="field.value"
-              class="field-cell-input"
-              :aria-label="
-                t(
-                  activeTab === 'query'
-                    ? 'request.queryValue'
-                    : 'request.headerValue',
-                  { index: index + 1 },
-                )
-              "
-              :placeholder="t('common.fields.value')"
-              autocomplete="off"
-              spellcheck="false"
-              :disabled="busy"
-              @input="emitChange"
-            />
-            <button
-              class="icon-button compact-icon-button"
-              type="button"
-              :aria-label="
-                t('request.removeField', {
-                  kind: activeFieldKind(),
-                  index: index + 1,
-                })
-              "
-              :title="
-                t('request.removeFieldTitle', {
-                  kind: activeFieldKind(),
-                })
-              "
-              :disabled="busy"
-              @click="removeActiveField(index)"
+          <TabsList class="request-tabs" :label="t('request.requestSettings')">
+            <TabsTrigger
+              v-for="tab in requestTabs"
+              :key="tab"
+              class="tab-button"
+              :value="tab"
             >
-              <Trash2 :size="15" aria-hidden="true" />
-            </button>
-          </div>
-          <button
-            class="add-field-button"
-            type="button"
-            :disabled="busy"
-            @click="addActiveField"
-          >
-            <Plus :size="15" aria-hidden="true" />
-            {{
-              activeTab === "query"
-                ? t("request.addParameter")
-                : t("request.addHeader")
-            }}
-          </button>
-        </div>
+              {{ requestTabLabel(tab) }}
+              <span v-if="tab !== 'body'" class="tab-count">
+                {{ tab === "query" ? query.length : headers.length }}
+              </span>
+            </TabsTrigger>
+          </TabsList>
 
-        <div v-else class="request-body-editor">
-          <textarea
-            v-model="body"
-            class="raw-body-input"
-            :aria-label="t('request.rawBody')"
-            :placeholder="t('request.rawBody')"
-            spellcheck="false"
-            :disabled="busy"
-            @input="emitChange"
-          ></textarea>
-        </div>
+          <TabsPanel
+            v-if="activeTab !== 'body'"
+            :value="activeTab"
+            class="request-fields"
+          >
+            <div class="request-field-heading" aria-hidden="true">
+              <span></span>
+              <span>{{ t("common.fields.name") }}</span>
+              <span>{{ t("common.fields.value") }}</span>
+              <span></span>
+            </div>
+            <div
+              v-for="(field, index) in activeTab === 'query' ? query : headers"
+              :key="index"
+              class="request-field-row"
+            >
+              <CheckboxControl
+                v-model="field.enabled"
+                visually-hidden-label
+                :label="
+                  t('request.enableField', {
+                    kind: activeFieldKind(),
+                    index: index + 1,
+                  })
+                "
+                :disabled="busy"
+                @change="emitChange"
+              />
+              <TextInput
+                v-model="field.name"
+                class="field-cell-input"
+                density="compact"
+                font="mono"
+                :aria-label="
+                  t(
+                    activeTab === 'query'
+                      ? 'request.queryName'
+                      : 'request.headerName',
+                    { index: index + 1 },
+                  )
+                "
+                :placeholder="t('common.fields.name')"
+                autocomplete="off"
+                spellcheck="false"
+                :disabled="busy"
+                @input="emitChange"
+              />
+              <TextInput
+                v-model="field.value"
+                class="field-cell-input"
+                density="compact"
+                font="mono"
+                :aria-label="
+                  t(
+                    activeTab === 'query'
+                      ? 'request.queryValue'
+                      : 'request.headerValue',
+                    { index: index + 1 },
+                  )
+                "
+                :placeholder="t('common.fields.value')"
+                autocomplete="off"
+                spellcheck="false"
+                :disabled="busy"
+                @input="emitChange"
+              />
+              <IconButton
+                class="compact-icon-button"
+                size="compact"
+                :label="
+                  t('request.removeField', {
+                    kind: activeFieldKind(),
+                    index: index + 1,
+                  })
+                "
+                :title="
+                  t('request.removeFieldTitle', {
+                    kind: activeFieldKind(),
+                  })
+                "
+                :disabled="busy"
+                @click="removeActiveField(index)"
+              >
+                <Trash2 :size="15" aria-hidden="true" />
+              </IconButton>
+            </div>
+            <ButtonControl
+              class="add-field-button"
+              variant="ghost"
+              size="compact"
+              :disabled="busy"
+              @click="addActiveField"
+            >
+              <template #leading>
+                <Plus :size="15" aria-hidden="true" />
+              </template>
+              {{
+                activeTab === "query"
+                  ? t("request.addParameter")
+                  : t("request.addHeader")
+              }}
+            </ButtonControl>
+          </TabsPanel>
+
+          <TabsPanel v-else value="body" class="request-body-editor">
+            <TextArea
+              v-model="body"
+              class="raw-body-input"
+              font="mono"
+              :aria-label="t('request.rawBody')"
+              :placeholder="t('request.rawBody')"
+              spellcheck="false"
+              :disabled="busy"
+              @input="emitChange"
+            />
+          </TabsPanel>
+        </TabsRoot>
       </section>
       <ResponsePanel :execution="execution" />
     </template>

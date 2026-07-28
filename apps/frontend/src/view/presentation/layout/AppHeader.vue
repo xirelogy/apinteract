@@ -2,6 +2,7 @@
 import { LogOut, Menu, Radio, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
+import IconButton from "@/view/presentation/controls/IconButton.vue";
 import LocaleSelector from "@/view/presentation/features/LocaleSelector.vue";
 
 const { t } = useI18n();
@@ -21,13 +22,9 @@ defineEmits<{
 <template>
   <header class="app-header">
     <div class="header-leading">
-      <button
-        class="icon-button navigator-toggle-button"
-        type="button"
-        :title="
-          navigatorOpen ? t('header.closeNavigator') : t('header.openNavigator')
-        "
-        :aria-label="
+      <IconButton
+        class="navigator-toggle-button"
+        :label="
           navigatorOpen ? t('header.closeNavigator') : t('header.openNavigator')
         "
         :aria-expanded="navigatorOpen"
@@ -36,7 +33,7 @@ defineEmits<{
       >
         <X v-if="navigatorOpen" :size="19" aria-hidden="true" />
         <Menu v-else :size="19" aria-hidden="true" />
-      </button>
+      </IconButton>
       <div class="brand-lockup">
         <span class="brand-mark" aria-hidden="true">API</span>
         <span class="brand-name">APInteract</span>
@@ -49,15 +46,12 @@ defineEmits<{
       </span>
       <LocaleSelector />
       <span class="user-name">{{ displayName }}</span>
-      <button
-        class="icon-button"
-        type="button"
-        :title="t('header.logout', { name: displayName })"
-        :aria-label="t('header.logout', { name: displayName })"
+      <IconButton
+        :label="t('header.logout', { name: displayName })"
         @click="$emit('logout')"
       >
         <LogOut :size="18" aria-hidden="true" />
-      </button>
+      </IconButton>
     </div>
   </header>
 </template>

@@ -4,6 +4,10 @@ import { Download, LoaderCircle } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type { ExecutionView } from "@/model/contracts/backend";
+import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
+import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
+import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
+import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 
 defineProps<{
   execution: ExecutionView | null;
@@ -59,36 +63,18 @@ function formatBytes(count: number): string {
       <strong>{{ execution.error.code }}</strong>
       <span>{{ execution.error.message }}</span>
     </div>
-    <template v-else>
-      <div
-        class="response-tabs"
-        role="tablist"
-        :aria-label="t('response.details')"
-      >
-        <button
-          class="tab-button"
-          :class="{ 'is-active': activeTab === 'raw' }"
-          type="button"
-          role="tab"
-          :aria-selected="activeTab === 'raw'"
-          @click="activeTab = 'raw'"
-        >
+    <TabsRoot v-else v-model="activeTab" activation-mode="manual">
+      <TabsList class="response-tabs" :label="t('response.details')">
+        <TabsTrigger class="tab-button" value="raw">
           {{ t("response.raw") }}
-        </button>
-        <button
-          class="tab-button"
-          :class="{ 'is-active': activeTab === 'headers' }"
-          type="button"
-          role="tab"
-          :aria-selected="activeTab === 'headers'"
-          @click="activeTab = 'headers'"
-        >
+        </TabsTrigger>
+        <TabsTrigger class="tab-button" value="headers">
           {{ t("response.headers") }}
           <span class="tab-count">{{ execution.headers?.length ?? 0 }}</span>
-        </button>
-      </div>
-      <div class="response-content">
-        <div v-if="activeTab === 'headers'" class="response-headers">
+        </TabsTrigger>
+      </TabsList>
+      <TabsPanel value="headers" class="response-content">
+        <div class="response-headers">
           <div
             v-for="(header, index) in execution.headers ?? []"
             :key="`${index}-${header.name}`"
@@ -105,13 +91,15 @@ function formatBytes(count: number): string {
             }}
           </div>
         </div>
-        <pre v-else class="body-preview">{{
+      </TabsPanel>
+      <TabsPanel value="raw" class="response-content">
+        <pre class="body-preview">{{
           execution.bodyPreview ??
           (execution.state === "running"
             ? t("response.waitingBody")
             : t("response.binaryBody"))
         }}</pre>
-      </div>
-    </template>
+      </TabsPanel>
+    </TabsRoot>
   </section>
 </template>
