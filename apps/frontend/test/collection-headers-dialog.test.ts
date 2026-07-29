@@ -74,6 +74,7 @@ describe("CollectionHeadersDialog", () => {
           parentCollectionId: null,
           name: "Examples",
           headers: [],
+          effectiveHeaders: [],
           revision: 0,
         },
         busy: false,

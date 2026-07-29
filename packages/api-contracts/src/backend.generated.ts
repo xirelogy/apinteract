@@ -454,11 +454,14 @@ export interface components {
       parentCollectionId: components["schemas"]["CollectionId"] | null;
       name: string;
       headers: components["schemas"]["RequestField"][];
+      /** @description Effective enabled headers after applying ancestor and local collection profiles. */
+      effectiveHeaders: components["schemas"]["RequestField"][];
       revision: number;
     };
     RequestView: {
       requestId: components["schemas"]["RequestId"];
       workspaceId: components["schemas"]["WorkspaceId"];
+      parentCollectionId: components["schemas"]["CollectionId"] | null;
       name: string;
       method: components["schemas"]["HttpMethod"];
       /** @constant */
@@ -469,6 +472,8 @@ export interface components {
       queryMode: "structured";
       query: components["schemas"]["RequestField"][];
       headers: components["schemas"]["RequestField"][];
+      /** @description Effective enabled headers inherited from the request's collection ancestry before request-local overrides. */
+      inheritedHeaders: components["schemas"]["RequestField"][];
       body: string;
       draftRevision: number;
     };

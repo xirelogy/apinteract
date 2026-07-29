@@ -45,12 +45,15 @@ export interface CollectionView {
   readonly parentCollectionId: EntityId | null;
   readonly name: string;
   readonly headers: readonly RequestField[];
+  /** Contains the enabled root-to-current header overlay for presentation. */
+  readonly effectiveHeaders: readonly RequestField[];
   readonly revision: number;
 }
 
 export interface RequestView {
   readonly requestId: EntityId;
   readonly workspaceId: EntityId;
+  readonly parentCollectionId: EntityId | null;
   readonly name: string;
   readonly method: HttpMethod;
   readonly targetMode: "absolute";
@@ -58,6 +61,8 @@ export interface RequestView {
   readonly queryMode: "structured";
   readonly query: readonly RequestField[];
   readonly headers: readonly RequestField[];
+  /** Contains effective collection headers before request-local overrides. */
+  readonly inheritedHeaders: readonly RequestField[];
   readonly body: string;
   readonly draftRevision: number;
 }
@@ -80,6 +85,32 @@ export interface PreparedExecution {
   readonly revisionId?: EntityId;
   readonly request: ExecutionRequestSnapshot;
   readonly createdAt: number;
+}
+
+/** Represents the persistence projection required to build a request view. */
+interface RequestRow {
+  readonly request_id: Uint8Array;
+  readonly workspace_id: Uint8Array;
+  readonly parent_collection_id: Uint8Array | null;
+  readonly name: string;
+  readonly method: HttpMethod;
+  readonly target_mode: "absolute";
+  readonly target_url: string;
+  readonly query_mode: "structured";
+  readonly query_json: string;
+  readonly headers_json: string;
+  readonly body_text: string;
+  readonly draft_revision: number;
+}
+
+/** Represents the persistence projection required to build a collection view. */
+interface CollectionRow {
+  readonly id: Uint8Array;
+  readonly workspace_id: Uint8Array;
+  readonly parent_collection_id: Uint8Array | null;
+  readonly name: string;
+  readonly profile_revision: number | null;
+  readonly headers_json: string | null;
 }
 
 /** Raised when an update targets a stale persisted draft revision. */
@@ -196,7 +227,7 @@ export class RequestService {
       userId,
       bytesToId(row.workspace_id),
     );
-    return mapCollection(row);
+    return this.#collectionView(this.#database, row);
   }
 
   /** Replaces a collection's common headers using optimistic concurrency. */
@@ -219,7 +250,7 @@ export class RequestService {
         );
       }
       if ((row.headers_json ?? "[]") === headersJson) {
-        return mapCollection(row);
+        return this.#collectionView(transaction, row);
       }
       const revision = currentRevision + 1;
       const now = Date.now();
@@ -269,6 +300,11 @@ export class RequestService {
       return {
         ...mapCollection(row),
         headers: normalizedHeaders,
+        effectiveHeaders: await this.#resolveHeaders(
+          transaction,
+          row.parent_collection_id,
+          normalizedHeaders,
+        ),
         revision,
       };
     });
@@ -340,9 +376,15 @@ export class RequestService {
         workspaceId,
         data: { requestId, parentCollectionId },
       });
+      const inheritedHeaders = await this.#resolveHeaders(
+        transaction,
+        parentCollectionId === null ? null : idToBytes(parentCollectionId),
+        [],
+      );
       return {
         requestId,
         workspaceId,
+        parentCollectionId,
         name: normalizedName,
         method: content.method,
         targetMode: "absolute",
@@ -350,6 +392,7 @@ export class RequestService {
         queryMode: "structured",
         query: content.query,
         headers: content.headers,
+        inheritedHeaders,
         body: content.body,
         draftRevision: 0,
       };
@@ -364,7 +407,7 @@ export class RequestService {
       userId,
       bytesToId(row.workspace_id),
     );
-    return mapRequest(row);
+    return this.#requestView(this.#database, row);
   }
 
   /** Updates a request draft only when its expected revision is current. */
@@ -404,7 +447,7 @@ export class RequestService {
         row.headers_json === headersJson &&
         row.body_text === content.body
       ) {
-        return mapRequest(row);
+        return this.#requestView(transaction, row);
       }
       await transaction
         .updateTable("workspace_tree_nodes")
@@ -432,7 +475,7 @@ export class RequestService {
         data: { requestId, draftRevision: expectedDraftRevision + 1 },
       });
       return {
-        ...mapRequest(row),
+        ...(await this.#requestView(transaction, row)),
         name: normalizedName,
         method: content.method,
         targetUrl: content.targetUrl,
@@ -674,6 +717,37 @@ export class RequestService {
     return row;
   }
 
+  /** Builds a collection view with its current effective ancestor overlay. */
+  async #collectionView(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    row: CollectionRow,
+  ): Promise<CollectionView> {
+    const collection = mapCollection(row);
+    return {
+      ...collection,
+      effectiveHeaders: await this.#resolveHeaders(
+        database,
+        row.parent_collection_id,
+        collection.headers,
+      ),
+    };
+  }
+
+  /** Builds a request view with effective collection headers kept read-only. */
+  async #requestView(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    row: RequestRow,
+  ): Promise<RequestView> {
+    return {
+      ...mapRequest(row),
+      inheritedHeaders: await this.#resolveHeaders(
+        database,
+        row.parent_collection_id,
+        [],
+      ),
+    };
+  }
+
   /** Resolves collection header layers root-first and overlays request headers. */
   async #resolveHeaders(
     database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
@@ -877,6 +951,7 @@ function normalizeExecutionInput(
 function mapRequest(row: {
   readonly request_id: Uint8Array;
   readonly workspace_id: Uint8Array;
+  readonly parent_collection_id: Uint8Array | null;
   readonly name: string;
   readonly method: HttpMethod;
   readonly target_mode: "absolute";
@@ -886,10 +961,14 @@ function mapRequest(row: {
   readonly headers_json: string;
   readonly body_text: string;
   readonly draft_revision: number;
-}): RequestView {
+}): Omit<RequestView, "inheritedHeaders"> {
   return {
     requestId: bytesToId(row.request_id),
     workspaceId: bytesToId(row.workspace_id),
+    parentCollectionId:
+      row.parent_collection_id === null
+        ? null
+        : bytesToId(row.parent_collection_id),
     name: row.name,
     method: row.method,
     targetMode: row.target_mode,
@@ -910,7 +989,7 @@ function mapCollection(row: {
   readonly name: string;
   readonly profile_revision: number | null;
   readonly headers_json: string | null;
-}): CollectionView {
+}): Omit<CollectionView, "effectiveHeaders"> {
   return {
     collectionId: bytesToId(row.id),
     workspaceId: bytesToId(row.workspace_id),

@@ -144,6 +144,7 @@ export class ApplicationController {
     ]);
     store.selectedCollectionId = collectionId;
     store.selectedCollection = collection;
+    store.activeRequestTabId = null;
     store.expandedCollectionIds = includeOnce(
       store.expandedCollectionIds,
       collectionId,
@@ -198,7 +199,7 @@ export class ApplicationController {
     await this.#run(() => this.#reloadCollection(workspaceId, collectionId));
   }
 
-  /** Expands an unloaded collection or collapses its currently visible branch. */
+  /** Expands an unloaded collection without selecting it, or collapses it. */
   async toggleCollection(collectionId: string): Promise<void> {
     const store = useApplicationStore();
     if (store.expandedCollectionIds.includes(collectionId)) {
@@ -207,7 +208,14 @@ export class ApplicationController {
       );
       return;
     }
-    await this.selectCollection(collectionId);
+    const workspaceId = requireSelection(store.selectedWorkspaceId);
+    if (store.collectionChildren[collectionId] === undefined) {
+      await this.#run(() => this.#reloadCollection(workspaceId, collectionId));
+    }
+    store.expandedCollectionIds = includeOnce(
+      store.expandedCollectionIds,
+      collectionId,
+    );
   }
 
   /** Opens a new unsaved request tab in the selected workspace. */
@@ -221,6 +229,12 @@ export class ApplicationController {
       draft: emptyDraft(),
       baseline: null,
       pendingParentCollectionId: parentCollectionId,
+      inheritedHeaders:
+        store.selectedCollectionId === parentCollectionId
+          ? (store.selectedCollection?.effectiveHeaders.map((field) => ({
+              ...field,
+            })) ?? [])
+          : [],
       execution: null,
       busy: false,
     };
@@ -279,6 +293,9 @@ export class ApplicationController {
         draft,
         baseline: cloneDraft(draft),
         pendingParentCollectionId: null,
+        inheritedHeaders: request.inheritedHeaders.map((field) => ({
+          ...field,
+        })),
         execution: null,
         busy: false,
       };
@@ -348,6 +365,9 @@ export class ApplicationController {
         draft: savedDraft,
         baseline: cloneDraft(savedDraft),
         pendingParentCollectionId: null,
+        inheritedHeaders: request.inheritedHeaders.map((field) => ({
+          ...field,
+        })),
       }));
       await this.#reloadCollection(tab.workspaceId, parentCollectionId);
     });

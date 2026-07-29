@@ -41,9 +41,7 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(collection).toBeVisible();
   await collection.click();
 
-  await page
-    .getByRole("button", { name: "Edit selected collection headers" })
-    .click();
+  await openCollectionAction(page, collectionName, "Edit headers");
   const headersDialog = page.getByRole("dialog", {
     name: `Common headers for ${collectionName}`,
   });
@@ -54,11 +52,7 @@ test("creates, restores, and sends the first workspace request", async ({
   await headersDialog.getByLabel("Header value 1").fill(`root-${suffix}`);
   await headersDialog.getByRole("button", { name: "Save" }).click();
 
-  await page
-    .getByRole("button", {
-      name: `Create subcollection in ${collectionName}`,
-    })
-    .click();
+  await openCollectionAction(page, collectionName, "New subcollection");
   const subcollectionDialog = page.getByRole("dialog", {
     name: "New subcollection",
   });
@@ -73,11 +67,7 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(subcollection).toBeVisible();
   await subcollection.click();
 
-  await page
-    .getByRole("button", {
-      name: `Create subcollection in ${subcollectionName}`,
-    })
-    .click();
+  await openCollectionAction(page, subcollectionName, "New subcollection");
   const leafDialog = page.getByRole("dialog", {
     name: "New subcollection",
   });
@@ -90,7 +80,7 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(leafCollection).toBeVisible();
   await leafCollection.click();
 
-  await page.getByRole("button", { name: "Create request" }).click();
+  await openCollectionAction(page, leafCollectionName, "New request");
   if (mobile) {
     await expect(
       page.getByRole("button", { name: "Open workspace navigator" }),
@@ -108,7 +98,11 @@ test("creates, restores, and sends the first workspace request", async ({
   await addParameterButton.click();
   await page.getByLabel("Query name 1").fill("source");
   await page.getByLabel("Query value 1").fill(suffix);
-  await page.getByRole("tab", { name: "Headers 0" }).click();
+  await page.getByRole("tab", { name: "Headers 1" }).click();
+  await expect(page.getByLabel("Inherited header name 1")).toHaveValue(
+    "X-Inherited",
+  );
+  await expect(page.getByLabel("Inherited header name 1")).toBeDisabled();
   const addHeaderButton = page.getByRole("button", { name: "Add header" });
   await expect(addHeaderButton).toHaveCSS("white-space", "nowrap");
   await addHeaderButton.click();
@@ -262,11 +256,45 @@ test("creates, restores, and sends the first workspace request", async ({
     "data-value",
     "POST",
   );
+  await page.getByRole("tab", { name: "Headers 2" }).click();
+  await expect(page.getByLabel("Inherited header name 1")).toHaveValue(
+    "X-Inherited",
+  );
+  await expect(page.getByLabel("Inherited header name 1")).toBeDisabled();
+  await expect(page.getByLabel("Inherited header value 1")).toHaveValue(
+    `root-${suffix}`,
+  );
   await page.getByRole("tab", { name: "Body" }).click();
   await expect(page.getByLabel("Raw request body")).toHaveValue(
     `payload-${suffix}`,
   );
   await expect(draftRevision).toHaveText("Draft 0");
+
+  await openNavigator(page, mobile);
+  const selectedLeaf = workspaceTree.getByRole("treeitem", {
+    name: leafCollectionName,
+    exact: true,
+  });
+  await selectedLeaf.click();
+  await expect(selectedLeaf.locator("..")).toHaveClass(/is-selected/u);
+  await expect(
+    workspaceTree.getByRole("treeitem", {
+      name: `POST ${requestName}`,
+      exact: true,
+    }),
+  ).not.toHaveClass(/is-selected/u);
+  if (mobile) {
+    await page
+      .getByRole("button", { name: "Close workspace navigator" })
+      .click();
+  }
+  await expect(
+    page.getByRole("heading", { name: "Select a request" }),
+  ).toBeVisible();
+  await openNavigator(page, mobile);
+  await workspaceTree
+    .getByRole("treeitem", { name: `POST ${requestName}`, exact: true })
+    .click();
 
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByRole("status")).toHaveText("In progress");
@@ -301,6 +329,20 @@ test("creates, restores, and sends the first workspace request", async ({
     freshRequestName,
   );
 });
+
+/** Opens one row-local collection action through its accessible menu. */
+async function openCollectionAction(
+  page: Page,
+  collectionName: string,
+  actionName: string,
+): Promise<void> {
+  const label = `More actions for ${collectionName}`;
+  await page.getByRole("button", { name: label }).click();
+  await page
+    .getByRole("menu", { name: label })
+    .getByRole("menuitem", { name: actionName, exact: true })
+    .click();
+}
 
 /** Authenticates the isolated browser-test administrator. */
 async function login(page: Page): Promise<void> {

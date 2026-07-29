@@ -1,9 +1,19 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ChevronRight, Folder, FolderOpen, FolderPlus } from "@lucide/vue";
+import {
+  ChevronRight,
+  FilePlus,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  Settings2,
+} from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type { TreeNode } from "@/model/contracts/backend";
+import ActionMenu, {
+  type ActionMenuItem,
+} from "@/view/presentation/controls/ActionMenu.vue";
 
 const props = defineProps<{
   node: TreeNode;
@@ -20,6 +30,8 @@ const { t } = useI18n();
 
 const emit = defineEmits<{
   createCollection: [parentCollectionId: string];
+  createRequest: [parentCollectionId: string];
+  editCollectionHeaders: [collectionId: string];
   selectCollection: [collectionId: string];
   toggleCollection: [collectionId: string];
   selectRequest: [requestId: string];
@@ -33,6 +45,31 @@ const expanded = computed(
 const children = computed(
   () => props.collectionChildren[props.node.nodeId] ?? [],
 );
+const collectionActions = computed<readonly ActionMenuItem[]>(() => [
+  {
+    value: "create-request",
+    label: t("collection.newRequest"),
+  },
+  {
+    value: "create-subcollection",
+    label: t("collection.newSubcollection"),
+  },
+  {
+    value: "edit-headers",
+    label: t("collection.editHeadersShort"),
+  },
+]);
+
+/** Routes a row-local collection command to its domain-specific event. */
+function selectCollectionAction(value: string): void {
+  if (value === "create-request") {
+    emit("createRequest", props.node.nodeId);
+  } else if (value === "create-subcollection") {
+    emit("createCollection", props.node.nodeId);
+  } else if (value === "edit-headers") {
+    emit("editCollectionHeaders", props.node.nodeId);
+  }
+}
 </script>
 
 <template>
@@ -85,16 +122,35 @@ const children = computed(
         <Folder v-else :size="16" aria-hidden="true" />
         <span>{{ node.name }}</span>
       </button>
-      <button
-        class="tree-node-action"
-        type="button"
-        :title="t('collection.createSubcollection', { name: node.name })"
-        :aria-label="t('collection.createSubcollection', { name: node.name })"
+      <ActionMenu
+        class="tree-node-action-menu"
+        :label="t('collection.moreActions', { name: node.name })"
+        :items="collectionActions"
         :disabled="busy"
-        @click="emit('createCollection', node.nodeId)"
+        @select="selectCollectionAction"
       >
-        <FolderPlus :size="15" aria-hidden="true" />
-      </button>
+        <template #item="{ item }">
+          <FilePlus
+            v-if="item.value === 'create-request'"
+            class="action-menu-item-icon"
+            :size="16"
+            aria-hidden="true"
+          />
+          <FolderPlus
+            v-else-if="item.value === 'create-subcollection'"
+            class="action-menu-item-icon"
+            :size="16"
+            aria-hidden="true"
+          />
+          <Settings2
+            v-else
+            class="action-menu-item-icon"
+            :size="16"
+            aria-hidden="true"
+          />
+          <span>{{ item.label }}</span>
+        </template>
+      </ActionMenu>
     </div>
 
     <button
@@ -137,6 +193,8 @@ const children = computed(
         :parent-node-id="node.nodeId"
         :level="level + 1"
         @create-collection="emit('createCollection', $event)"
+        @create-request="emit('createRequest', $event)"
+        @edit-collection-headers="emit('editCollectionHeaders', $event)"
         @select-collection="emit('selectCollection', $event)"
         @toggle-collection="emit('toggleCollection', $event)"
         @select-request="emit('selectRequest', $event)"

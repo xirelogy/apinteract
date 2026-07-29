@@ -135,6 +135,28 @@ describe("collection header inheritance", () => {
       ]);
 
       await expect(
+        requests.getCollection(userId, leaf.nodeId),
+      ).resolves.toMatchObject({
+        effectiveHeaders: [
+          { name: "X-Root", value: "root", enabled: true },
+          { name: "x-shared", value: "child-1", enabled: true },
+          { name: "X-SHARED", value: "child-2", enabled: true },
+          { name: "X-Leaf", value: "leaf", enabled: true },
+        ],
+      });
+      await expect(
+        requests.get(userId, request.requestId),
+      ).resolves.toMatchObject({
+        parentCollectionId: leaf.nodeId,
+        inheritedHeaders: [
+          { name: "X-Root", value: "root", enabled: true },
+          { name: "x-shared", value: "child-1", enabled: true },
+          { name: "X-SHARED", value: "child-2", enabled: true },
+          { name: "X-Leaf", value: "leaf", enabled: true },
+        ],
+      });
+
+      await expect(
         requests.updateCollectionHeaders(userId, root.nodeId, 0, []),
       ).rejects.toBeInstanceOf(CollectionProfileConflictError);
       await expect(

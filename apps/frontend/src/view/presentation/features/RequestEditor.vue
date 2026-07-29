@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Play, Plus, Save, Trash2 } from "@lucide/vue";
+import { Lock, Play, Plus, Save, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -28,6 +28,7 @@ const props = defineProps<{
   execution: ExecutionView | null;
   tabId: string | null;
   temporary: boolean;
+  inheritedHeaders: readonly RequestField[];
   busy: boolean;
 }>();
 const { t } = useI18n();
@@ -263,7 +264,11 @@ function activeFieldKind(): string {
             >
               {{ requestTabLabel(tab) }}
               <span v-if="tab !== 'body'" class="tab-count">
-                {{ tab === "query" ? query.length : headers.length }}
+                {{
+                  tab === "query"
+                    ? query.length
+                    : headers.length + inheritedHeaders.length
+                }}
               </span>
             </TabsTrigger>
           </TabsList>
@@ -278,6 +283,50 @@ function activeFieldKind(): string {
               <span>{{ t("common.fields.name") }}</span>
               <span>{{ t("common.fields.value") }}</span>
               <span></span>
+            </div>
+            <div
+              v-for="(field, index) in activeTab === 'headers'
+                ? inheritedHeaders
+                : []"
+              :key="`inherited-${index}`"
+              class="request-field-row inherited-header-row"
+            >
+              <CheckboxControl
+                :model-value="field.enabled"
+                visually-hidden-label
+                :label="
+                  t('request.inheritedHeaderEnabled', { index: index + 1 })
+                "
+                disabled
+              />
+              <TextInput
+                :model-value="field.name"
+                class="field-cell-input"
+                density="compact"
+                font="mono"
+                :aria-label="
+                  t('request.inheritedHeaderName', { index: index + 1 })
+                "
+                disabled
+              />
+              <TextInput
+                :model-value="field.value"
+                class="field-cell-input"
+                density="compact"
+                font="mono"
+                :aria-label="
+                  t('request.inheritedHeaderValue', { index: index + 1 })
+                "
+                disabled
+              />
+              <span
+                class="inherited-header-indicator"
+                role="img"
+                :aria-label="t('request.inherited')"
+                :title="t('request.inherited')"
+              >
+                <Lock :size="14" aria-hidden="true" />
+              </span>
             </div>
             <div
               v-for="(field, index) in activeTab === 'query' ? query : headers"

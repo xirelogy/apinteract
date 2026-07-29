@@ -37,6 +37,7 @@ export interface RequestTab {
   readonly draft: RequestDraftInput;
   readonly baseline: RequestDraftInput | null;
   readonly pendingParentCollectionId: string | null;
+  readonly inheritedHeaders: readonly RequestField[];
   readonly execution: ExecutionView | null;
   readonly busy: boolean;
 }

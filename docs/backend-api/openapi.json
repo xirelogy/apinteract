@@ -1188,6 +1188,7 @@
           "parentCollectionId",
           "name",
           "headers",
+          "effectiveHeaders",
           "revision"
         ],
         "properties": {
@@ -1216,6 +1217,13 @@
               "$ref": "#/components/schemas/RequestField"
             }
           },
+          "effectiveHeaders": {
+            "type": "array",
+            "description": "Effective enabled headers after applying ancestor and local collection profiles.",
+            "items": {
+              "$ref": "#/components/schemas/RequestField"
+            }
+          },
           "revision": {
             "type": "integer",
             "minimum": 0
@@ -1228,6 +1236,7 @@
         "required": [
           "requestId",
           "workspaceId",
+          "parentCollectionId",
           "name",
           "method",
           "targetMode",
@@ -1235,6 +1244,7 @@
           "queryMode",
           "query",
           "headers",
+          "inheritedHeaders",
           "body",
           "draftRevision"
         ],
@@ -1244,6 +1254,16 @@
           },
           "workspaceId": {
             "$ref": "#/components/schemas/WorkspaceId"
+          },
+          "parentCollectionId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CollectionId"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "name": {
             "type": "string"
@@ -1271,6 +1291,13 @@
           },
           "headers": {
             "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestField"
+            }
+          },
+          "inheritedHeaders": {
+            "type": "array",
+            "description": "Effective enabled headers inherited from the request's collection ancestry before request-local overrides.",
             "items": {
               "$ref": "#/components/schemas/RequestField"
             }

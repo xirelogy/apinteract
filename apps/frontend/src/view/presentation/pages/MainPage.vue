@@ -102,10 +102,24 @@ function createTemporaryRequest(
   closeNavigator();
 }
 
+/** Selects a collection before opening a temporary request inside it. */
+async function createRequestInCollection(collectionId: string): Promise<void> {
+  if (selectedCollectionId.value !== collectionId) {
+    await controller.selectCollection(collectionId);
+  }
+  createTemporaryRequest(collectionId);
+}
+
 /** Selects a request and reveals its tab after closing the mobile drawer. */
 async function selectRequest(requestId: string): Promise<void> {
   await controller.selectRequest(requestId);
   closeNavigator();
+}
+
+/** Selects a collection and opens its common-header editor. */
+async function editCollectionHeaders(collectionId: string): Promise<void> {
+  await controller.selectCollection(collectionId);
+  collectionHeadersOpen.value = true;
 }
 
 /** Saves a tab or asks for a temporary request destination. */
@@ -234,8 +248,8 @@ function discardRequestTab(): void {
         "
         @select-collection="controller.selectCollection($event)"
         @toggle-collection="controller.toggleCollection($event)"
-        @create-request="createTemporaryRequest"
-        @edit-collection-headers="collectionHeadersOpen = true"
+        @create-request="createRequestInCollection"
+        @edit-collection-headers="editCollectionHeaders"
         @select-request="selectRequest"
         @dismiss="closeNavigator"
       />
@@ -264,6 +278,7 @@ function discardRequestTab(): void {
           :execution="activeTab?.execution ?? null"
           :tab-id="activeTab?.tabId ?? null"
           :temporary="activeTab?.request === null"
+          :inherited-headers="activeTab?.inheritedHeaders ?? []"
           :busy="activeTab?.busy ?? false"
           @change="
             activeTab && controller.updateRequestDraft(activeTab.tabId, $event)

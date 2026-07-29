@@ -443,7 +443,7 @@
 
 .tree-toggle-button,
 .tree-node-main,
-.tree-node-action {
+.tree-node-action-menu {
   display: inline-flex;
   align-items: center;
   min-width: 0;
@@ -456,7 +456,7 @@
 }
 
 .tree-toggle-button,
-.tree-node-action {
+.tree-node-action-menu {
   justify-content: center;
   color: var(--text-secondary);
 }
@@ -474,7 +474,7 @@
   white-space: nowrap;
 }
 
-.tree-node-action:hover,
+.tree-node-action-menu:hover,
 .tree-toggle-button:hover {
   color: var(--text-primary);
 }
@@ -647,6 +647,17 @@
   justify-self: center;
 }
 
+.inherited-header-row {
+  color: var(--text-secondary);
+}
+
+.inherited-header-indicator {
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  color: var(--text-secondary);
+}
+
 .field-cell-input {
   min-width: 0;
   min-height: var(--control-height-compact);
@@ -656,6 +667,12 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
   background: var(--surface-primary);
+}
+
+.inherited-header-row .field-cell-input:disabled {
+  opacity: 1;
+  color: var(--text-secondary);
+  background: var(--surface-secondary);
 }
 
 .add-field-button {
