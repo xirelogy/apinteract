@@ -48,8 +48,12 @@ test("creates, restores, and sends the first workspace request", async ({
   await headersDialog
     .getByRole("button", { name: "Add common header" })
     .click();
-  await headersDialog.getByLabel("Header name 1").fill("X-Inherited");
-  await headersDialog.getByLabel("Header value 1").fill(`root-${suffix}`);
+  await headersDialog
+    .getByLabel("Header name 1", { exact: true })
+    .fill("X-Inherited");
+  await headersDialog
+    .getByLabel("Header value 1", { exact: true })
+    .fill(`root-${suffix}`);
   await headersDialog.getByRole("button", { name: "Save" }).click();
 
   await openCollectionAction(page, collectionName, "New subcollection");
@@ -106,8 +110,10 @@ test("creates, restores, and sends the first workspace request", async ({
   const addHeaderButton = page.getByRole("button", { name: "Add header" });
   await expect(addHeaderButton).toHaveCSS("white-space", "nowrap");
   await addHeaderButton.click();
-  await page.getByLabel("Header name 1").fill("X-Fixture-Request");
-  await page.getByLabel("Header value 1").fill("browser-test");
+  await page
+    .getByLabel("Header name 1", { exact: true })
+    .fill("X-Fixture-Request");
+  await page.getByLabel("Header value 1", { exact: true }).fill("browser-test");
   await page.getByRole("tab", { name: "Body" }).click();
   await page.getByLabel("Raw request body").fill(`payload-${suffix}`);
   await page.getByRole("button", { name: "Send" }).click();
@@ -284,9 +290,7 @@ test("creates, restores, and sends the first workspace request", async ({
     }),
   ).not.toHaveClass(/is-selected/u);
   if (mobile) {
-    await page
-      .getByRole("button", { name: "Close workspace navigator" })
-      .click();
+    await page.getByTitle("Close workspace navigator", { exact: true }).click();
   }
   await expect(
     page.getByRole("heading", { name: "Select a request" }),
