@@ -1,0 +1,31 @@
+name: apinteract-aio
+
+services:
+  apinteract:
+    image: apinteract/aio:local
+    build:
+      context: ../..
+      dockerfile: deploy/aio/Dockerfile
+      args:
+        APT_MIRROR_URL: "${APT_MIRROR_URL:-}"
+        APINTERACT_VERSION: "${APINTERACT_VERSION:-0.0.0}"
+        APINTERACT_SOURCE_COMMIT: "${APINTERACT_SOURCE_COMMIT:-unknown}"
+    init: false
+    read_only: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${APINTERACT_AIO_BIND_ADDRESS:-127.0.0.1}:${APINTERACT_AIO_PORT:-8080}:8080"
+    tmpfs:
+      # s6-overlay starts its supervised service tree from /run/s6.
+      - /run:size=16m,mode=0755,exec
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - apinteract-data:/data
+      - apinteract-cache:/cache
+
+volumes:
+  apinteract-data:
+  apinteract-cache:

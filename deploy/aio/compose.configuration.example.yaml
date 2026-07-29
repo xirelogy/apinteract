@@ -1,0 +1,4 @@
+services:
+  apinteract:
+    volumes:
+      - ./configuration:/etc/apinteract:ro

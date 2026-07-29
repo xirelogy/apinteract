@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 
 import { createApplication } from "./bootstrap/application.js";
 import { loadBackendConfiguration } from "./config.js";
+import { InstanceAlreadyInitializedError } from "./identity/identity-service.js";
 
 const [area, command, ...commandArguments] = process.argv.slice(2);
 if (area !== "admin" || (command !== "init" && command !== "reset-password")) {
@@ -27,13 +28,22 @@ if (area !== "admin" || (command !== "init" && command !== "reset-password")) {
   const application = await createApplication(configuration);
   try {
     if (command === "init") {
-      const user = await application.identity.initializeAdministrator(
-        values.username,
-        values["display-name"],
-        password,
-      );
-      await application.audit.publishPending();
-      stdout.write(`Initialized administrator ${user.username}.\n`);
+      try {
+        const user = await application.identity.initializeAdministrator(
+          values.username,
+          values["display-name"],
+          password,
+        );
+        await application.audit.publishPending();
+        stdout.write(`Initialized administrator ${user.username}.\n`);
+      } catch (cause) {
+        if (!(cause instanceof InstanceAlreadyInitializedError)) {
+          throw cause;
+        }
+        // Re-running deployment initialization must not replace credentials or
+        // turn an already healthy instance into a failed rollout.
+        stdout.write("APInteract is already initialized.\n");
+      }
     } else {
       if (values.user === undefined) {
         throw new Error("--user is required for reset-password");

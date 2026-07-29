@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="$(cd -- "${script_directory}/../.." && pwd)"
+compose_file="${repository_root}/deploy/aio/compose.yaml"
+compose=(docker compose --file "${compose_file}")
+export APINTERACT_SOURCE_COMMIT="${APINTERACT_SOURCE_COMMIT:-$(git -C "${repository_root}" rev-parse --verify HEAD)}"
+
+usage() {
+  cat <<'USAGE'
+Usage: deploy/scripts/aio <command>
+
+Commands:
+  build       Build the production-style all-in-one image
+  up          Build and start APInteract in the background
+  down        Stop and remove the AIO container and network; preserve volumes
+  ps          Show AIO container status
+  logs        Follow backend, proxy, and supervisor output
+  init-admin  Interactively initialize the first administrator
+  verify      Run isolated build, restart, persistence, and failure checks
+  config      Print the resolved Compose configuration
+USAGE
+}
+
+command="${1:-}"
+case "${command}" in
+  build)
+    "${compose[@]}" build apinteract
+    ;;
+  up)
+    "${compose[@]}" up --detach --build apinteract
+    ;;
+  down)
+    "${compose[@]}" down
+    ;;
+  ps)
+    "${compose[@]}" ps
+    ;;
+  logs)
+    "${compose[@]}" logs --follow apinteract
+    ;;
+  init-admin)
+    "${compose[@]}" exec --user 10001:10001 apinteract \
+      node /opt/apinteract/backend/dist/cli.js admin init \
+      --config /run/apinteract/backend.yaml
+    ;;
+  verify)
+    "${repository_root}/deploy/aio/verify"
+    ;;
+  config)
+    "${compose[@]}" config
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

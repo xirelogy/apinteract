@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="$(cd -- "${script_directory}/../.." && pwd)"
+project_name="apinteract-aio-verification-$$"
+host_port="$((20000 + ($$ % 20000)))"
+password="AIO-$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')!"
+compose=(
+  docker compose
+  --project-name "${project_name}"
+  --file "${script_directory}/compose.yaml"
+  --file "${script_directory}/compose.verify.yaml"
+)
+
+wait_for_health() {
+  local attempt
+  for attempt in $(seq 1 90); do
+    if "${compose[@]}" exec --no-TTY apinteract \
+      node /opt/apinteract/runtime/healthcheck.mjs >/dev/null 2>&1; then
+      return
+    fi
+    sleep 1
+  done
+  "${compose[@]}" logs apinteract
+  printf 'AIO did not become ready.\n' >&2
+  exit 1
+}
+
+wait_for_proxy_unavailable() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if "${compose[@]}" exec --no-TTY apinteract node --input-type=module \
+      --eval 'const response = await fetch("http://127.0.0.1:8080/health"); process.exit(response.status === 503 ? 0 : 1)' \
+      >/dev/null 2>&1; then
+      return
+    fi
+    sleep 1
+  done
+  printf 'Backend health did not report local proxy unavailability.\n' >&2
+  exit 1
+}
+
+cleanup() {
+  "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+export APINTERACT_AIO_PORT="${host_port}"
+export APINTERACT_SOURCE_COMMIT="$(git -C "${repository_root}" rev-parse --verify HEAD)"
+
+"${compose[@]}" build apinteract
+"${compose[@]}" up --detach target apinteract
+wait_for_health
+
+printf '%s\n' "${password}" | "${compose[@]}" exec --no-TTY --user 10001:10001 apinteract \
+  node /opt/apinteract/backend/dist/cli.js admin init \
+  --config /run/apinteract/backend.yaml
+printf '%s\n' "${password}" | "${compose[@]}" exec --no-TTY --user 10001:10001 apinteract \
+  node /opt/apinteract/backend/dist/cli.js admin init \
+  --config /run/apinteract/backend.yaml
+
+state="$({
+  printf '%s\n' "${password}" | "${compose[@]}" exec --no-TTY --user 10001:10001 apinteract \
+    node /opt/apinteract/runtime/verify-runtime.mjs --phase create
+} | tail -n 1)"
+if [[ -z "${state}" ]]; then
+  printf 'AIO verification did not return persistence state.\n' >&2
+  exit 1
+fi
+
+"${compose[@]}" restart apinteract
+wait_for_health
+
+printf '%s\n' "${password}" | "${compose[@]}" exec --no-TTY --user 10001:10001 apinteract \
+  node /opt/apinteract/runtime/verify-runtime.mjs \
+  --phase restore \
+  --state "${state}"
+
+printf '%s\n' "${password}" | "${compose[@]}" exec --no-TTY --user 10001:10001 apinteract \
+  node /opt/apinteract/runtime/verify-runtime.mjs --phase failure
+
+"${compose[@]}" exec --no-TTY apinteract \
+  node /opt/apinteract/runtime/verify-processes.mjs
+
+"${compose[@]}" exec --no-TTY apinteract \
+  /command/s6-svc -p /run/service/proxy
+wait_for_proxy_unavailable
+"${compose[@]}" exec --no-TTY apinteract \
+  /command/s6-svc -c /run/service/proxy
+wait_for_health
+
+"${compose[@]}" stop --timeout 45 apinteract
+"${compose[@]}" start apinteract
+wait_for_health
+
+printf '%s\n' "${password}" | "${compose[@]}" exec --no-TTY --user 10001:10001 apinteract \
+  node /opt/apinteract/runtime/verify-runtime.mjs \
+  --phase restore \
+  --state "${state}"
+
+printf 'AIO build, health, failure, shutdown, and restart verification passed.\n'

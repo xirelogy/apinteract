@@ -22,7 +22,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0 && stylelint \"apps/frontend/src/**/*.css\"",
     "source-docs:check": "node tooling/check-source-documentation.mjs",
-    "test": "pnpm -r --if-present test",
+    "test": "pnpm -r --if-present test && node --test deploy/aio/runtime/*.test.mjs",
     "test:e2e": "playwright test",
     "typecheck": "pnpm contracts:generate && pnpm -r --if-present typecheck"
   },

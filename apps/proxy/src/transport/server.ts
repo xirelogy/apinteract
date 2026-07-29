@@ -75,7 +75,12 @@ function problem(
 export function createProxyServer(
   configuration: ProxyConfiguration,
 ): FastifyInstance {
-  const server = Fastify({ logger: true });
+  const server = Fastify({
+    logger: {
+      level: "info",
+      base: { component: "proxy" },
+    },
+  });
   const executions = new ExecutionService(
     configuration.cache.path,
     configuration.cache.retentionMs,

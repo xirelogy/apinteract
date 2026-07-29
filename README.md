@@ -11,9 +11,10 @@ proprietary services.
 
 ## Project Status
 
-APInteract is currently in the product and architecture design stage. The
-repository structure, component contracts, security model, and technology
-choices are being defined before implementation begins.
+APInteract currently has an architectural walking skeleton spanning its Vue
+frontend, backend, local request proxy, authentication, persistence, and
+request-execution path. It is not release-ready; product capabilities and
+operational hardening remain under active development.
 
 ## Direction
 
@@ -50,6 +51,10 @@ The detailed boundaries and contracts are still under design.
 The public [architecture overview](docs/architecture/README.md) describes
 component ownership, request execution, communication planes, and deployment
 topologies.
+
+The source-built [all-in-one deployment](deploy/aio/README.md) packages the
+compiled frontend, backend, and loopback proxy in one container for local
+self-hosting and full-boundary verification.
 
 ## Documentation
 

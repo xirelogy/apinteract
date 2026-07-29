@@ -1,0 +1,4 @@
+#!/command/with-contenv sh
+exec s6-setuidgid apinteract \
+  node /opt/apinteract/backend/dist/main.js \
+  --config /run/apinteract/backend.yaml

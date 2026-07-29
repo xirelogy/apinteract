@@ -14,9 +14,12 @@ This directory contains the public documentation for APInteract.
   and supporting documentation.
 - [Plugins](plugins/README.md): common registration, sensitivity reporting,
   lifecycle, and domain-specific extension contracts.
+- [All-in-one deployment](../deploy/aio/README.md): source-built container
+  operation, storage, configuration, and verification.
 
 Security, user, and contributor documentation follows as those designs become
 stable enough to publish.
 
-APInteract is currently in the design stage. Published documents distinguish
-confirmed behavior from proposals that remain subject to change.
+APInteract is in active walking-skeleton implementation. Published documents
+distinguish implemented contracts from proposals that remain subject to
+change.

@@ -14,7 +14,10 @@ export async function createBackendServer(
   configuration: BackendConfiguration,
 ): Promise<FastifyInstance> {
   const server = Fastify({
-    logger: true,
+    logger: {
+      level: "info",
+      base: { component: "backend" },
+    },
     bodyLimit: 1024 * 1024,
     requestTimeout: 30_000,
   });
@@ -28,13 +31,14 @@ export async function createBackendServer(
       prefix: "/web-ui/",
       wildcard: false,
       index: "index.html",
+      cacheControl: false,
       /** Gives the SPA shell and content-hashed assets distinct cache policies. */
       setHeaders(response, path) {
         response.setHeader(
           "Cache-Control",
-          path.endsWith("index.html")
-            ? "no-cache"
-            : "public, max-age=31536000, immutable",
+          path.split(/[/\\]/u).includes("assets")
+            ? "public, max-age=31536000, immutable"
+            : "no-cache",
         );
       },
     });

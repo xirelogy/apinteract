@@ -118,6 +118,19 @@ The backend uses the same public proxy contract over a local connection. The
 all-in-one topology does not introduce a private execution path with different
 behavior.
 
+The source-built AIO image supervises the backend and loopback proxy as
+separate processes. The compiled frontend is static content served by the
+backend. Initialization generates one container-local proxy credential under
+`/run/apinteract`; the credential is shared only through private effective
+component configuration and is not persisted with product data.
+
+Durable backend state is mounted at `/data`, while `/cache` contains disposable
+proxy transfer state. This separation keeps backup and restoration focused on
+authoritative backend data without treating recoverable proxy frames as product
+records. The application processes run as an unprivileged account, and the
+provided Compose deployment makes the remaining container filesystem
+read-only.
+
 Backend persistent data and proxy transient cache data use separate writable
 locations.
 
