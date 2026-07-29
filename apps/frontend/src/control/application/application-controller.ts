@@ -1,7 +1,9 @@
 import { v7 as uuidV7 } from "uuid";
 
 import type {
+  CollectionView,
   ExecutionView,
+  RequestField,
   RequestView,
   TreeNode,
   WorkspaceSummary,
@@ -93,6 +95,7 @@ export class ApplicationController {
     store.selectedWorkspaceId = workspaceId;
     store.rootNodes = result.children;
     store.selectedCollectionId = null;
+    store.selectedCollection = null;
     store.collectionChildren = {};
     store.expandedCollectionIds = [];
     const active = activeRequestTab(store);
@@ -116,13 +119,10 @@ export class ApplicationController {
         parentCollectionId,
         name,
       });
-      await this.#reloadCollection(workspaceId, parentCollectionId);
-      if (parentCollectionId !== null) {
-        store.selectedCollectionId = parentCollectionId;
-        store.expandedCollectionIds = includeOnce(
-          store.expandedCollectionIds,
-          parentCollectionId,
-        );
+      if (parentCollectionId === null) {
+        await this.#reloadCollection(workspaceId, null);
+      } else {
+        await this.#selectCollection(parentCollectionId);
       }
     });
   }
@@ -136,12 +136,36 @@ export class ApplicationController {
   async #selectCollection(collectionId: string): Promise<void> {
     const store = useApplicationStore();
     const workspaceId = requireSelection(store.selectedWorkspaceId);
-    await this.#reloadCollection(workspaceId, collectionId);
+    const [, collection] = await Promise.all([
+      this.#reloadCollection(workspaceId, collectionId),
+      this.#webSocket.command<CollectionView>("collection.get", {
+        collectionId,
+      }),
+    ]);
     store.selectedCollectionId = collectionId;
+    store.selectedCollection = collection;
     store.expandedCollectionIds = includeOnce(
       store.expandedCollectionIds,
       collectionId,
     );
+  }
+
+  /** Saves ordered common headers for the currently selected collection. */
+  async updateCollectionHeaders(
+    collectionId: string,
+    expectedRevision: number,
+    headers: readonly RequestField[],
+  ): Promise<void> {
+    await this.#run(async () => {
+      const collection = await this.#webSocket.command<CollectionView>(
+        "collection.headers.update",
+        { collectionId, expectedRevision, headers },
+      );
+      const store = useApplicationStore();
+      if (store.selectedCollectionId === collectionId) {
+        store.selectedCollection = collection;
+      }
+    });
   }
 
   /** Refreshes one root or collection child list from the backend. */
@@ -203,6 +227,7 @@ export class ApplicationController {
     store.requestTabs.push(tab);
     store.activeRequestTabId = tab.tabId;
     store.selectedCollectionId = null;
+    store.selectedCollection = null;
   }
 
   /** Activates an already open request tab. */
@@ -211,6 +236,7 @@ export class ApplicationController {
     if (store.requestTabs.some((tab) => tab.tabId === tabId)) {
       store.activeRequestTabId = tabId;
       store.selectedCollectionId = null;
+      store.selectedCollection = null;
     }
   }
 
@@ -259,6 +285,7 @@ export class ApplicationController {
       store.requestTabs.push(tab);
       store.activeRequestTabId = tab.tabId;
       store.selectedCollectionId = null;
+      store.selectedCollection = null;
     });
   }
 
@@ -341,6 +368,7 @@ export class ApplicationController {
               "execution.start_temporary",
               {
                 workspaceId: tab.workspaceId,
+                parentCollectionId: tab.pendingParentCollectionId,
                 request: executableDraft(tab.draft),
               },
             )

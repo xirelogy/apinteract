@@ -70,6 +70,14 @@ export interface WorkspaceTreeNodeTable {
   created_at: number;
 }
 
+export interface CollectionProfileTable {
+  collection_id: BinaryId;
+  revision: number;
+  headers_json: string;
+  updated_by: BinaryId;
+  updated_at: number;
+}
+
 export interface RequestDraftTable {
   request_id: BinaryId;
   draft_revision: number;
@@ -171,6 +179,7 @@ export interface DatabaseSchema {
   workspaces: WorkspaceTable;
   workspace_memberships: WorkspaceMembershipTable;
   workspace_tree_nodes: WorkspaceTreeNodeTable;
+  collection_profiles: CollectionProfileTable;
   request_drafts: RequestDraftTable;
   request_revisions: RequestRevisionTable;
   executions: ExecutionTable;

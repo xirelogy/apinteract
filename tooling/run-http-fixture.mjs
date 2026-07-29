@@ -51,6 +51,7 @@ async function handleEcho(request, response) {
     method: request.method,
     query: [...url.searchParams.entries()],
     requestHeader: request.headers["x-fixture-request"] ?? null,
+    inheritedHeader: request.headers["x-inherited"] ?? null,
     body: Buffer.concat(chunks).toString("utf8"),
   });
   response.writeHead(201, {

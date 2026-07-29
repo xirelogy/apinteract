@@ -547,6 +547,12 @@
             "$ref": "#/components/schemas/CollectionCreateCommand"
           },
           {
+            "$ref": "#/components/schemas/CollectionGetCommand"
+          },
+          {
+            "$ref": "#/components/schemas/CollectionHeadersUpdateCommand"
+          },
+          {
             "$ref": "#/components/schemas/RequestCreateCommand"
           },
           {
@@ -747,6 +753,66 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CollectionGetCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "collection.get"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["collectionId"],
+                "properties": {
+                  "collectionId": {
+                    "$ref": "#/components/schemas/CollectionId"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CollectionHeadersUpdateCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "collection.headers.update"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["collectionId", "expectedRevision", "headers"],
+                "properties": {
+                  "collectionId": {
+                    "$ref": "#/components/schemas/CollectionId"
+                  },
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "headers": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/RequestField"
+                    }
                   }
                 }
               }
@@ -958,10 +1024,20 @@
               "payload": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["workspaceId", "request"],
+                "required": ["workspaceId", "parentCollectionId", "request"],
                 "properties": {
                   "workspaceId": {
                     "$ref": "#/components/schemas/WorkspaceId"
+                  },
+                  "parentCollectionId": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/CollectionId"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "request": {
                     "$ref": "#/components/schemas/RequestExecutionInput"
@@ -1100,6 +1176,49 @@
           },
           "method": {
             "$ref": "#/components/schemas/HttpMethod"
+          }
+        }
+      },
+      "CollectionView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "collectionId",
+          "workspaceId",
+          "parentCollectionId",
+          "name",
+          "headers",
+          "revision"
+        ],
+        "properties": {
+          "collectionId": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "workspaceId": {
+            "$ref": "#/components/schemas/WorkspaceId"
+          },
+          "parentCollectionId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CollectionId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestField"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },

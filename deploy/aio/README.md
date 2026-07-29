@@ -149,6 +149,7 @@ The isolated verification command builds the image and proves:
 - backend and proxy readiness;
 - administrator initialization and login;
 - authenticated WebSocket workspace, collection, and request operations;
+- persistent collection headers and inherited proxy delivery;
 - execution through the local proxy against a deterministic target;
 - exact response-body download;
 - persistence across restart;

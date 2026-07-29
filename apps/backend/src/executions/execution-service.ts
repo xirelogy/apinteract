@@ -112,6 +112,7 @@ export class ExecutionService {
   async startTemporary(
     userId: EntityId,
     workspaceId: EntityId,
+    parentCollectionId: EntityId | null,
     request: RequestExecutionInput,
     publish: (event: ExecutionEvent) => void,
   ): Promise<ExecutionView> {
@@ -119,6 +120,7 @@ export class ExecutionService {
       const prepared = await this.#requests.prepareTemporaryExecution(
         userId,
         workspaceId,
+        parentCollectionId,
         request,
       );
       return this.#startPrepared(prepared, userId, publish);

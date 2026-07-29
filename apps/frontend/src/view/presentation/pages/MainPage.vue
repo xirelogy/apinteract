@@ -6,6 +6,7 @@ import { useRouter } from "vue-router";
 
 import { useApplicationController } from "@/app/dependencies";
 import { useApplicationStore } from "@/control/state/application-store";
+import type { RequestField } from "@/model/contracts/backend";
 import {
   isRequestTabDirty,
   type RequestDraftInput,
@@ -13,6 +14,7 @@ import {
 } from "@/model/domain/application";
 import AppHeader from "@/view/presentation/layout/AppHeader.vue";
 import DiscardChangesDialog from "@/view/presentation/features/DiscardChangesDialog.vue";
+import CollectionHeadersDialog from "@/view/presentation/features/CollectionHeadersDialog.vue";
 import RequestEditor from "@/view/presentation/features/RequestEditor.vue";
 import RequestTabs from "@/view/presentation/features/RequestTabs.vue";
 import SaveRequestDialog from "@/view/presentation/features/SaveRequestDialog.vue";
@@ -25,6 +27,7 @@ const { t } = useI18n();
 const navigatorOpen = ref(false);
 const saveDialogTab = ref<RequestTab | null>(null);
 const discardDialogTab = ref<RequestTab | null>(null);
+const collectionHeadersOpen = ref(false);
 const {
   session,
   connection,
@@ -32,6 +35,7 @@ const {
   selectedWorkspaceId,
   rootNodes,
   selectedCollectionId,
+  selectedCollection,
   collectionChildren,
   expandedCollectionIds,
   requestTabs,
@@ -159,6 +163,22 @@ async function downloadExecutionBody(executionId: string): Promise<void> {
   }
 }
 
+/** Saves the selected collection profile and closes its editor on success. */
+async function saveCollectionHeaders(
+  headers: readonly RequestField[],
+): Promise<void> {
+  const collection = selectedCollection.value;
+  if (collection === null) {
+    return;
+  }
+  await controller.updateCollectionHeaders(
+    collection.collectionId,
+    collection.revision,
+    headers,
+  );
+  collectionHeadersOpen.value = false;
+}
+
 /** Closes a clean tab or opens discard confirmation for unsaved content. */
 function requestTabClose(tabId: string): void {
   const tab = requestTabs.value.find((candidate) => candidate.tabId === tabId);
@@ -215,6 +235,7 @@ function discardRequestTab(): void {
         @select-collection="controller.selectCollection($event)"
         @toggle-collection="controller.toggleCollection($event)"
         @create-request="createTemporaryRequest"
+        @edit-collection-headers="collectionHeadersOpen = true"
         @select-request="selectRequest"
         @dismiss="closeNavigator"
       />
@@ -271,6 +292,13 @@ function discardRequestTab(): void {
       "
       @close="discardDialogTab = null"
       @discard="discardRequestTab"
+    />
+    <CollectionHeadersDialog
+      v-if="collectionHeadersOpen && selectedCollection"
+      :collection="selectedCollection"
+      :busy="busy"
+      @close="collectionHeadersOpen = false"
+      @save="saveCollectionHeaders"
     />
   </div>
 </template>

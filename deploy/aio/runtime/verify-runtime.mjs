@@ -109,6 +109,11 @@ async function createPersistentJourney(client, accessToken, targetUrl) {
     parentCollectionId: null,
     name: collectionName,
   });
+  await client.command("collection.headers.update", {
+    collectionId: collection.nodeId,
+    expectedRevision: 0,
+    headers: [{ name: "X-AIO-Inherited", value: marker, enabled: true }],
+  });
   const request = await client.command("request.create", {
     workspaceId: workspace.workspaceId,
     parentCollectionId: collection.nodeId,
@@ -131,7 +136,7 @@ async function createPersistentJourney(client, accessToken, targetUrl) {
   if (
     view.status !== 200 ||
     view.bodyComplete !== true ||
-    !view.bodyPreview?.includes(marker)
+    !view.bodyPreview?.includes(`"inherited":"${marker}"`)
   ) {
     throw new Error("AIO proxy execution did not return the expected response");
   }
@@ -166,6 +171,18 @@ async function verifyRestoredJourney(client, accessToken, state) {
   });
   if (!root.children?.some((node) => node.nodeId === state.collectionId)) {
     throw new Error("The verification collection did not survive restart");
+  }
+  const collection = await client.command("collection.get", {
+    collectionId: state.collectionId,
+  });
+  if (
+    collection.revision !== 1 ||
+    !collection.headers?.some(
+      (header) =>
+        header.name === "X-AIO-Inherited" && header.value === state.marker,
+    )
+  ) {
+    throw new Error("The collection header profile did not survive restart");
   }
   const children = await client.command("tree.list", {
     workspaceId: state.workspaceId,
@@ -230,6 +247,7 @@ async function verifyExecutionFailure(client) {
   }
   const execution = await client.command("execution.start_temporary", {
     workspaceId: workspace.workspaceId,
+    parentCollectionId: null,
     request: {
       method: "GET",
       targetUrl: "http://127.0.0.1:1/unreachable",

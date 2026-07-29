@@ -120,6 +120,7 @@ describe("ExecutionService shutdown", () => {
         executions.startTemporary(
           userId,
           workspace.workspaceId,
+          null,
           {
             method: "GET",
             targetUrl: "https://example.test/rejected",

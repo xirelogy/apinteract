@@ -9,6 +9,7 @@ const server = createServer((request, response) => {
       method: request.method,
       url: request.url,
       verification: request.headers["x-aio-verification"] ?? null,
+      inherited: request.headers["x-aio-inherited"] ?? null,
       body,
     });
     response.writeHead(200, {

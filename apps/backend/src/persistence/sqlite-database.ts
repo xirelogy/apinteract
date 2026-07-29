@@ -10,6 +10,7 @@ import type { DatabaseSchema } from "./schema.js";
 const INITIAL_MIGRATION = "0001_quick_verification";
 const EXPANDED_REQUEST_MIGRATION = "0002_expanded_request_profile";
 const TEMPORARY_EXECUTION_MIGRATION = "0003_temporary_executions";
+const COLLECTION_PROFILES_MIGRATION = "0004_collection_profiles";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -277,6 +278,13 @@ export class SqliteDatabase {
     if (temporaryExecutionApplied === undefined) {
       this.#migrateTemporaryExecutions();
     }
+
+    const collectionProfilesApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(COLLECTION_PROFILES_MIGRATION);
+    if (collectionProfilesApplied === undefined) {
+      this.#migrateCollectionProfiles();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -307,6 +315,7 @@ export class SqliteDatabase {
       INITIAL_MIGRATION,
       EXPANDED_REQUEST_MIGRATION,
       TEMPORARY_EXECUTION_MIGRATION,
+      COLLECTION_PROFILES_MIGRATION,
     ].some((identifier) => !identifiers.has(identifier));
   }
 
@@ -455,6 +464,22 @@ export class SqliteDatabase {
     if (violation !== undefined) {
       throw new Error("Temporary execution migration violated a foreign key");
     }
+  }
+
+  /** Adds optimistic collection-owned request header profiles. */
+  #migrateCollectionProfiles(): void {
+    this.#driver.transaction(() => {
+      this.#driver.exec(`
+        CREATE TABLE collection_profiles (
+          collection_id BLOB PRIMARY KEY REFERENCES workspace_tree_nodes(id) ON DELETE CASCADE,
+          revision INTEGER NOT NULL CHECK(revision >= 0),
+          headers_json TEXT NOT NULL,
+          updated_by BLOB NOT NULL REFERENCES users(id),
+          updated_at INTEGER NOT NULL
+        ) STRICT;
+      `);
+      this.#recordMigration(COLLECTION_PROFILES_MIGRATION);
+    })();
   }
 
   /** Records one successfully applied schema migration. */

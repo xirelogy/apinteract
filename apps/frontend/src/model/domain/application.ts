@@ -1,4 +1,5 @@
 import type {
+  CollectionView,
   CurrentSession,
   ExecutionView,
   HttpMethod,
@@ -55,6 +56,7 @@ export interface ApplicationSnapshot {
   readonly selectedWorkspaceId: string | null;
   readonly rootNodes: readonly TreeNode[];
   readonly selectedCollectionId: string | null;
+  readonly selectedCollection: CollectionView | null;
   readonly collectionChildren: Readonly<Record<string, readonly TreeNode[]>>;
   readonly expandedCollectionIds: readonly string[];
   readonly requestTabs: readonly RequestTab[];

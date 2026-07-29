@@ -874,6 +874,16 @@
   font-size: var(--font-size-xs);
 }
 
+.collection-headers-dialog {
+  width: min(42rem, calc(100vi - var(--space-6)));
+}
+
+.collection-header-fields {
+  min-width: 0;
+  max-height: 50dvh;
+  overflow: auto;
+}
+
 .resource-dialog-form {
   display: flex;
   flex-direction: column;

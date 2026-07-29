@@ -9,6 +9,7 @@ test("creates, restores, and sends the first workspace request", async ({
   const workspaceName = `First workspace ${suffix}`;
   const collectionName = `Getting started ${suffix}`;
   const subcollectionName = `Examples ${suffix}`;
+  const leafCollectionName = `Inherited ${suffix}`;
   const requestName = `Hello fixture ${suffix}`;
   const targetUrl = "http://127.0.0.1:8090/echo";
   const mobile = testInfo.project.name === "mobile-chromium";
@@ -41,6 +42,19 @@ test("creates, restores, and sends the first workspace request", async ({
   await collection.click();
 
   await page
+    .getByRole("button", { name: "Edit selected collection headers" })
+    .click();
+  const headersDialog = page.getByRole("dialog", {
+    name: `Common headers for ${collectionName}`,
+  });
+  await headersDialog
+    .getByRole("button", { name: "Add common header" })
+    .click();
+  await headersDialog.getByLabel("Header name 1").fill("X-Inherited");
+  await headersDialog.getByLabel("Header value 1").fill(`root-${suffix}`);
+  await headersDialog.getByRole("button", { name: "Save" }).click();
+
+  await page
     .getByRole("button", {
       name: `Create subcollection in ${collectionName}`,
     })
@@ -58,6 +72,23 @@ test("creates, restores, and sends the first workspace request", async ({
   });
   await expect(subcollection).toBeVisible();
   await subcollection.click();
+
+  await page
+    .getByRole("button", {
+      name: `Create subcollection in ${subcollectionName}`,
+    })
+    .click();
+  const leafDialog = page.getByRole("dialog", {
+    name: "New subcollection",
+  });
+  await leafDialog.getByLabel("Collection name").fill(leafCollectionName);
+  await leafDialog.getByRole("button", { name: "Create" }).click();
+  const leafCollection = workspaceTree.getByRole("treeitem", {
+    name: leafCollectionName,
+    exact: true,
+  });
+  await expect(leafCollection).toBeVisible();
+  await leafCollection.click();
 
   await page.getByRole("button", { name: "Create request" }).click();
   if (mobile) {
@@ -95,6 +126,9 @@ test("creates, restores, and sends the first workspace request", async ({
   );
   await expect(page.locator(".body-preview")).toContainText(
     `"requestHeader":"browser-test"`,
+  );
+  await expect(page.locator(".body-preview")).toContainText(
+    `"inheritedHeader":"root-${suffix}"`,
   );
   await expect(page.locator(".body-preview")).toContainText(
     `"body":"payload-${suffix}"`,
@@ -186,7 +220,7 @@ test("creates, restores, and sends the first workspace request", async ({
     name: "Destination collection",
   });
   const destinationCollection = destinationTree.getByRole("treeitem", {
-    name: subcollectionName,
+    name: leafCollectionName,
     exact: true,
   });
   await expect(destinationCollection.locator("..")).toHaveClass(/is-selected/u);
@@ -207,6 +241,9 @@ test("creates, restores, and sends the first workspace request", async ({
     .click();
   await workspaceTree
     .getByRole("treeitem", { name: subcollectionName, exact: true })
+    .click();
+  await workspaceTree
+    .getByRole("treeitem", { name: leafCollectionName, exact: true })
     .click();
   await workspaceTree
     .getByRole("treeitem", { name: `POST ${requestName}`, exact: true })
@@ -234,6 +271,9 @@ test("creates, restores, and sends the first workspace request", async ({
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByRole("status")).toHaveText("In progress");
   await expect(page.locator(".status-code")).toHaveText("201");
+  await expect(page.locator(".body-preview")).toContainText(
+    `"inheritedHeader":"root-${suffix}"`,
+  );
   await expect(draftRevision).toHaveText("Draft 0");
 });
 

@@ -86,6 +86,14 @@ Target HTTP statuses, including `4xx` and `5xx`, are valid target responses.
 Proxy, network, and malformed HTTP response failures are separate execution
 errors.
 
+Collection common headers resolve from the workspace root toward the request's
+direct parent. Header names match case-insensitively: when a nearer enabled
+layer declares a name, its complete ordered group replaces the farther group
+with that name. Request-local headers are the nearest layer. Disabled fields
+do not participate in execution or suppress inherited values. The backend
+stores this resolved header set in the immutable revision and execution
+snapshot before contacting the proxy.
+
 ## Control And Data Planes
 
 Backend-to-proxy communication has two logical planes:

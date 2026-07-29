@@ -91,6 +91,7 @@ describe("RequestService draft updates", () => {
       const temporary = await requests.prepareTemporaryExecution(
         userId,
         workspace.workspaceId,
+        null,
         {
           method: "POST",
           targetUrl: "https://example.test/temporary",

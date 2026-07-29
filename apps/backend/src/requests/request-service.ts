@@ -39,6 +39,15 @@ export interface RequestField {
   readonly enabled: boolean;
 }
 
+export interface CollectionView {
+  readonly collectionId: EntityId;
+  readonly workspaceId: EntityId;
+  readonly parentCollectionId: EntityId | null;
+  readonly name: string;
+  readonly headers: readonly RequestField[];
+  readonly revision: number;
+}
+
 export interface RequestView {
   readonly requestId: EntityId;
   readonly workspaceId: EntityId;
@@ -75,6 +84,9 @@ export interface PreparedExecution {
 
 /** Raised when an update targets a stale persisted draft revision. */
 export class DraftConflictError extends Error {}
+
+/** Raised when a collection profile update targets a stale revision. */
+export class CollectionProfileConflictError extends Error {}
 
 /**
  * Owns the ordered collection/request tree and mutable request drafts.
@@ -169,6 +181,95 @@ export class RequestService {
         kind: "collection",
         name: normalizeName(name),
         position,
+      };
+    });
+  }
+
+  /** Loads one authorized collection and its common-header profile. */
+  async getCollection(
+    userId: EntityId,
+    collectionId: EntityId,
+  ): Promise<CollectionView> {
+    const row = await this.#collectionRow(this.#database, collectionId);
+    await this.#workspaces.requireCanRead(
+      this.#database,
+      userId,
+      bytesToId(row.workspace_id),
+    );
+    return mapCollection(row);
+  }
+
+  /** Replaces a collection's common headers using optimistic concurrency. */
+  async updateCollectionHeaders(
+    userId: EntityId,
+    collectionId: EntityId,
+    expectedRevision: number,
+    headers: readonly RequestField[],
+  ): Promise<CollectionView> {
+    const normalizedHeaders = validateHeaders(headers);
+    const headersJson = JSON.stringify(normalizedHeaders);
+    return this.#database.transaction().execute(async (transaction) => {
+      const row = await this.#collectionRow(transaction, collectionId);
+      const workspaceId = bytesToId(row.workspace_id);
+      await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
+      const currentRevision = row.profile_revision ?? 0;
+      if (currentRevision !== expectedRevision) {
+        throw new CollectionProfileConflictError(
+          "The collection header profile changed",
+        );
+      }
+      if ((row.headers_json ?? "[]") === headersJson) {
+        return mapCollection(row);
+      }
+      const revision = currentRevision + 1;
+      const now = Date.now();
+      if (row.profile_revision === null) {
+        const result = await transaction
+          .insertInto("collection_profiles")
+          .values({
+            collection_id: idToBytes(collectionId),
+            revision,
+            headers_json: headersJson,
+            updated_by: idToBytes(userId),
+            updated_at: now,
+          })
+          .onConflict((conflict) =>
+            conflict.column("collection_id").doNothing(),
+          )
+          .executeTakeFirst();
+        if (result.numInsertedOrUpdatedRows !== 1n) {
+          throw new CollectionProfileConflictError(
+            "The collection header profile changed",
+          );
+        }
+      } else {
+        const result = await transaction
+          .updateTable("collection_profiles")
+          .set({
+            revision,
+            headers_json: headersJson,
+            updated_by: idToBytes(userId),
+            updated_at: now,
+          })
+          .where("collection_id", "=", idToBytes(collectionId))
+          .where("revision", "=", expectedRevision)
+          .executeTakeFirst();
+        if (result.numUpdatedRows !== 1n) {
+          throw new CollectionProfileConflictError(
+            "The collection header profile changed",
+          );
+        }
+      }
+      await this.#audit.record(transaction, {
+        type: "collection.headers_updated",
+        actorUserId: userId,
+        workspaceId,
+        data: { collectionId, revision },
+      });
+      return {
+        ...mapCollection(row),
+        headers: normalizedHeaders,
+        revision,
       };
     });
   }
@@ -356,13 +457,19 @@ export class RequestService {
         userId,
         request.workspaceId,
       );
+      const resolvedHeaders = await this.#resolveHeaders(
+        transaction,
+        row.parent_collection_id,
+        request.headers,
+      );
+      const resolvedRequest = { ...request, headers: resolvedHeaders };
       const content = JSON.stringify({
         method: request.method,
         targetMode: request.targetMode,
         targetUrl: request.targetUrl,
         queryMode: request.queryMode,
         query: request.query,
-        headers: request.headers,
+        headers: resolvedHeaders,
         body: request.body,
       });
       const fingerprint = createHash("sha256").update(content).digest("hex");
@@ -415,7 +522,7 @@ export class RequestService {
         workspaceId: request.workspaceId,
         data: { executionId, requestId, revisionId },
       });
-      return { executionId, revisionId, request, createdAt };
+      return { executionId, revisionId, request: resolvedRequest, createdAt };
     });
   }
 
@@ -423,14 +530,22 @@ export class RequestService {
   async prepareTemporaryExecution(
     userId: EntityId,
     workspaceId: EntityId,
+    parentCollectionId: EntityId | null,
     input: RequestExecutionInput,
   ): Promise<PreparedExecution> {
-    const request = {
+    const localRequest = {
       workspaceId,
       ...normalizeExecutionInput(input),
     };
     return this.#database.transaction().execute(async (transaction) => {
       await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
+      await this.#validateParent(transaction, workspaceId, parentCollectionId);
+      const resolvedHeaders = await this.#resolveHeaders(
+        transaction,
+        parentCollectionId === null ? null : idToBytes(parentCollectionId),
+        localRequest.headers,
+      );
+      const request = { ...localRequest, headers: resolvedHeaders };
       const executionId = createEntityId();
       const createdAt = Date.now();
       const snapshot = JSON.stringify({
@@ -519,6 +634,7 @@ export class RequestService {
         "draft.headers_json",
         "draft.body_text",
         "node.workspace_id",
+        "node.parent_collection_id",
         "node.name",
       ])
       .where("draft.request_id", "=", idToBytes(requestId))
@@ -527,6 +643,74 @@ export class RequestService {
       throw new ResourceNotFoundError("Request not found");
     }
     return row;
+  }
+
+  /** Loads collection metadata and an optional header profile. */
+  async #collectionRow(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    collectionId: EntityId,
+  ) {
+    const row = await database
+      .selectFrom("workspace_tree_nodes as node")
+      .leftJoin(
+        "collection_profiles as profile",
+        "profile.collection_id",
+        "node.id",
+      )
+      .select([
+        "node.id",
+        "node.workspace_id",
+        "node.parent_collection_id",
+        "node.name",
+        "profile.revision as profile_revision",
+        "profile.headers_json",
+      ])
+      .where("node.id", "=", idToBytes(collectionId))
+      .where("node.kind", "=", "collection")
+      .executeTakeFirst();
+    if (row === undefined) {
+      throw new ResourceNotFoundError("Collection not found");
+    }
+    return row;
+  }
+
+  /** Resolves collection header layers root-first and overlays request headers. */
+  async #resolveHeaders(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    parentCollectionId: Uint8Array | null,
+    requestHeaders: readonly RequestField[],
+  ): Promise<RequestField[]> {
+    const layers: RequestField[][] = [];
+    const visited = new Set<string>();
+    let currentId = parentCollectionId;
+    while (currentId !== null) {
+      const key = Buffer.from(currentId).toString("hex");
+      if (visited.has(key) || visited.size >= 64) {
+        throw new Error("Collection hierarchy is cyclic or too deep");
+      }
+      visited.add(key);
+      const row = await database
+        .selectFrom("workspace_tree_nodes as node")
+        .leftJoin(
+          "collection_profiles as profile",
+          "profile.collection_id",
+          "node.id",
+        )
+        .select(["node.parent_collection_id", "profile.headers_json"])
+        .where("node.id", "=", currentId)
+        .where("node.kind", "=", "collection")
+        .executeTakeFirst();
+      if (row === undefined) {
+        throw new ResourceNotFoundError("Parent collection not found");
+      }
+      layers.unshift(
+        validateHeaders(
+          JSON.parse(row.headers_json ?? "[]") as readonly RequestField[],
+        ),
+      );
+      currentId = row.parent_collection_id;
+    }
+    return resolveHeaderLayers([...layers, validateHeaders(requestHeaders)]);
   }
 
   /** Requires a parent to be a collection in the same workspace. */
@@ -716,4 +900,50 @@ function mapRequest(row: {
     body: row.body_text,
     draftRevision: row.draft_revision,
   };
+}
+
+/** Maps collection metadata and its optional profile to the public view. */
+function mapCollection(row: {
+  readonly id: Uint8Array;
+  readonly workspace_id: Uint8Array;
+  readonly parent_collection_id: Uint8Array | null;
+  readonly name: string;
+  readonly profile_revision: number | null;
+  readonly headers_json: string | null;
+}): CollectionView {
+  return {
+    collectionId: bytesToId(row.id),
+    workspaceId: bytesToId(row.workspace_id),
+    parentCollectionId:
+      row.parent_collection_id === null
+        ? null
+        : bytesToId(row.parent_collection_id),
+    name: row.name,
+    headers: JSON.parse(row.headers_json ?? "[]") as RequestField[],
+    revision: row.profile_revision ?? 0,
+  };
+}
+
+/** Resolves enabled header groups with nearer layers replacing farther ones. */
+export function resolveHeaderLayers(
+  layers: readonly (readonly RequestField[])[],
+): RequestField[] {
+  let resolved: RequestField[] = [];
+  for (const layer of layers) {
+    const groups = new Map<string, RequestField[]>();
+    for (const field of layer) {
+      if (!field.enabled) {
+        continue;
+      }
+      const key = field.name.toLowerCase();
+      const group = groups.get(key) ?? [];
+      group.push({ ...field });
+      groups.set(key, group);
+    }
+    for (const [key, group] of groups) {
+      resolved = resolved.filter((field) => field.name.toLowerCase() !== key);
+      resolved.push(...group);
+    }
+  }
+  return resolved;
 }

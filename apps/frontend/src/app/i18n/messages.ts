@@ -43,14 +43,19 @@ export const enUsMessages = {
     tree: "Workspace tree",
   },
   collection: {
+    addHeader: "Add common header",
     collapse: "Collapse {name}",
     createBeforeSaving: "Create a collection before saving this request.",
     createSubcollection: "Create subcollection in {name}",
     destination: "Destination collection",
     empty: "This collection is empty",
+    editHeaders: "Edit selected collection headers",
     expand: "Expand {name}",
     inside: "Inside {name}",
     label: "Collection",
+    headersDescription:
+      "Enabled headers apply to requests in this collection and its descendants.",
+    headersTitle: "Common headers for {name}",
     name: "Collection name",
     new: "New collection",
     newSubcollection: "New subcollection",
@@ -116,6 +121,8 @@ export const enUsMessages = {
     workspaceName: "Workspace name",
   },
   errors: {
+    collection_profile_conflict:
+      "These collection headers changed elsewhere. Reopen the editor and try again.",
     operationFailed: "The operation failed.",
     parentRequired: "Select the required parent first.",
     requestTabClosed: "The request tab is no longer open.",

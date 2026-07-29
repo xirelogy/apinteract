@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 
 import type {
+  CollectionView,
   CurrentSession,
   TreeNode,
   WorkspaceSummary,
@@ -19,6 +20,7 @@ export const useApplicationStore = defineStore("application", {
     selectedWorkspaceId: null as string | null,
     rootNodes: [] as TreeNode[],
     selectedCollectionId: null as string | null,
+    selectedCollection: null as CollectionView | null,
     collectionChildren: {} as Record<string, TreeNode[]>,
     expandedCollectionIds: [] as string[],
     requestTabs: [] as RequestTab[],

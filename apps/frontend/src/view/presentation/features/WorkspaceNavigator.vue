@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { FilePlus, FolderPlus, Plus } from "@lucide/vue";
+import { FilePlus, FolderCog, FolderPlus, Plus } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type { TreeNode, WorkspaceSummary } from "@/model/contracts/backend";
@@ -32,6 +32,7 @@ const emit = defineEmits<{
   selectCollection: [collectionId: string];
   toggleCollection: [collectionId: string];
   createRequest: [parentCollectionId: string | null];
+  editCollectionHeaders: [];
   selectRequest: [requestId: string];
   dismiss: [];
 }>();
@@ -207,6 +208,15 @@ function findLoadedNodeName(nodeId: string): string | null {
             @click="openCreationDialog('collection')"
           >
             <FolderPlus :size="16" aria-hidden="true" />
+          </IconButton>
+          <IconButton
+            class="compact-icon-button"
+            size="compact"
+            :label="t('collection.editHeaders')"
+            :disabled="busy || selectedCollectionId === null"
+            @click="emit('editCollectionHeaders')"
+          >
+            <FolderCog :size="16" aria-hidden="true" />
           </IconButton>
           <IconButton
             class="compact-icon-button"

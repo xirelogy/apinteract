@@ -4,6 +4,7 @@ export type AccessCredential = components["schemas"]["AccessCredential"];
 export type CurrentSession = components["schemas"]["CurrentSession"];
 export type WorkspaceSummary = components["schemas"]["WorkspaceSummary"];
 export type TreeNode = components["schemas"]["TreeNode"];
+export type CollectionView = components["schemas"]["CollectionView"];
 export type RequestView = components["schemas"]["RequestView"];
 export type HttpMethod = components["schemas"]["HttpMethod"];
 export type RequestField = components["schemas"]["RequestField"];

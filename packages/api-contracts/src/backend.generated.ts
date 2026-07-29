@@ -202,6 +202,8 @@ export interface components {
       | components["schemas"]["WorkspaceCreateCommand"]
       | components["schemas"]["TreeListCommand"]
       | components["schemas"]["CollectionCreateCommand"]
+      | components["schemas"]["CollectionGetCommand"]
+      | components["schemas"]["CollectionHeadersUpdateCommand"]
       | components["schemas"]["RequestCreateCommand"]
       | components["schemas"]["RequestGetCommand"]
       | components["schemas"]["RequestUpdateCommand"]
@@ -293,6 +295,34 @@ export interface components {
        */
       type: "CollectionCreateCommand";
     };
+    CollectionGetCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "collection.get";
+      payload?: {
+        collectionId: components["schemas"]["CollectionId"];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "CollectionGetCommand";
+    };
+    CollectionHeadersUpdateCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "collection.headers.update";
+      payload?: {
+        collectionId: components["schemas"]["CollectionId"];
+        expectedRevision: number;
+        headers: components["schemas"]["RequestField"][];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "CollectionHeadersUpdateCommand";
+    };
     RequestCreateCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
       type?: "request.create";
@@ -366,6 +396,7 @@ export interface components {
       type?: "execution.start_temporary";
       payload?: {
         workspaceId: components["schemas"]["WorkspaceId"];
+        parentCollectionId: components["schemas"]["CollectionId"] | null;
         request: components["schemas"]["RequestExecutionInput"];
       };
     } & {
@@ -416,6 +447,14 @@ export interface components {
       name: string;
       position: number;
       method?: components["schemas"]["HttpMethod"];
+    };
+    CollectionView: {
+      collectionId: components["schemas"]["CollectionId"];
+      workspaceId: components["schemas"]["WorkspaceId"];
+      parentCollectionId: components["schemas"]["CollectionId"] | null;
+      name: string;
+      headers: components["schemas"]["RequestField"][];
+      revision: number;
     };
     RequestView: {
       requestId: components["schemas"]["RequestId"];

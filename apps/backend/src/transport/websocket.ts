@@ -6,6 +6,7 @@ import type { Application } from "../bootstrap/application.js";
 import type { BackendConfiguration } from "../config.js";
 import { createEntityId } from "../foundation/id.js";
 import {
+  CollectionProfileConflictError,
   DraftConflictError,
   type HttpMethod,
   type RequestExecutionInput,
@@ -170,6 +171,18 @@ async function dispatch(
         optionalString(command.payload.parentCollectionId),
         requireString(command.payload.name, "name"),
       );
+    case "collection.get":
+      return application.requests.getCollection(
+        userId,
+        requireString(command.payload.collectionId, "collectionId"),
+      );
+    case "collection.headers.update":
+      return application.requests.updateCollectionHeaders(
+        userId,
+        requireString(command.payload.collectionId, "collectionId"),
+        requireInteger(command.payload.expectedRevision, "expectedRevision"),
+        requireRequestFields(command.payload.headers, "headers"),
+      );
     case "request.create":
       return application.requests.createRequest(
         userId,
@@ -212,6 +225,7 @@ async function dispatch(
       return application.executions.startTemporary(
         userId,
         requireString(command.payload.workspaceId, "workspaceId"),
+        optionalString(command.payload.parentCollectionId),
         requireExecutionInput(command.payload.request),
         (event) => publishExecutionEvent(event, publish),
       );
@@ -245,6 +259,9 @@ function mapCommandError(cause: unknown): CommandError {
   }
   if (cause instanceof DraftConflictError) {
     return new CommandError("request_draft_conflict", cause.message);
+  }
+  if (cause instanceof CollectionProfileConflictError) {
+    return new CommandError("collection_profile_conflict", cause.message);
   }
   return new CommandError(
     "invalid_command",
