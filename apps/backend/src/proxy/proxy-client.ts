@@ -10,6 +10,10 @@ type StreamError = components["schemas"]["ExecutionStreamError"];
 
 const FRAME_HEADER_BYTES = 16;
 const MAX_FRAME_PAYLOAD_BYTES = 1_048_576;
+/** Maximum milliseconds for bounded proxy control-plane requests. */
+const CONTROL_REQUEST_TIMEOUT_MS = 30_000;
+/** Maximum milliseconds allowed for best-effort terminal release. */
+const RELEASE_TIMEOUT_MS = 5000;
 
 const FrameType = {
   ResponseHead: 1,
@@ -62,8 +66,17 @@ export class ProxyClient {
   /** Reports whether the configured proxy health endpoint is reachable and ready. */
   async health(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.#endpoint}/health`);
-      return response.ok;
+      const response = await fetch(`${this.#endpoint}/health`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!response.ok) {
+        return false;
+      }
+      const health = (await response.json()) as {
+        readonly status?: unknown;
+        readonly apiVersion?: unknown;
+      };
+      return health.status === "ready" && health.apiVersion === "0.1.1";
     } catch {
       return false;
     }
@@ -110,6 +123,7 @@ export class ProxyClient {
           },
         },
       }),
+      signal: AbortSignal.timeout(CONTROL_REQUEST_TIMEOUT_MS),
     });
     if (!creation.ok) {
       throw new Error(
@@ -131,6 +145,7 @@ export class ProxyClient {
               "Content-Type": "application/octet-stream",
             },
             body: body.toString("utf8"),
+            signal: AbortSignal.timeout(CONTROL_REQUEST_TIMEOUT_MS),
           },
         );
         if (!upload.ok) {
@@ -155,6 +170,7 @@ export class ProxyClient {
       await fetch(`${this.#endpoint}/executions/${session.executionId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${this.#bearerToken}` },
+        signal: AbortSignal.timeout(RELEASE_TIMEOUT_MS),
       }).catch(() => undefined);
     }
   }

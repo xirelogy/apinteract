@@ -11,6 +11,7 @@ export interface BackendConfiguration {
   };
   readonly persistence: {
     readonly databasePath: string;
+    readonly migrationBackupDirectory: string;
   };
   readonly blobs: {
     readonly rootPath: string;
@@ -112,6 +113,11 @@ export async function loadBackendConfiguration(
         persistence.databasePath,
         "config.persistence.databasePath",
         "/data/apinteract.sqlite3",
+      ),
+      migrationBackupDirectory: text(
+        persistence.migrationBackupDirectory,
+        "config.persistence.migrationBackupDirectory",
+        "/data/backups",
       ),
     },
     blobs: {

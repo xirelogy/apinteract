@@ -71,6 +71,7 @@ async function prepareRuntime() {
   await Promise.all([
     mkdir(configurationRoot, { recursive: true }),
     mkdir(resolve(runtimeRoot, "audit"), { recursive: true }),
+    mkdir(resolve(runtimeRoot, "backups"), { recursive: true }),
     mkdir(resolve(runtimeRoot, "blobs"), { recursive: true }),
     mkdir(resolve(runtimeRoot, "blob-staging"), { recursive: true }),
     mkdir(resolve(runtimeRoot, "proxy-cache"), { recursive: true }),
@@ -103,6 +104,7 @@ async function prepareRuntime() {
         },
         persistence: {
           databasePath: resolve(runtimeRoot, "apinteract.sqlite3"),
+          migrationBackupDirectory: resolve(runtimeRoot, "backups"),
         },
         blobs: {
           rootPath: resolve(runtimeRoot, "blobs"),

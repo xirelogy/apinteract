@@ -1,5 +1,6 @@
-import { mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
+import { chmod, mkdir, stat } from "node:fs/promises";
+import { basename, dirname, extname, join } from "node:path";
 
 import BetterSqlite3 from "better-sqlite3";
 import { Kysely, SqliteDialect } from "kysely";
@@ -204,7 +205,11 @@ export class SqliteDatabase {
   }
 
   /** Opens the SQLite database, configures durability, and applies migrations. */
-  static async open(path: string): Promise<SqliteDatabase> {
+  static async open(
+    path: string,
+    migrationBackupDirectory = join(dirname(path), "backups"),
+  ): Promise<SqliteDatabase> {
+    const existingDatabase = await nonEmptyFile(path);
     await mkdir(dirname(path), { recursive: true });
     const driver = new BetterSqlite3(path);
     // These settings provide referential enforcement, durable commits, bounded
@@ -214,10 +219,32 @@ export class SqliteDatabase {
     driver.pragma("synchronous = FULL");
     driver.pragma("busy_timeout = 5000");
     driver.pragma("trusted_schema = OFF");
-
-    const database = new SqliteDatabase(driver);
-    database.#migrate();
-    return database;
+    try {
+      const database = new SqliteDatabase(driver);
+      const migrationsPending =
+        !database.#migrationLedgerExists() || database.#hasPendingMigrations();
+      if (existingDatabase && migrationsPending) {
+        await mkdir(migrationBackupDirectory, {
+          recursive: true,
+          mode: 0o700,
+        });
+        const stem = basename(path, extname(path));
+        const backupPath = join(
+          migrationBackupDirectory,
+          `${stem}-before-migration-${Date.now()}-${randomUUID()}.sqlite3`,
+        );
+        // better-sqlite3's online backup API includes committed WAL content,
+        // producing one consistent recovery file before schema changes begin.
+        await driver.backup(backupPath);
+        await chmod(backupPath, 0o600);
+      }
+      database.#ensureMigrationLedger();
+      database.#migrate();
+      return database;
+    } catch (cause) {
+      driver.close();
+      throw cause;
+    }
   }
 
   /** Closes the Kysely connection and its underlying SQLite driver. */
@@ -227,11 +254,6 @@ export class SqliteDatabase {
 
   /** Applies the initial schema exactly once within a SQLite transaction. */
   #migrate(): void {
-    // Bootstrap the migration ledger separately because it must exist before
-    // the first versioned migration can be detected and applied atomically.
-    this.#driver.exec(
-      "CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL) STRICT",
-    );
     const initialApplied = this.#driver
       .prepare("SELECT id FROM schema_migrations WHERE id = ?")
       .get(INITIAL_MIGRATION);
@@ -255,6 +277,37 @@ export class SqliteDatabase {
     if (temporaryExecutionApplied === undefined) {
       this.#migrateTemporaryExecutions();
     }
+  }
+
+  /** Creates the ledger required to inspect migration state safely. */
+  #ensureMigrationLedger(): void {
+    this.#driver.exec(
+      "CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL) STRICT",
+    );
+  }
+
+  /** Reports whether the database has entered APInteract migration governance. */
+  #migrationLedgerExists(): boolean {
+    return (
+      this.#driver
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
+        )
+        .get() !== undefined
+    );
+  }
+
+  /** Reports whether this release would modify the existing physical schema. */
+  #hasPendingMigrations(): boolean {
+    const applied = this.#driver
+      .prepare("SELECT id FROM schema_migrations")
+      .all() as { readonly id: string }[];
+    const identifiers = new Set(applied.map((migration) => migration.id));
+    return [
+      INITIAL_MIGRATION,
+      EXPANDED_REQUEST_MIGRATION,
+      TEMPORARY_EXECUTION_MIGRATION,
+    ].some((identifier) => !identifiers.has(identifier));
   }
 
   /** Rebuilds GET-only drafts with expanded request content columns. */
@@ -409,5 +462,17 @@ export class SqliteDatabase {
     this.#driver
       .prepare("INSERT INTO schema_migrations(id, applied_at) VALUES (?, ?)")
       .run(id, Date.now());
+  }
+}
+
+/** Reports whether a path identifies an existing database with stored bytes. */
+async function nonEmptyFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).size > 0;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw cause;
   }
 }

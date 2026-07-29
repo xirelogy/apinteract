@@ -15,9 +15,15 @@ const { values } = parseArgs({
 const configuration = await loadProxyConfiguration(values.config);
 const server = createProxyServer(configuration);
 
-/** Stops the proxy listener and releases process resources once. */
-const stop = async (): Promise<void> => {
-  await server.close();
+let stopping: Promise<void> | undefined;
+
+/** Stops the proxy listener and records shutdown failure exactly once. */
+const stop = (): Promise<void> => {
+  stopping ??= server.close().catch((cause: unknown) => {
+    server.log.error({ err: cause }, "Proxy shutdown failed");
+    process.exitCode = 1;
+  });
+  return stopping;
 };
 
 process.once("SIGINT", () => void stop());

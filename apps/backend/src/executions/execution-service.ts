@@ -76,6 +76,9 @@ export class ExecutionService {
   readonly #proxy: ProxyClient;
   readonly #blobs: LocalBlobStore;
   readonly #audit: AuditService;
+  readonly #starting = new Set<Promise<ExecutionView>>();
+  readonly #active = new Set<Promise<void>>();
+  #accepting = true;
 
   constructor(
     database: Kysely<DatabaseSchema>,
@@ -99,8 +102,10 @@ export class ExecutionService {
     requestId: EntityId,
     publish: (event: ExecutionEvent) => void,
   ): Promise<ExecutionView> {
-    const prepared = await this.#requests.prepareExecution(userId, requestId);
-    return this.#startPrepared(prepared, userId, publish);
+    return this.#beginStart(async () => {
+      const prepared = await this.#requests.prepareExecution(userId, requestId);
+      return this.#startPrepared(prepared, userId, publish);
+    });
   }
 
   /** Starts a workspace-owned execution without saving a reusable request. */
@@ -110,12 +115,30 @@ export class ExecutionService {
     request: RequestExecutionInput,
     publish: (event: ExecutionEvent) => void,
   ): Promise<ExecutionView> {
-    const prepared = await this.#requests.prepareTemporaryExecution(
-      userId,
-      workspaceId,
-      request,
-    );
-    return this.#startPrepared(prepared, userId, publish);
+    return this.#beginStart(async () => {
+      const prepared = await this.#requests.prepareTemporaryExecution(
+        userId,
+        workspaceId,
+        request,
+      );
+      return this.#startPrepared(prepared, userId, publish);
+    });
+  }
+
+  /** Registers preparation before yielding so shutdown can drain the full start. */
+  async #beginStart(
+    operation: () => Promise<ExecutionView>,
+  ): Promise<ExecutionView> {
+    if (!this.#accepting) {
+      throw new Error("Request execution is unavailable during shutdown");
+    }
+    const starting = operation();
+    this.#starting.add(starting);
+    try {
+      return await starting;
+    } finally {
+      this.#starting.delete(starting);
+    }
   }
 
   /** Marks one prepared execution running and starts asynchronous proxy work. */
@@ -131,7 +154,15 @@ export class ExecutionService {
       .execute();
     // The caller receives the running view immediately. Terminal state arrives
     // through execution events after proxy streaming and persistence finish.
-    void this.#run(prepared, userId, publish);
+    const active = this.#run(prepared, userId, publish);
+    this.#active.add(active);
+    // Both outcomes remove lifecycle bookkeeping. Terminal persistence errors
+    // are already represented by #run when storage remains available; a
+    // second rejection must not become an unhandled process-level failure.
+    void active.then(
+      () => this.#active.delete(active),
+      () => this.#active.delete(active),
+    );
     return {
       executionId: prepared.executionId,
       ...(prepared.request.requestId === undefined
@@ -141,6 +172,16 @@ export class ExecutionService {
       bodyComplete: false,
       createdAt: new Date(prepared.createdAt).toISOString(),
     };
+  }
+
+  /** Stops admitting executions and drains proxy work already in progress. */
+  async close(): Promise<void> {
+    this.#accepting = false;
+    // A rejected validation or authorization start has no proxy work to drain
+    // and must not prevent already accepted executions from reaching terminal
+    // persistence before the database closes.
+    await Promise.allSettled(this.#starting);
+    await Promise.allSettled(this.#active);
   }
 
   /** Resolves authorized immutable response-body metadata for an execution. */

@@ -17,9 +17,15 @@ const configuration = await loadBackendConfiguration(values.config);
 const application = await createApplication(configuration);
 const server = await createBackendServer(application, configuration);
 
-/** Stops accepting requests and closes application resources once. */
-const stop = async (): Promise<void> => {
-  await server.close();
+let stopping: Promise<void> | undefined;
+
+/** Stops accepting requests, drains work, and records shutdown failure once. */
+const stop = (): Promise<void> => {
+  stopping ??= server.close().catch((cause: unknown) => {
+    server.log.error({ err: cause }, "Backend shutdown failed");
+    process.exitCode = 1;
+  });
+  return stopping;
 };
 
 process.once("SIGINT", () => void stop());

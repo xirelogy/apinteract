@@ -13,6 +13,7 @@ await Promise.all([
   mkdir(configurationRoot, { recursive: true }),
   mkdir(resolve(runtimeRoot, "cache", "proxy"), { recursive: true }),
   mkdir(resolve(runtimeRoot, "data", "audit"), { recursive: true }),
+  mkdir(resolve(runtimeRoot, "data", "backups"), { recursive: true }),
   mkdir(resolve(runtimeRoot, "data", "blobs"), { recursive: true }),
   mkdir(resolve(runtimeRoot, "data", "blob-staging"), { recursive: true }),
 ]);
@@ -56,6 +57,7 @@ function backendConfiguration(origin) {
     },
     persistence: {
       databasePath: resolve(runtimeRoot, "data", "apinteract.sqlite3"),
+      migrationBackupDirectory: resolve(runtimeRoot, "data", "backups"),
     },
     blobs: {
       rootPath: resolve(runtimeRoot, "data", "blobs"),

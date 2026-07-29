@@ -28,6 +28,7 @@ export async function createApplication(
 ): Promise<Application> {
   const database = await SqliteDatabase.open(
     configuration.persistence.databasePath,
+    configuration.persistence.migrationBackupDirectory,
   );
   const audit = new AuditService(database.db, configuration.audit.rootPath);
   const blobs = new LocalBlobStore(
@@ -70,6 +71,7 @@ export async function createApplication(
     executions,
     proxy,
     close: async () => {
+      await executions.close();
       await audit.publishPending();
       await database.close();
     },
