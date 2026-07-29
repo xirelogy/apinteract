@@ -61,6 +61,21 @@ export class BackendHttpClient {
     }
   }
 
+  /** Downloads exact authorized response bytes for one visible execution. */
+  async downloadExecutionBody(
+    accessToken: string,
+    executionId: string,
+  ): Promise<Blob> {
+    const response = await fetch(
+      `/api/executions/${encodeURIComponent(executionId)}/body`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!response.ok) {
+      throw await this.#problem(response);
+    }
+    return response.blob();
+  }
+
   /** Performs one JSON request and converts non-success responses to problems. */
   async #request<T>(path: string, init: RequestInit): Promise<T> {
     const response = await fetch(path, init);

@@ -36,6 +36,7 @@ const emit = defineEmits<{
   save: [draft: RequestDraftInput];
   execute: [draft: RequestDraftInput];
   change: [draft: RequestDraftInput];
+  download: [executionId: string];
 }>();
 
 const methods: readonly HttpMethod[] = [
@@ -383,7 +384,10 @@ function activeFieldKind(): string {
           </TabsPanel>
         </TabsRoot>
       </section>
-      <ResponsePanel :execution="execution" />
+      <ResponsePanel
+        :execution="execution"
+        @download="emit('download', $event)"
+      />
     </template>
   </main>
 </template>

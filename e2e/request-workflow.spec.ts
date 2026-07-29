@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { expect, test, type Page } from "@playwright/test";
 
 test("creates, restores, and sends the first workspace request", async ({
@@ -113,6 +115,15 @@ test("creates, restores, and sends the first workspace request", async ({
     "x-fixture-response",
   );
   await expect(page.locator(".response-headers")).toContainText("echoed");
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download response body" }).click();
+  const download = await downloadPromise;
+  const downloadPath = await download.path();
+  expect(downloadPath).not.toBeNull();
+  expect(await readFile(downloadPath, "utf8")).toContain(
+    `"body":"payload-${suffix}"`,
+  );
 
   await page.getByRole("button", { name: "New temporary request" }).click();
   await expect(page.locator(".request-tab")).toHaveCount(2);

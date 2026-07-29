@@ -141,6 +141,24 @@ async function executeRequest(draft: RequestDraftInput): Promise<void> {
   }
 }
 
+/** Downloads exact response bytes without exposing the bearer token in a URL. */
+async function downloadExecutionBody(executionId: string): Promise<void> {
+  try {
+    const body = await controller.downloadExecutionBody(executionId);
+    const objectUrl = URL.createObjectURL(body);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `apinteract-response-${executionId}.bin`;
+    anchor.hidden = true;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  } catch {
+    // The controller has already published a safe global application error.
+  }
+}
+
 /** Closes a clean tab or opens discard confirmation for unsaved content. */
 function requestTabClose(tabId: string): void {
   const tab = requestTabs.value.find((candidate) => candidate.tabId === tabId);
@@ -231,6 +249,7 @@ function discardRequestTab(): void {
           "
           @save="saveRequest"
           @execute="executeRequest"
+          @download="downloadExecutionBody"
         />
       </div>
     </div>

@@ -63,6 +63,14 @@ export class SessionController {
     store.$reset();
   }
 
+  /** Downloads response bytes using the active session's bearer credential. */
+  async downloadExecutionBody(executionId: string): Promise<Blob> {
+    if (this.#accessToken === null) {
+      throw new Error("An authenticated session is required");
+    }
+    return this.#http.downloadExecutionBody(this.#accessToken, executionId);
+  }
+
   /** Connects the control channel before publishing authenticated view state. */
   async #establish(
     accessToken: string,

@@ -4,6 +4,7 @@ import { Download, LoaderCircle } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type { ExecutionView } from "@/model/contracts/backend";
+import IconButton from "@/view/presentation/controls/IconButton.vue";
 import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
 import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
 import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
@@ -11,6 +12,9 @@ import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 
 defineProps<{
   execution: ExecutionView | null;
+}>();
+const emit = defineEmits<{
+  download: [executionId: string];
 }>();
 const { t } = useI18n();
 
@@ -45,15 +49,15 @@ function formatBytes(count: number): string {
           </span>
           <span>{{ formatBytes(execution.bodyBytes ?? 0) }}</span>
         </span>
-        <a
+        <IconButton
           v-if="execution.bodyBlobId"
-          class="icon-button"
-          :href="`/api/executions/${execution.executionId}/body`"
+          size="compact"
+          :label="t('response.downloadBody')"
           :title="t('response.downloadBody')"
-          :aria-label="t('response.downloadBody')"
+          @click="emit('download', execution.executionId)"
         >
           <Download :size="17" aria-hidden="true" />
-        </a>
+        </IconButton>
       </div>
     </div>
     <div v-if="execution === null" class="response-empty">

@@ -354,13 +354,18 @@ export class ApplicationController {
     });
   }
 
+  /** Downloads one authorized response body while reporting shared failures. */
+  async downloadExecutionBody(executionId: string): Promise<Blob> {
+    return this.#run(() => this.session.downloadExecutionBody(executionId));
+  }
+
   /** Runs one workspace-tree operation with shared busy and error state. */
-  async #run(operation: () => Promise<void>): Promise<void> {
+  async #run<Result>(operation: () => Promise<Result>): Promise<Result> {
     const store = useApplicationStore();
     store.busy = true;
     store.error = null;
     try {
-      await operation();
+      return await operation();
     } catch (cause) {
       store.error = applicationError(cause);
       throw cause;
