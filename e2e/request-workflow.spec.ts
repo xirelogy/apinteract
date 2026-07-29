@@ -275,6 +275,31 @@ test("creates, restores, and sends the first workspace request", async ({
     `"inheritedHeader":"root-${suffix}"`,
   );
   await expect(draftRevision).toHaveText("Draft 0");
+
+  const freshRequestName = `Fresh save ${suffix}`;
+  await page.getByRole("button", { name: "New temporary request" }).click();
+  await page.getByLabel("Target URL").fill("https://example.test/fresh");
+  const freshSaveButton = page.getByRole("button", {
+    name: "Save",
+    exact: true,
+  });
+  await expect(freshSaveButton).toBeEnabled();
+  await freshSaveButton.click();
+  const freshSaveDialog = page.getByRole("dialog", { name: "Save request" });
+  await freshSaveDialog.getByLabel("Saved request name").fill(freshRequestName);
+  await expect(
+    freshSaveDialog
+      .getByRole("treeitem", {
+        name: collectionName,
+        exact: true,
+      })
+      .locator(".."),
+  ).toHaveClass(/is-selected/u);
+  await freshSaveDialog.getByRole("button", { name: "Save" }).click();
+  await expect(page.locator(".draft-revision")).toHaveText("Draft 0");
+  await expect(page.getByLabel("Request name", { exact: true })).toHaveValue(
+    freshRequestName,
+  );
 });
 
 /** Authenticates the isolated browser-test administrator. */

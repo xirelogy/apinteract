@@ -81,7 +81,9 @@ const validTarget = computed(() => {
     return false;
   }
 });
-const canSave = computed(() => name.value.trim() !== "" && validTarget.value);
+const canSave = computed(
+  () => validTarget.value && (props.temporary || name.value.trim() !== ""),
+);
 const draftRevisionLabel = computed(() =>
   props.temporary
     ? t("request.temporary")
