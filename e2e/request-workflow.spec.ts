@@ -58,6 +58,7 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(environmentDialog).toBeHidden();
   await selectMenuOption(page, "Select environment", environmentName);
 
+  await openNavigator(page, mobile);
   await page.getByRole("button", { name: "Create root collection" }).click();
   const collectionDialog = page.getByRole("dialog", {
     name: "New collection",
