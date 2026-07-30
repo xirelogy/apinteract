@@ -227,6 +227,13 @@ async function dispatch(
         requireString(command.payload.workspaceId, "workspaceId"),
         optionalEnvironmentId(command.payload.environmentId),
       );
+    case "environment.preview_variables":
+      return application.environments.previewVariables(
+        userId,
+        identity.sessionId,
+        requireString(command.payload.workspaceId, "workspaceId"),
+        requireVariableNames(command.payload.names),
+      );
     case "request.create":
       return application.requests.createRequest(
         userId,
@@ -539,6 +546,33 @@ function requireEnvironmentVariables(
         );
     }
   });
+}
+
+/** Validates a bounded unique list of variable names requested for preview. */
+function requireVariableNames(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 100) {
+    throw new CommandError(
+      "validation_failed",
+      "names must be an array containing at most 100 items.",
+    );
+  }
+  const names = value.map((name) => {
+    const parsed = requireString(name, "variable name");
+    if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/u.test(parsed)) {
+      throw new CommandError(
+        "validation_failed",
+        `Variable name ${parsed} is invalid.`,
+      );
+    }
+    return parsed;
+  });
+  if (new Set(names).size !== names.length) {
+    throw new CommandError(
+      "validation_failed",
+      "names must not contain duplicates.",
+    );
+  }
+  return names;
 }
 
 /** Requires a raw request body string, including the valid empty body. */

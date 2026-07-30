@@ -659,9 +659,15 @@
   --select-trigger-hover-border: var(--success);
 }
 
-.url-input {
+.url-input,
+.url-template-input {
   font-family: var(--font-mono);
   font-size: var(--font-size-sm);
+}
+
+.url-template-input .template-text-control-input,
+.field-template-input .template-text-control-input {
+  width: 100%;
 }
 
 .request-tabs {
@@ -738,6 +744,12 @@
   background: var(--surface-primary);
 }
 
+.field-template-input {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
 .inherited-header-row .field-cell-input:disabled {
   opacity: 1;
   color: var(--text-secondary);
@@ -781,6 +793,26 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
   background: var(--surface-code);
+}
+
+.body-template-input {
+  width: 100%;
+  height: 100%;
+  min-height: 8rem;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.body-template-input .template-text-control-input {
+  width: 100%;
+  height: 100%;
+  min-height: 8rem;
+  resize: vertical;
+  padding: var(--space-3);
+  line-height: var(--line-height-code);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: transparent;
 }
 
 .response-panel {

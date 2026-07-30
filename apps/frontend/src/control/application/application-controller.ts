@@ -9,6 +9,7 @@ import type {
   RequestField,
   RequestView,
   TreeNode,
+  VariablePreviewResult,
   WorkspaceSummary,
 } from "@/model/contracts/backend";
 import { useApplicationStore } from "@/control/state/application-store";
@@ -39,6 +40,8 @@ class WorkflowError extends Error {
 export class ApplicationController {
   readonly session: SessionController;
   readonly #webSocket: BackendWebSocketClient;
+  #previewNames: readonly string[] = [];
+  #previewSequence = 0;
 
   constructor(session: SessionController, webSocket: BackendWebSocketClient) {
     this.session = session;
@@ -105,6 +108,9 @@ export class ApplicationController {
     store.environments = environmentList.environments;
     store.selectedEnvironmentId = environmentList.selectedEnvironmentId;
     store.selectedEnvironment = null;
+    store.variablePreviews = [];
+    this.#previewNames = [];
+    this.#previewSequence += 1;
     store.selectedCollectionId = null;
     store.selectedCollection = null;
     store.collectionChildren = {};
@@ -126,7 +132,39 @@ export class ApplicationController {
         selectedEnvironmentId: string | null;
       }>("environment.select", { workspaceId, environmentId });
       store.selectedEnvironmentId = result.selectedEnvironmentId;
+      await this.#refreshVariablePreviews();
     });
+  }
+
+  /** Refreshes redacted resolution hints without blocking request editing. */
+  async previewVariables(names: readonly string[]): Promise<void> {
+    this.#previewNames = [...new Set(names)].slice(0, 100);
+    await this.#refreshVariablePreviews();
+  }
+
+  /** Applies only the newest best-effort preview response for active context. */
+  async #refreshVariablePreviews(): Promise<void> {
+    const store = useApplicationStore();
+    const workspaceId = store.selectedWorkspaceId;
+    const names = this.#previewNames;
+    const sequence = ++this.#previewSequence;
+    if (workspaceId === null || names.length === 0) {
+      store.variablePreviews = [];
+      return;
+    }
+    try {
+      const result = await this.#webSocket.command<VariablePreviewResult>(
+        "environment.preview_variables",
+        { workspaceId, names },
+      );
+      if (sequence === this.#previewSequence) {
+        store.variablePreviews = [...result.previews];
+      }
+    } catch {
+      if (sequence === this.#previewSequence) {
+        store.variablePreviews = [];
+      }
+    }
   }
 
   /** Loads one redacted environment profile for management. */
@@ -155,6 +193,7 @@ export class ApplicationController {
       );
       await this.#reloadEnvironments(workspaceId);
       store.selectedEnvironment = environment;
+      await this.#refreshVariablePreviews();
       return environment;
     });
   }
@@ -175,6 +214,7 @@ export class ApplicationController {
       );
       await this.#reloadEnvironments(workspaceId);
       store.selectedEnvironment = environment;
+      await this.#refreshVariablePreviews();
       return environment;
     });
   }
@@ -193,6 +233,7 @@ export class ApplicationController {
       });
       store.selectedEnvironment = null;
       await this.#reloadEnvironments(workspaceId);
+      await this.#refreshVariablePreviews();
     });
   }
 

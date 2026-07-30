@@ -1,0 +1,95 @@
+// @vitest-environment jsdom
+
+import { createI18n } from "vue-i18n";
+import { mount } from "@vue/test-utils";
+import { describe, expect, it } from "vitest";
+
+import { enUsMessages } from "../src/app/i18n/messages";
+import {
+  collectTemplateVariableNames,
+  parseTemplateSegments,
+} from "../src/model/domain/template-variables";
+import TemplateTextControl from "../src/view/presentation/controls/TemplateTextControl.vue";
+
+describe("template variable editing", () => {
+  it("recognizes valid placeholders while preserving escapes and invalid text", () => {
+    expect(
+      collectTemplateVariableNames([
+        "<<base_url>>/<<<<literal>>/<<token>>/<<base_url>>",
+      ]),
+    ).toEqual(["base_url", "token"]);
+    expect(
+      parseTemplateSegments("<<invalid name>>").find(
+        (segment) => segment.kind === "variable",
+      ),
+    ).toMatchObject({ name: "invalid name", valid: false });
+  });
+
+  it("decorates kinds and inspects ordinary values without exposing secrets", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const modelValue = "<<base_url>>/resource?token=<<token>>";
+    const source = {
+      scope: "environment" as const,
+      environmentId: "019facab-1eee-765f-bd9f-ac2449151bf0",
+      environmentName: "Development",
+      environmentRevision: 3,
+    };
+    const wrapper = mount(TemplateTextControl, {
+      props: {
+        modelValue,
+        previews: [
+          {
+            name: "base_url",
+            status: "resolved",
+            declaredKind: "value",
+            effectiveKind: "value",
+            aliasTarget: null,
+            value: "https://api.example.test",
+            secretVersion: null,
+            diagnostic: null,
+            source,
+          },
+          {
+            name: "token",
+            status: "resolved",
+            declaredKind: "secret",
+            effectiveKind: "secret",
+            aliasTarget: null,
+            value: null,
+            secretVersion: 7,
+            diagnostic: null,
+            source,
+          },
+        ],
+      },
+      global: { plugins: [i18n] },
+    });
+
+    expect(wrapper.get('[data-variable-name="base_url"]').classes()).toContain(
+      "template-variable-token-kind-value",
+    );
+    expect(wrapper.get('[data-variable-name="token"]').classes()).toContain(
+      "template-variable-token-kind-secret",
+    );
+
+    const input = wrapper.get<HTMLInputElement>("input");
+    input.element.setSelectionRange(3, 3);
+    await input.trigger("focus");
+    await input.trigger("keyup");
+    expect(wrapper.get('[role="tooltip"]').text()).toContain(
+      "https://api.example.test",
+    );
+
+    const tokenPosition = modelValue.indexOf("<<token>>") + 3;
+    input.element.setSelectionRange(tokenPosition, tokenPosition);
+    await input.trigger("keyup");
+    expect(wrapper.get('[role="tooltip"]').text()).toContain(
+      "Secret value stored · version 7",
+    );
+    expect(wrapper.html()).not.toContain("top-secret-token");
+  });
+});

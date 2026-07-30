@@ -180,6 +180,51 @@ describe("environment service", () => {
         fixture.workspaceId,
         environment.environmentId,
       );
+      const preview = await fixture.environments.previewVariables(
+        fixture.userId,
+        fixture.firstSessionId,
+        fixture.workspaceId,
+        ["base", "token", "auth", "broken", "missing"],
+      );
+      expect(preview.previews).toMatchObject([
+        {
+          name: "base",
+          status: "resolved",
+          declaredKind: "value",
+          effectiveKind: "value",
+          value: "https://dev.example",
+        },
+        {
+          name: "token",
+          status: "resolved",
+          declaredKind: "secret",
+          effectiveKind: "secret",
+          value: null,
+          secretVersion: 1,
+        },
+        {
+          name: "auth",
+          status: "resolved",
+          declaredKind: "alias",
+          effectiveKind: "secret",
+          aliasTarget: "token",
+          value: null,
+          secretVersion: 1,
+        },
+        { name: "broken", status: "error", declaredKind: "alias" },
+        { name: "missing", status: "missing", source: null },
+      ]);
+      expect(JSON.stringify(preview)).not.toContain("top-secret-token");
+      await expect(
+        fixture.environments.previewVariables(
+          fixture.userId,
+          fixture.secondSessionId,
+          fixture.workspaceId,
+          ["base"],
+        ),
+      ).resolves.toMatchObject({
+        previews: [{ name: "base", status: "missing", source: null }],
+      });
       const prepared = await fixture.requests.prepareTemporaryExecution(
         fixture.userId,
         fixture.firstSessionId,

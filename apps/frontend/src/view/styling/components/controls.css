@@ -192,6 +192,144 @@
   border-color: var(--border-danger);
 }
 
+.template-text-control {
+  position: relative;
+  min-width: 0;
+  border-radius: var(--radius-control);
+  background: var(--surface-primary);
+}
+
+.template-text-control[data-font="mono"] {
+  font-family: var(--font-mono);
+}
+
+.template-text-control-input {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+
+.template-text-control-mirror {
+  position: absolute;
+  z-index: 0;
+  inset: 1px;
+  overflow: hidden;
+  color: transparent;
+  border-radius: calc(var(--radius-control) - 1px);
+  pointer-events: none;
+}
+
+.template-text-control-mirror-content {
+  width: max-content;
+  min-width: 100%;
+  height: 100%;
+  padding-inline: var(--space-3);
+  line-height: calc(var(--control-height) - 2px);
+  white-space: pre;
+  transform-origin: top left;
+}
+
+.template-text-control[data-density="compact"]
+  .template-text-control-mirror-content {
+  padding-inline: var(--space-2);
+  line-height: calc(var(--control-height-compact) - 2px);
+}
+
+.template-text-control[data-multiline] .template-text-control-mirror-content {
+  width: 100%;
+  min-height: 100%;
+  height: auto;
+  padding: var(--space-3);
+  line-height: var(--line-height-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.template-variable-token {
+  border-radius: 0.2rem;
+  background: color-mix(in srgb, var(--accent-primary) 13%, transparent);
+  text-decoration-line: underline;
+  text-decoration-color: var(--accent-primary);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.16em;
+}
+
+.template-variable-token-kind-alias {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  text-decoration-color: var(--warning);
+  text-decoration-style: dashed;
+}
+
+.template-variable-token-kind-secret,
+.template-variable-token-secret-tainted {
+  background: color-mix(in srgb, var(--accent-secondary) 16%, transparent);
+  text-decoration-color: var(--accent-secondary);
+  text-decoration-style: double;
+}
+
+.template-variable-token-unset,
+.template-variable-token-kind-unset {
+  background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+  text-decoration-line: line-through;
+  text-decoration-color: var(--text-secondary);
+}
+
+.template-variable-token-missing,
+.template-variable-token-error {
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+  text-decoration-color: var(--danger);
+  text-decoration-style: wavy;
+}
+
+.template-variable-token-pending {
+  background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+  text-decoration-color: var(--text-secondary);
+  text-decoration-style: dotted;
+}
+
+.variable-preview-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  display: flex;
+  width: max-content;
+  min-width: 14rem;
+  max-width: min(30rem, calc(100vi - var(--space-6)));
+  max-height: 16rem;
+  overflow: auto;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-body);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--surface-primary);
+  box-shadow: var(--shadow-dialog);
+}
+
+.variable-preview-popover strong code {
+  color: var(--accent-primary);
+}
+
+.variable-preview-value {
+  max-height: 8rem;
+  overflow: auto;
+  padding: var(--space-2);
+  color: var(--text-primary);
+  border-radius: var(--radius-control);
+  background: var(--surface-code);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.variable-preview-error {
+  color: var(--danger);
+}
+
 .checkbox-control {
   display: inline-flex;
   min-width: 0;

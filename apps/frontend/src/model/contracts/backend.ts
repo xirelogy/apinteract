@@ -12,6 +12,9 @@ export type EnvironmentVariableView =
   components["schemas"]["EnvironmentVariableView"];
 export type EnvironmentVariableWrite =
   components["schemas"]["EnvironmentVariableWrite"];
+export type VariablePreview = components["schemas"]["VariablePreview"];
+export type VariablePreviewResult =
+  components["schemas"]["VariablePreviewResult"];
 export type RequestView = components["schemas"]["RequestView"];
 export type HttpMethod = components["schemas"]["HttpMethod"];
 export type RequestField = components["schemas"]["RequestField"];

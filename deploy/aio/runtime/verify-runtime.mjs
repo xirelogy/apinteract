@@ -158,6 +158,7 @@ async function createPersistentJourney(client, accessToken, targetUrl) {
   await verifyBodyDownload(accessToken, execution.executionId, marker);
   return {
     marker,
+    targetUrl,
     workspaceName,
     collectionName,
     requestName,
@@ -228,6 +229,24 @@ async function verifyRestoredJourney(client, accessToken, state) {
     workspaceId: state.workspaceId,
     environmentId: state.environmentId,
   });
+  const preview = await client.command("environment.preview_variables", {
+    workspaceId: state.workspaceId,
+    names: ["base_url", "token"],
+  });
+  const baseUrl = preview.previews?.find(
+    (variable) => variable.name === "base_url",
+  );
+  const token = preview.previews?.find((variable) => variable.name === "token");
+  if (
+    baseUrl?.status !== "resolved" ||
+    baseUrl.value !== state.targetUrl ||
+    token?.status !== "resolved" ||
+    token.effectiveKind !== "secret" ||
+    token.value !== null ||
+    JSON.stringify(preview).includes(`secret-${state.marker}`)
+  ) {
+    throw new Error("Variable previews were stale or exposed a secret");
+  }
   const children = await client.command("tree.list", {
     workspaceId: state.workspaceId,
     parentCollectionId: state.collectionId,

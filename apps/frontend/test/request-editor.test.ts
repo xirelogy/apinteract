@@ -2,13 +2,14 @@
 
 import { createI18n } from "vue-i18n";
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
 import RequestEditor from "../src/view/presentation/features/RequestEditor.vue";
 
 describe("RequestEditor", () => {
   it("allows a target URL containing an environment placeholder", async () => {
+    vi.useFakeTimers();
     const i18n = createI18n({
       legacy: false,
       locale: "en-US",
@@ -42,6 +43,9 @@ describe("RequestEditor", () => {
     expect(wrapper.emitted("execute")?.[0]?.[0]).toMatchObject({
       targetUrl: "<<base_url>>/resource",
     });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(wrapper.emitted("preview")).toEqual([[["base_url"]]]);
+    vi.useRealTimers();
   });
 
   it("allows an unnamed temporary request to open the naming dialog", async () => {

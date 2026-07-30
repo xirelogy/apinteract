@@ -212,6 +212,7 @@ export interface components {
       | components["schemas"]["EnvironmentUpdateCommand"]
       | components["schemas"]["EnvironmentDeleteCommand"]
       | components["schemas"]["EnvironmentSelectCommand"]
+      | components["schemas"]["EnvironmentPreviewVariablesCommand"]
       | components["schemas"]["RequestCreateCommand"]
       | components["schemas"]["RequestGetCommand"]
       | components["schemas"]["RequestUpdateCommand"]
@@ -416,6 +417,20 @@ export interface components {
        */
       type: "EnvironmentSelectCommand";
     };
+    EnvironmentPreviewVariablesCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "environment.preview_variables";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+        names: components["schemas"]["VariableName"][];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "EnvironmentPreviewVariablesCommand";
+    };
     RequestCreateCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
       type?: "request.create";
@@ -514,6 +529,7 @@ export interface components {
     WebSocketReplyPayload:
       | components["schemas"]["EnvironmentListView"]
       | components["schemas"]["EnvironmentView"]
+      | components["schemas"]["VariablePreviewResult"]
       | {
           [key: string]: unknown;
         };
@@ -555,6 +571,29 @@ export interface components {
     EnvironmentListView: {
       environments: components["schemas"]["EnvironmentSummary"][];
       selectedEnvironmentId: components["schemas"]["EnvironmentId"] | null;
+    };
+    VariablePreviewResult: {
+      previews: components["schemas"]["VariablePreview"][];
+    };
+    VariablePreview: {
+      name: components["schemas"]["VariableName"];
+      /** @enum {string} */
+      status: "resolved" | "missing" | "unset" | "error";
+      declaredKind: ("value" | "secret" | "alias" | "unset") | null;
+      effectiveKind: ("value" | "secret") | null;
+      aliasTarget: components["schemas"]["VariableName"] | null;
+      /** @description Resolved ordinary value. Secret-derived and unresolved values are always null. */
+      value: string | null;
+      secretVersion: number | null;
+      diagnostic: string | null;
+      source: components["schemas"]["VariablePreviewSource"] | null;
+    };
+    VariablePreviewSource: {
+      /** @constant */
+      scope: "environment";
+      environmentId: components["schemas"]["EnvironmentId"];
+      environmentName: string;
+      environmentRevision: number;
     };
     EnvironmentVariableView:
       | components["schemas"]["EnvironmentValueVariableView"]

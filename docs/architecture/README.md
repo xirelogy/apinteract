@@ -110,6 +110,12 @@ and text bodies immediately before execution. Persisted execution evidence
 identifies the environment revision and secret versions without copying secret
 plaintext into the snapshot.
 
+The request editor recognizes the same placeholder grammar before execution and
+requests redacted resolution previews from the backend. Ordinary variables may
+show their current resolved value; secret and secret-derived variables expose
+only kind, source scope, presence, and version metadata. Preview results are
+advisory and execution always performs authoritative resolution again.
+
 Normal APIs never return workspace secret values. The built-in MVP persistence
 representation may store those values without at-rest encryption, isolated
 behind a versioned backend storage boundary so a later encrypted or external

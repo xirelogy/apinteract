@@ -13,6 +13,7 @@ import {
   normalizeName,
   ResourceNotFoundError,
 } from "../workspaces/workspace-service.js";
+import { VariableResolver } from "./variable-resolver.js";
 
 export type EnvironmentVariableWrite =
   | {
@@ -96,8 +97,35 @@ export interface ResolvedEnvironmentVariable {
 
 export interface SelectedEnvironmentProfile {
   readonly environmentId: EntityId;
+  readonly name: string;
   readonly revision: number;
   readonly variables: readonly ResolvedEnvironmentVariable[];
+}
+
+/** Identifies the effective persisted scope supplying a previewed variable. */
+export interface VariablePreviewSource {
+  readonly scope: "environment";
+  readonly environmentId: EntityId;
+  readonly environmentName: string;
+  readonly environmentRevision: number;
+}
+
+/** Describes one editor-visible resolution without exposing secret plaintext. */
+export interface VariablePreview {
+  readonly name: string;
+  readonly status: "resolved" | "missing" | "unset" | "error";
+  readonly declaredKind: "value" | "secret" | "alias" | "unset" | null;
+  readonly effectiveKind: "value" | "secret" | null;
+  readonly aliasTarget: string | null;
+  readonly value: string | null;
+  readonly secretVersion: number | null;
+  readonly diagnostic: string | null;
+  readonly source: VariablePreviewSource | null;
+}
+
+/** Returns previews in the same order as the requested unique variable names. */
+export interface VariablePreviewResult {
+  readonly previews: readonly VariablePreview[];
 }
 
 interface SecretMutation {
@@ -371,6 +399,107 @@ export class EnvironmentService {
     return { selectedEnvironmentId: environmentId };
   }
 
+  /** Resolves requested names for editor hints without returning secret values. */
+  async previewVariables(
+    userId: EntityId,
+    sessionId: EntityId,
+    workspaceId: EntityId,
+    names: readonly string[],
+  ): Promise<VariablePreviewResult> {
+    await this.#workspaces.requireCanRead(this.#database, userId, workspaceId);
+    const profile = await this.selectedProfile(
+      this.#database,
+      sessionId,
+      workspaceId,
+    );
+    if (profile === null) {
+      return {
+        previews: names.map((name) => ({
+          name,
+          status: "missing",
+          declaredKind: null,
+          effectiveKind: null,
+          aliasTarget: null,
+          value: null,
+          secretVersion: null,
+          diagnostic: "No environment is selected",
+          source: null,
+        })),
+      };
+    }
+    const variables = new Map(
+      profile.variables.map((variable) => [variable.name, variable] as const),
+    );
+    const resolver = new VariableResolver(profile);
+    const source: VariablePreviewSource = {
+      scope: "environment",
+      environmentId: profile.environmentId,
+      environmentName: profile.name,
+      environmentRevision: profile.revision,
+    };
+    return {
+      previews: names.map((name) => {
+        validateVariableName(name);
+        const variable = variables.get(name);
+        if (variable === undefined) {
+          return {
+            name,
+            status: "missing",
+            declaredKind: null,
+            effectiveKind: null,
+            aliasTarget: null,
+            value: null,
+            secretVersion: null,
+            diagnostic: `Variable ${name} is missing`,
+            source: null,
+          };
+        }
+        const common = {
+          name,
+          declaredKind: variable.kind,
+          aliasTarget: variable.kind === "alias" ? variable.aliasTarget : null,
+          source,
+        };
+        if (variable.kind === "unset") {
+          return {
+            ...common,
+            status: "unset",
+            effectiveKind: null,
+            value: null,
+            secretVersion: null,
+            diagnostic: `Variable ${name} is unset`,
+          };
+        }
+        try {
+          const resolved = resolver.resolve(name);
+          return {
+            ...common,
+            status: "resolved",
+            effectiveKind: resolved.effectiveKind,
+            value: resolved.secret ? null : resolved.value,
+            secretVersion:
+              resolved.secretReferences[0]?.version ??
+              (variable.kind === "secret" ? variable.secretVersion : null),
+            diagnostic: null,
+          };
+        } catch (cause) {
+          return {
+            ...common,
+            status: "error",
+            effectiveKind: variable.kind === "secret" ? "secret" : null,
+            value: null,
+            secretVersion:
+              variable.kind === "secret" ? variable.secretVersion : null,
+            diagnostic:
+              cause instanceof Error
+                ? cause.message
+                : `Variable ${name} could not be resolved`,
+          };
+        }
+      }),
+    };
+  }
+
   /** Loads the selected environment including secrets for composition only. */
   async selectedProfile(
     database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
@@ -384,7 +513,7 @@ export class EnvironmentService {
         "environment.id",
         "selection.selected_environment_id",
       )
-      .select(["environment.id", "environment.revision"])
+      .select(["environment.id", "environment.name", "environment.revision"])
       .where("selection.session_id", "=", idToBytes(sessionId))
       .where("selection.workspace_id", "=", idToBytes(workspaceId))
       .where("environment.workspace_id", "=", idToBytes(workspaceId))
@@ -413,6 +542,7 @@ export class EnvironmentService {
       .execute();
     return {
       environmentId: bytesToId(selected.id),
+      name: selected.name,
       revision: selected.revision,
       variables: variables.map((variable) => ({
         variableId: bytesToId(variable.id),

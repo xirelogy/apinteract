@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Lock, Play, Plus, Save, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
@@ -8,13 +8,15 @@ import type {
   HttpMethod,
   RequestField,
   RequestView,
+  VariablePreview,
 } from "@/model/contracts/backend";
 import type { RequestDraftInput } from "@/model/domain/application";
+import { collectTemplateVariableNames } from "@/model/domain/template-variables";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
-import TextArea from "@/view/presentation/controls/TextArea.vue";
+import TemplateTextControl from "@/view/presentation/controls/TemplateTextControl.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
 import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
 import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
@@ -22,15 +24,23 @@ import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
 import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 import ResponsePanel from "./ResponsePanel.vue";
 
-const props = defineProps<{
-  request: RequestView | null;
-  draft: RequestDraftInput | null;
-  execution: ExecutionView | null;
-  tabId: string | null;
-  temporary: boolean;
-  inheritedHeaders: readonly RequestField[];
-  busy: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    request: RequestView | null;
+    draft: RequestDraftInput | null;
+    execution: ExecutionView | null;
+    tabId: string | null;
+    temporary: boolean;
+    inheritedHeaders: readonly RequestField[];
+    variablePreviews?: readonly VariablePreview[];
+    previewContextKey?: string | null;
+    busy: boolean;
+  }>(),
+  {
+    variablePreviews: () => [],
+    previewContextKey: null,
+  },
+);
 const { t } = useI18n();
 
 const emit = defineEmits<{
@@ -38,6 +48,7 @@ const emit = defineEmits<{
   execute: [draft: RequestDraftInput];
   change: [draft: RequestDraftInput];
   download: [executionId: string];
+  preview: [names: readonly string[]];
 }>();
 
 const methods: readonly HttpMethod[] = [
@@ -61,6 +72,7 @@ const query = ref<RequestField[]>([]);
 const headers = ref<RequestField[]>([]);
 const body = ref("");
 const activeTab = ref<"query" | "headers" | "body">("query");
+let previewTimer: ReturnType<typeof setTimeout> | undefined;
 
 watch(
   () => props.draft,
@@ -75,6 +87,30 @@ watch(
   { immediate: true },
 );
 const validTarget = computed(() => isValidTargetTemplate(targetUrl.value));
+const referencedVariableNames = computed(() =>
+  collectTemplateVariableNames([
+    targetUrl.value,
+    ...query.value.map((field) => field.value),
+    ...headers.value.map((field) => field.value),
+    ...props.inheritedHeaders.map((field) => field.value),
+    body.value,
+  ]),
+);
+const previewSignature = computed(() =>
+  referencedVariableNames.value.join("\0"),
+);
+
+watch(
+  [previewSignature, () => props.previewContextKey],
+  scheduleVariablePreview,
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  if (previewTimer !== undefined) {
+    clearTimeout(previewTimer);
+  }
+});
 
 /** Accepts final HTTP URLs and bounded placeholders resolved by the backend. */
 function isValidTargetTemplate(value: string): boolean {
@@ -87,6 +123,17 @@ function isValidTargetTemplate(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Debounces metadata lookup while preserving uninterrupted request editing. */
+function scheduleVariablePreview(): void {
+  if (previewTimer !== undefined) {
+    clearTimeout(previewTimer);
+  }
+  previewTimer = setTimeout(() => {
+    previewTimer = undefined;
+    emit("preview", [...referencedVariableNames.value]);
+  }, 150);
 }
 const canSave = computed(
   () => validTarget.value && (props.temporary || name.value.trim() !== ""),
@@ -243,10 +290,11 @@ function activeFieldKind(): string {
               <span class="method-option">{{ option.label }}</span>
             </template>
           </SelectMenu>
-          <TextInput
+          <TemplateTextControl
             v-model="targetUrl"
-            class="url-input"
+            class="url-template-input"
             font="mono"
+            :previews="variablePreviews"
             :aria-label="t('request.targetUrl')"
             inputmode="url"
             autocomplete="off"
@@ -315,11 +363,12 @@ function activeFieldKind(): string {
                 "
                 disabled
               />
-              <TextInput
+              <TemplateTextControl
                 :model-value="field.value"
-                class="field-cell-input"
+                class="field-template-input"
                 density="compact"
                 font="mono"
+                :previews="variablePreviews"
                 :aria-label="
                   t('request.inheritedHeaderValue', { index: index + 1 })
                 "
@@ -370,11 +419,12 @@ function activeFieldKind(): string {
                 :disabled="busy"
                 @input="emitChange"
               />
-              <TextInput
+              <TemplateTextControl
                 v-model="field.value"
-                class="field-cell-input"
+                class="field-template-input"
                 density="compact"
                 font="mono"
+                :previews="variablePreviews"
                 :aria-label="
                   t(
                     activeTab === 'query'
@@ -428,10 +478,12 @@ function activeFieldKind(): string {
           </TabsPanel>
 
           <TabsPanel v-else value="body" class="request-body-editor">
-            <TextArea
+            <TemplateTextControl
               v-model="body"
-              class="raw-body-input"
+              class="body-template-input"
+              multiline
               font="mono"
+              :previews="variablePreviews"
               :aria-label="t('request.rawBody')"
               :placeholder="t('request.rawBody')"
               spellcheck="false"

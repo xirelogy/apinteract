@@ -127,6 +127,13 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(draftRevision).toHaveText("Temporary");
   await page.getByLabel("Request name", { exact: true }).fill(requestName);
   await page.getByLabel("Target URL").fill("<<base_url>>/echo");
+  await expect(
+    page.locator('.url-template-input [data-variable-name="base_url"]'),
+  ).toHaveAttribute("data-preview-status", "resolved");
+  await inspectTemplateAt(page, "Target URL", 3);
+  await expect(page.getByRole("tooltip")).toContainText(
+    "http://127.0.0.1:8090",
+  );
   await selectMenuOption(page, "HTTP method", "POST");
   const addParameterButton = page.getByRole("button", {
     name: "Add parameter",
@@ -147,6 +154,12 @@ test("creates, restores, and sends the first workspace request", async ({
     .getByLabel("Header name 1", { exact: true })
     .fill("X-Fixture-Request");
   await page.getByLabel("Header value 1", { exact: true }).fill("<<token>>");
+  await expect(
+    page.locator('.field-template-input [data-variable-name="token"]'),
+  ).toHaveAttribute("data-preview-status", "resolved");
+  await inspectTemplateAt(page, "Header value 1", 3);
+  await expect(page.getByRole("tooltip")).toContainText("Secret value stored");
+  await expect(page.getByRole("tooltip")).not.toContainText(`secret-${suffix}`);
   await page.getByRole("tab", { name: "Body" }).click();
   await page.getByLabel("Raw request body").fill("payload-<<source>>");
   await page.getByRole("button", { name: "Send" }).click();
@@ -417,6 +430,24 @@ async function selectMenuOption(
     .getByRole("listbox", { name: label })
     .getByRole("option", { name: option, exact: true })
     .click();
+}
+
+/** Focuses one placeholder position so its accessible preview becomes visible. */
+async function inspectTemplateAt(
+  page: Page,
+  label: string,
+  position: number,
+): Promise<void> {
+  await page.getByLabel(label, { exact: true }).evaluate((element, caret) => {
+    if (
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement
+    ) {
+      element.focus();
+      element.setSelectionRange(caret, caret);
+      element.dispatchEvent(new Event("select", { bubbles: true }));
+    }
+  }, position);
 }
 
 /** Verifies the application work area consumes all space below the header. */

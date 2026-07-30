@@ -43,6 +43,7 @@ const {
   environments,
   selectedEnvironmentId,
   selectedEnvironment,
+  variablePreviews,
   rootNodes,
   selectedCollectionId,
   selectedCollection,
@@ -62,6 +63,10 @@ const visibleRequestTabs = computed(() =>
   requestTabs.value.filter(
     (tab) => tab.workspaceId === selectedWorkspaceId.value,
   ),
+);
+const variablePreviewContextKey = computed(
+  () =>
+    `${selectedWorkspaceId.value ?? ""}:${selectedEnvironmentId.value ?? ""}`,
 );
 const canEditWorkspace = computed(() => {
   const workspace = workspaces.value.find(
@@ -338,12 +343,15 @@ function discardRequestTab(): void {
           :tab-id="activeTab?.tabId ?? null"
           :temporary="activeTab?.request === null"
           :inherited-headers="activeTab?.inheritedHeaders ?? []"
+          :variable-previews="variablePreviews"
+          :preview-context-key="variablePreviewContextKey"
           :busy="activeTab?.busy ?? false"
           @change="
             activeTab && controller.updateRequestDraft(activeTab.tabId, $event)
           "
           @save="saveRequest"
           @execute="executeRequest"
+          @preview="controller.previewVariables($event)"
           @download="downloadExecutionBody"
         />
       </div>

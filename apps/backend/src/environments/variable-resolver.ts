@@ -11,6 +11,7 @@ export interface SecretReference {
 export interface ResolvedVariableValue {
   readonly value: string;
   readonly secret: boolean;
+  readonly effectiveKind: "value" | "secret";
   readonly secretReferences: readonly SecretReference[];
 }
 
@@ -78,6 +79,7 @@ export class VariableResolver {
     return {
       value,
       secret,
+      effectiveKind: secret ? "secret" : "value",
       secretReferences: [...references.values()],
       referencedNames: names,
     };
@@ -101,6 +103,7 @@ export class VariableResolver {
         return {
           value: variable.value ?? "",
           secret: false,
+          effectiveKind: "value",
           secretReferences: [],
         };
       case "secret":
@@ -112,6 +115,7 @@ export class VariableResolver {
         return {
           value: variable.value,
           secret: true,
+          effectiveKind: "secret",
           secretReferences: [
             {
               variableId: variable.variableId,

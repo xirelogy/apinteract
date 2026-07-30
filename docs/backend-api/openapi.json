@@ -265,6 +265,9 @@
             },
             "environmentProfile": {
               "$ref": "#/components/schemas/EnvironmentView"
+            },
+            "variablePreview": {
+              "$ref": "#/components/schemas/VariablePreviewResult"
             }
           },
           "rules": [
@@ -583,6 +586,9 @@
           },
           {
             "$ref": "#/components/schemas/EnvironmentSelectCommand"
+          },
+          {
+            "$ref": "#/components/schemas/EnvironmentPreviewVariablesCommand"
           },
           {
             "$ref": "#/components/schemas/RequestCreateCommand"
@@ -1007,6 +1013,31 @@
           }
         ]
       },
+      "EnvironmentPreviewVariablesCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "environment.preview_variables" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["workspaceId", "names"],
+                "properties": {
+                  "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+                  "names": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "uniqueItems": true,
+                    "items": { "$ref": "#/components/schemas/VariableName" }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
       "RequestCreateCommand": {
         "allOf": [
           {
@@ -1276,6 +1307,7 @@
         "anyOf": [
           { "$ref": "#/components/schemas/EnvironmentListView" },
           { "$ref": "#/components/schemas/EnvironmentView" },
+          { "$ref": "#/components/schemas/VariablePreviewResult" },
           { "type": "object", "additionalProperties": true }
         ]
       },
@@ -1400,6 +1432,92 @@
               { "type": "null" }
             ]
           }
+        }
+      },
+      "VariablePreviewResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["previews"],
+        "properties": {
+          "previews": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/VariablePreview" }
+          }
+        }
+      },
+      "VariablePreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "status",
+          "declaredKind",
+          "effectiveKind",
+          "aliasTarget",
+          "value",
+          "secretVersion",
+          "diagnostic",
+          "source"
+        ],
+        "properties": {
+          "name": { "$ref": "#/components/schemas/VariableName" },
+          "status": {
+            "type": "string",
+            "enum": ["resolved", "missing", "unset", "error"]
+          },
+          "declaredKind": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": ["value", "secret", "alias", "unset"]
+              },
+              { "type": "null" }
+            ]
+          },
+          "effectiveKind": {
+            "oneOf": [
+              { "type": "string", "enum": ["value", "secret"] },
+              { "type": "null" }
+            ]
+          },
+          "aliasTarget": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/VariableName" },
+              { "type": "null" }
+            ]
+          },
+          "value": {
+            "description": "Resolved ordinary value. Secret-derived and unresolved values are always null.",
+            "oneOf": [{ "type": "string" }, { "type": "null" }]
+          },
+          "secretVersion": {
+            "oneOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }]
+          },
+          "diagnostic": {
+            "oneOf": [{ "type": "string" }, { "type": "null" }]
+          },
+          "source": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/VariablePreviewSource" },
+              { "type": "null" }
+            ]
+          }
+        }
+      },
+      "VariablePreviewSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scope",
+          "environmentId",
+          "environmentName",
+          "environmentRevision"
+        ],
+        "properties": {
+          "scope": { "const": "environment" },
+          "environmentId": { "$ref": "#/components/schemas/EnvironmentId" },
+          "environmentName": { "type": "string" },
+          "environmentRevision": { "type": "integer", "minimum": 0 }
         }
       },
       "EnvironmentVariableView": {
