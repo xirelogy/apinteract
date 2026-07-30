@@ -467,6 +467,11 @@ export class EnvironmentService {
       if (write.variableId !== undefined && previous === undefined) {
         throw new ResourceNotFoundError("Environment variable not found");
       }
+      if (previous !== undefined && previous.kind !== write.kind) {
+        throw new EnvironmentConflictError(
+          "An existing environment variable's kind cannot be changed",
+        );
+      }
       if (write.kind === "alias") {
         validateVariableName(write.target);
       }
@@ -482,15 +487,6 @@ export class EnvironmentService {
       return { write, variableId, position, previous };
     });
     const mutations: SecretMutation[] = [];
-    for (const item of prepared) {
-      if (item.previous?.kind === "secret" && item.write.kind !== "secret") {
-        mutations.push({
-          type: "deleted",
-          variableId: item.variableId,
-          version: item.previous.version ?? 1,
-        });
-      }
-    }
     for (const [variableId, previous] of existing) {
       if (previous.kind === "secret" && !usedIds.has(variableId)) {
         mutations.push({

@@ -1463,6 +1463,7 @@
         }
       },
       "EnvironmentVariableWrite": {
+        "description": "Creates a variable when variableId is omitted or updates the identified variable without changing its existing kind.",
         "oneOf": [
           { "$ref": "#/components/schemas/EnvironmentValueVariableWrite" },
           { "$ref": "#/components/schemas/EnvironmentSecretVariableWrite" },

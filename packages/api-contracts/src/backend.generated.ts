@@ -589,6 +589,7 @@ export interface components {
       /** @constant */
       kind: "unset";
     };
+    /** @description Creates a variable when variableId is omitted or updates the identified variable without changing its existing kind. */
     EnvironmentVariableWrite:
       | components["schemas"]["EnvironmentValueVariableWrite"]
       | components["schemas"]["EnvironmentSecretVariableWrite"]

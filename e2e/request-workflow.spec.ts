@@ -12,7 +12,6 @@ test("creates, restores, and sends the first workspace request", async ({
   const leafCollectionName = `Inherited ${suffix}`;
   const requestName = `Hello fixture ${suffix}`;
   const environmentName = `Development ${suffix}`;
-  const targetUrl = "http://127.0.0.1:8090/echo";
   const mobile = testInfo.project.name === "mobile-chromium";
 
   await login(page);
@@ -27,9 +26,7 @@ test("creates, restores, and sends the first workspace request", async ({
     workspaceName,
   );
   if (mobile) {
-    await page
-      .getByRole("button", { name: "Close workspace navigator" })
-      .click();
+    await page.getByTitle("Close workspace navigator", { exact: true }).click();
   }
 
   await page.getByRole("button", { name: "Manage environments" }).click();
@@ -40,18 +37,23 @@ test("creates, restores, and sends the first workspace request", async ({
     .getByLabel("Name", { exact: true })
     .fill(environmentName);
   await environmentDialog.getByRole("button", { name: "Add variable" }).click();
-  await environmentDialog.getByLabel("Variable name 1").fill("source");
+  await environmentDialog.getByLabel("Variable name 1").fill("base_url");
   await environmentDialog
     .getByLabel("Variable value 1")
+    .fill("http://127.0.0.1:8090");
+  await environmentDialog.getByRole("button", { name: "Add variable" }).click();
+  await environmentDialog.getByLabel("Variable name 2").fill("source");
+  await environmentDialog
+    .getByLabel("Variable value 2")
     .fill(`environment-${suffix}`);
   await environmentDialog.getByRole("button", { name: "Add variable" }).click();
-  await environmentDialog.getByLabel("Variable name 2").fill("token");
-  await environmentDialog.getByLabel("Variable kind 2").click();
+  await environmentDialog.getByLabel("Variable name 3").fill("token");
+  await environmentDialog.getByLabel("Variable kind 3").click();
   await page
-    .getByRole("listbox", { name: "Variable kind 2" })
+    .getByRole("listbox", { name: "Variable kind 3" })
     .getByRole("option", { name: "Secret", exact: true })
     .click();
-  await environmentDialog.getByLabel("Secret value 2").fill(`secret-${suffix}`);
+  await environmentDialog.getByLabel("Secret value 3").fill(`secret-${suffix}`);
   await environmentDialog.getByRole("button", { name: "Save" }).click();
   await expect(environmentDialog).toBeHidden();
   await selectMenuOption(page, "Select environment", environmentName);
@@ -123,7 +125,7 @@ test("creates, restores, and sends the first workspace request", async ({
   const draftRevision = page.locator(".draft-revision");
   await expect(draftRevision).toHaveText("Temporary");
   await page.getByLabel("Request name", { exact: true }).fill(requestName);
-  await page.getByLabel("Target URL").fill(targetUrl);
+  await page.getByLabel("Target URL").fill("<<base_url>>/echo");
   await selectMenuOption(page, "HTTP method", "POST");
   const addParameterButton = page.getByRole("button", {
     name: "Add parameter",
@@ -291,7 +293,7 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.getByLabel("Request name", { exact: true })).toHaveValue(
     requestName,
   );
-  await expect(page.getByLabel("Target URL")).toHaveValue(targetUrl);
+  await expect(page.getByLabel("Target URL")).toHaveValue("<<base_url>>/echo");
   await expect(page.getByLabel("HTTP method")).toHaveAttribute(
     "data-value",
     "POST",

@@ -121,6 +121,22 @@ describe("environment service", () => {
         fixture.environments.update(
           fixture.userId,
           first.environmentId,
+          preserved.revision,
+          preserved.name,
+          [
+            {
+              variableId: secret.variableId,
+              name: secret.name,
+              kind: "value",
+              value: "not-a-secret",
+            },
+          ],
+        ),
+      ).rejects.toBeInstanceOf(EnvironmentConflictError);
+      await expect(
+        fixture.environments.update(
+          fixture.userId,
+          first.environmentId,
           first.revision,
           "stale",
           [],

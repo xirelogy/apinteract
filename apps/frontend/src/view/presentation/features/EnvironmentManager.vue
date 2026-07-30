@@ -118,8 +118,11 @@ function addVariable(): void {
   });
 }
 
-/** Changes kind while ensuring a newly entered secret is sent explicitly. */
+/** Changes kind only for an unsaved variable and marks new secrets explicit. */
 function changeKind(variable: DraftVariable, kind: string): void {
+  if (variable.variableId !== undefined) {
+    return;
+  }
   variable.kind = kind as DraftVariable["kind"];
   if (variable.kind === "secret" && !variable.hasValue) {
     variable.secretTouched = true;
@@ -280,7 +283,7 @@ function deleteEnvironment(): void {
             :options="kindOptions"
             :label="t('environment.variableKind', { index: index + 1 })"
             density="compact"
-            :disabled="busy || !canEdit"
+            :disabled="busy || !canEdit || variable.variableId !== undefined"
             @update:model-value="changeKind(variable, $event)"
           />
           <TextInput
@@ -325,6 +328,11 @@ function deleteEnvironment(): void {
               {{ t("environment.clearSecret") }}
             </ButtonControl>
           </div>
+          <span
+            v-else
+            class="environment-variable-empty-value"
+            aria-hidden="true"
+          ></span>
           <IconButton
             v-if="canEdit"
             :label="t('environment.removeVariable', { index: index + 1 })"

@@ -108,6 +108,7 @@ async function createPersistentJourney(client, accessToken, targetUrl) {
     workspaceId: workspace.workspaceId,
     name: "Persistent environment",
     variables: [
+      { name: "base_url", kind: "value", value: targetUrl },
       { name: "marker", kind: "value", value: marker },
       { name: "token", kind: "secret", value: `secret-${marker}` },
     ],
@@ -131,7 +132,7 @@ async function createPersistentJourney(client, accessToken, targetUrl) {
     parentCollectionId: collection.nodeId,
     name: requestName,
     method: "POST",
-    targetUrl,
+    targetUrl: "<<base_url>>",
     query: [{ name: "marker", value: "<<marker>>", enabled: true }],
     headers: [
       { name: "X-AIO-Verification", value: "<<token>>", enabled: true },

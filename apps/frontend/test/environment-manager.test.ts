@@ -139,6 +139,11 @@ describe("EnvironmentManager", () => {
 
     const secretInput = wrapper.get('input[aria-label="Secret value 1"]');
     expect((secretInput.element as HTMLInputElement).value).toBe("");
+    expect(
+      wrapper
+        .get('button[aria-label="Variable kind 1"]')
+        .attributes("disabled"),
+    ).toBeDefined();
     expect(wrapper.text()).not.toContain("top-secret-token");
     await wrapper.get('button[type="submit"]').trigger("submit");
     expect(wrapper.emitted("save")?.[0]).toEqual([

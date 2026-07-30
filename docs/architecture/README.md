@@ -101,11 +101,14 @@ environments. A new session begins with no environment selected, and deleting
 an environment clears all session selections that reference it.
 
 Environment variables may be ordinary values, write-only secrets, aliases, or
-explicitly unset values. Names are case-sensitive; aliases resolve after scope
-merging and preserve secret sensitivity. The backend interpolates variables in
-target URLs, query values, header values, and text bodies immediately before
-execution. Persisted execution evidence identifies the environment revision and
-secret versions without copying secret plaintext into the snapshot.
+explicitly unset values. A variable's kind is immutable after creation; changing
+kind requires removing it and creating a new variable, so a stored secret can
+never be recast as a readable value. Names are case-sensitive; aliases resolve
+after scope merging and preserve secret sensitivity. The backend interpolates
+`<<variable-name>>` placeholders in target URLs, query values, header values,
+and text bodies immediately before execution. Persisted execution evidence
+identifies the environment revision and secret versions without copying secret
+plaintext into the snapshot.
 
 Normal APIs never return workspace secret values. The built-in MVP persistence
 representation may store those values without at-rest encryption, isolated

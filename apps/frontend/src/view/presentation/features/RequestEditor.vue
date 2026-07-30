@@ -74,14 +74,20 @@ watch(
   },
   { immediate: true },
 );
-const validTarget = computed(() => {
+const validTarget = computed(() => isValidTargetTemplate(targetUrl.value));
+
+/** Accepts final HTTP URLs and bounded placeholders resolved by the backend. */
+function isValidTargetTemplate(value: string): boolean {
+  if (value.includes("<<")) {
+    return value.length <= 8192 && !value.includes("?") && !value.includes("#");
+  }
   try {
-    const url = new URL(targetUrl.value);
+    const url = new URL(value);
     return url.protocol === "http:" || url.protocol === "https:";
   } catch {
     return false;
   }
-});
+}
 const canSave = computed(
   () => validTarget.value && (props.temporary || name.value.trim() !== ""),
 );

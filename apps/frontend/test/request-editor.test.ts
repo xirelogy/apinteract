@@ -8,6 +8,42 @@ import { enUsMessages } from "../src/app/i18n/messages";
 import RequestEditor from "../src/view/presentation/features/RequestEditor.vue";
 
 describe("RequestEditor", () => {
+  it("allows a target URL containing an environment placeholder", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft: {
+          name: "Templated request",
+          method: "GET",
+          targetUrl: "<<base_url>>/resource",
+          query: [],
+          headers: [],
+          body: "",
+        },
+        execution: null,
+        tabId: "019facab-1eee-765f-bd9f-ac2449151be0",
+        temporary: true,
+        inheritedHeaders: [],
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    const buttons = wrapper.findAll(".command-bar button");
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]?.attributes("disabled")).toBeUndefined();
+    expect(buttons[1]?.attributes("disabled")).toBeUndefined();
+    await buttons[1]?.trigger("click");
+    expect(wrapper.emitted("execute")?.[0]?.[0]).toMatchObject({
+      targetUrl: "<<base_url>>/resource",
+    });
+  });
+
   it("allows an unnamed temporary request to open the naming dialog", async () => {
     const i18n = createI18n({
       legacy: false,
