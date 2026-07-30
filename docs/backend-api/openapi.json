@@ -259,6 +259,14 @@
           "clientMessages": {
             "$ref": "#/components/schemas/WebSocketCommand"
           },
+          "replyPayloads": {
+            "environmentList": {
+              "$ref": "#/components/schemas/EnvironmentListView"
+            },
+            "environmentProfile": {
+              "$ref": "#/components/schemas/EnvironmentView"
+            }
+          },
           "rules": [
             "The server emits system.ready immediately after upgrade.",
             "The client must authenticate before sending domain commands.",
@@ -361,6 +369,12 @@
         "$ref": "#/components/schemas/UuidV7"
       },
       "CollectionId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
+      "EnvironmentId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
+      "EnvironmentVariableId": {
         "$ref": "#/components/schemas/UuidV7"
       },
       "RequestId": {
@@ -551,6 +565,24 @@
           },
           {
             "$ref": "#/components/schemas/CollectionHeadersUpdateCommand"
+          },
+          {
+            "$ref": "#/components/schemas/EnvironmentListCommand"
+          },
+          {
+            "$ref": "#/components/schemas/EnvironmentCreateCommand"
+          },
+          {
+            "$ref": "#/components/schemas/EnvironmentGetCommand"
+          },
+          {
+            "$ref": "#/components/schemas/EnvironmentUpdateCommand"
+          },
+          {
+            "$ref": "#/components/schemas/EnvironmentDeleteCommand"
+          },
+          {
+            "$ref": "#/components/schemas/EnvironmentSelectCommand"
           },
           {
             "$ref": "#/components/schemas/RequestCreateCommand"
@@ -820,6 +852,161 @@
           }
         ]
       },
+      "EnvironmentListCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "environment.list" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["workspaceId"],
+                "properties": {
+                  "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "EnvironmentCreateCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "environment.create" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["workspaceId", "name", "variables"],
+                "properties": {
+                  "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "variables": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/EnvironmentVariableWrite"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "EnvironmentGetCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "environment.get" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["environmentId"],
+                "properties": {
+                  "environmentId": {
+                    "$ref": "#/components/schemas/EnvironmentId"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "EnvironmentUpdateCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "environment.update" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "environmentId",
+                  "expectedRevision",
+                  "name",
+                  "variables"
+                ],
+                "properties": {
+                  "environmentId": {
+                    "$ref": "#/components/schemas/EnvironmentId"
+                  },
+                  "expectedRevision": { "type": "integer", "minimum": 0 },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "variables": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/EnvironmentVariableWrite"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "EnvironmentDeleteCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "environment.delete" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["environmentId", "expectedRevision"],
+                "properties": {
+                  "environmentId": {
+                    "$ref": "#/components/schemas/EnvironmentId"
+                  },
+                  "expectedRevision": { "type": "integer", "minimum": 0 }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "EnvironmentSelectCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "environment.select" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["workspaceId", "environmentId"],
+                "properties": {
+                  "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+                  "environmentId": {
+                    "oneOf": [
+                      { "$ref": "#/components/schemas/EnvironmentId" },
+                      { "type": "null" }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
       "RequestCreateCommand": {
         "allOf": [
           {
@@ -868,8 +1055,8 @@
                   },
                   "targetUrl": {
                     "type": "string",
-                    "format": "uri",
-                    "pattern": "^https?://[^?#]+$"
+                    "maxLength": 8192,
+                    "description": "Absolute HTTP URL template validated after variable interpolation."
                   },
                   "query": {
                     "type": "array",
@@ -960,8 +1147,8 @@
                   },
                   "targetUrl": {
                     "type": "string",
-                    "format": "uri",
-                    "pattern": "^https?://[^?#]+$"
+                    "maxLength": 8192,
+                    "description": "Absolute HTTP URL template validated after variable interpolation."
                   },
                   "query": {
                     "type": "array",
@@ -1077,11 +1264,20 @@
           "correlationId": {
             "$ref": "#/components/schemas/CorrelationId"
           },
-          "payload": {},
+          "payload": {
+            "$ref": "#/components/schemas/WebSocketReplyPayload"
+          },
           "error": {
             "$ref": "#/components/schemas/WebSocketError"
           }
         }
+      },
+      "WebSocketReplyPayload": {
+        "anyOf": [
+          { "$ref": "#/components/schemas/EnvironmentListView" },
+          { "$ref": "#/components/schemas/EnvironmentView" },
+          { "type": "object", "additionalProperties": true }
+        ]
       },
       "WebSocketError": {
         "type": "object",
@@ -1176,6 +1372,178 @@
           },
           "method": {
             "$ref": "#/components/schemas/HttpMethod"
+          }
+        }
+      },
+      "EnvironmentSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["environmentId", "name", "revision"],
+        "properties": {
+          "environmentId": { "$ref": "#/components/schemas/EnvironmentId" },
+          "name": { "type": "string" },
+          "revision": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "EnvironmentListView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["environments", "selectedEnvironmentId"],
+        "properties": {
+          "environments": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EnvironmentSummary" }
+          },
+          "selectedEnvironmentId": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/EnvironmentId" },
+              { "type": "null" }
+            ]
+          }
+        }
+      },
+      "EnvironmentVariableView": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/EnvironmentValueVariableView" },
+          { "$ref": "#/components/schemas/EnvironmentSecretVariableView" },
+          { "$ref": "#/components/schemas/EnvironmentAliasVariableView" },
+          { "$ref": "#/components/schemas/EnvironmentUnsetVariableView" }
+        ]
+      },
+      "EnvironmentValueVariableView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["variableId", "name", "kind", "value"],
+        "properties": {
+          "variableId": {
+            "$ref": "#/components/schemas/EnvironmentVariableId"
+          },
+          "name": { "$ref": "#/components/schemas/VariableName" },
+          "kind": { "const": "value" },
+          "value": { "type": "string" }
+        }
+      },
+      "EnvironmentSecretVariableView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["variableId", "name", "kind", "hasValue", "secretVersion"],
+        "properties": {
+          "variableId": {
+            "$ref": "#/components/schemas/EnvironmentVariableId"
+          },
+          "name": { "$ref": "#/components/schemas/VariableName" },
+          "kind": { "const": "secret" },
+          "hasValue": { "type": "boolean" },
+          "secretVersion": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "EnvironmentAliasVariableView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["variableId", "name", "kind", "target"],
+        "properties": {
+          "variableId": {
+            "$ref": "#/components/schemas/EnvironmentVariableId"
+          },
+          "name": { "$ref": "#/components/schemas/VariableName" },
+          "kind": { "const": "alias" },
+          "target": { "$ref": "#/components/schemas/VariableName" }
+        }
+      },
+      "EnvironmentUnsetVariableView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["variableId", "name", "kind"],
+        "properties": {
+          "variableId": {
+            "$ref": "#/components/schemas/EnvironmentVariableId"
+          },
+          "name": { "$ref": "#/components/schemas/VariableName" },
+          "kind": { "const": "unset" }
+        }
+      },
+      "EnvironmentVariableWrite": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/EnvironmentValueVariableWrite" },
+          { "$ref": "#/components/schemas/EnvironmentSecretVariableWrite" },
+          { "$ref": "#/components/schemas/EnvironmentAliasVariableWrite" },
+          { "$ref": "#/components/schemas/EnvironmentUnsetVariableWrite" }
+        ]
+      },
+      "EnvironmentValueVariableWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "kind", "value"],
+        "properties": {
+          "variableId": {
+            "$ref": "#/components/schemas/EnvironmentVariableId"
+          },
+          "name": { "$ref": "#/components/schemas/VariableName" },
+          "kind": { "const": "value" },
+          "value": { "type": "string" }
+        }
+      },
+      "EnvironmentSecretVariableWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "kind"],
+        "properties": {
+          "variableId": {
+            "$ref": "#/components/schemas/EnvironmentVariableId"
+          },
+          "name": { "$ref": "#/components/schemas/VariableName" },
+          "kind": { "const": "secret" },
+          "value": { "type": "string", "writeOnly": true },
+          "clearValue": { "type": "boolean" }
+        }
+      },
+      "EnvironmentAliasVariableWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "kind", "target"],
+        "properties": {
+          "variableId": {
+            "$ref": "#/components/schemas/EnvironmentVariableId"
+          },
+          "name": { "$ref": "#/components/schemas/VariableName" },
+          "kind": { "const": "alias" },
+          "target": { "$ref": "#/components/schemas/VariableName" }
+        }
+      },
+      "EnvironmentUnsetVariableWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "kind"],
+        "properties": {
+          "variableId": {
+            "$ref": "#/components/schemas/EnvironmentVariableId"
+          },
+          "name": { "$ref": "#/components/schemas/VariableName" },
+          "kind": { "const": "unset" }
+        }
+      },
+      "VariableName": {
+        "type": "string",
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+      },
+      "EnvironmentView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environmentId",
+          "workspaceId",
+          "name",
+          "revision",
+          "variables"
+        ],
+        "properties": {
+          "environmentId": { "$ref": "#/components/schemas/EnvironmentId" },
+          "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+          "name": { "type": "string" },
+          "revision": { "type": "integer", "minimum": 0 },
+          "variables": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EnvironmentVariableView" }
           }
         }
       },
@@ -1277,7 +1645,8 @@
           },
           "targetUrl": {
             "type": "string",
-            "format": "uri"
+            "maxLength": 8192,
+            "description": "Absolute HTTP URL template validated after variable interpolation."
           },
           "queryMode": {
             "type": "string",
@@ -1390,8 +1759,8 @@
           },
           "targetUrl": {
             "type": "string",
-            "format": "uri",
-            "pattern": "^https?://[^?#]+$"
+            "maxLength": 8192,
+            "description": "Absolute HTTP URL template validated after variable interpolation."
           },
           "query": {
             "type": "array",

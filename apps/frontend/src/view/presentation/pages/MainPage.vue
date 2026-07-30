@@ -6,7 +6,10 @@ import { useRouter } from "vue-router";
 
 import { useApplicationController } from "@/app/dependencies";
 import { useApplicationStore } from "@/control/state/application-store";
-import type { RequestField } from "@/model/contracts/backend";
+import type {
+  EnvironmentVariableWrite,
+  RequestField,
+} from "@/model/contracts/backend";
 import {
   isRequestTabDirty,
   type RequestDraftInput,
@@ -15,6 +18,7 @@ import {
 import AppHeader from "@/view/presentation/layout/AppHeader.vue";
 import DiscardChangesDialog from "@/view/presentation/features/DiscardChangesDialog.vue";
 import CollectionHeadersDialog from "@/view/presentation/features/CollectionHeadersDialog.vue";
+import EnvironmentManager from "@/view/presentation/features/EnvironmentManager.vue";
 import RequestEditor from "@/view/presentation/features/RequestEditor.vue";
 import RequestTabs from "@/view/presentation/features/RequestTabs.vue";
 import SaveRequestDialog from "@/view/presentation/features/SaveRequestDialog.vue";
@@ -28,11 +32,17 @@ const navigatorOpen = ref(false);
 const saveDialogTab = ref<RequestTab | null>(null);
 const discardDialogTab = ref<RequestTab | null>(null);
 const collectionHeadersOpen = ref(false);
+const environmentManager = ref<InstanceType<typeof EnvironmentManager> | null>(
+  null,
+);
 const {
   session,
   connection,
   workspaces,
   selectedWorkspaceId,
+  environments,
+  selectedEnvironmentId,
+  selectedEnvironment,
   rootNodes,
   selectedCollectionId,
   selectedCollection,
@@ -53,6 +63,12 @@ const visibleRequestTabs = computed(() =>
     (tab) => tab.workspaceId === selectedWorkspaceId.value,
   ),
 );
+const canEditWorkspace = computed(() => {
+  const workspace = workspaces.value.find(
+    (candidate) => candidate.workspaceId === selectedWorkspaceId.value,
+  );
+  return workspace?.role === "owner" || workspace?.role === "editor";
+});
 const errorMessage = computed(() => {
   if (error.value === null) {
     return null;
@@ -193,6 +209,35 @@ async function saveCollectionHeaders(
   collectionHeadersOpen.value = false;
 }
 
+/** Creates an environment and closes its editor after summaries refresh. */
+async function createEnvironment(
+  name: string,
+  variables: readonly EnvironmentVariableWrite[],
+): Promise<void> {
+  await controller.createEnvironment(name, variables);
+  environmentManager.value?.finishMutation();
+}
+
+/** Updates an environment and closes its editor after summaries refresh. */
+async function updateEnvironment(
+  environmentId: string,
+  revision: number,
+  name: string,
+  variables: readonly EnvironmentVariableWrite[],
+): Promise<void> {
+  await controller.updateEnvironment(environmentId, revision, name, variables);
+  environmentManager.value?.finishMutation();
+}
+
+/** Deletes an environment and closes its editor after summaries refresh. */
+async function deleteEnvironment(
+  environmentId: string,
+  revision: number,
+): Promise<void> {
+  await controller.deleteEnvironment(environmentId, revision);
+  environmentManager.value?.finishMutation();
+}
+
 /** Closes a clean tab or opens discard confirmation for unsaved content. */
 function requestTabClose(tabId: string): void {
   const tab = requestTabs.value.find((candidate) => candidate.tabId === tabId);
@@ -265,6 +310,20 @@ function discardRequestTab(): void {
         :inert="navigatorOpen"
         :aria-hidden="navigatorOpen ? 'true' : undefined"
       >
+        <EnvironmentManager
+          v-if="selectedWorkspaceId"
+          ref="environmentManager"
+          :environments="environments"
+          :selected-environment-id="selectedEnvironmentId"
+          :environment="selectedEnvironment"
+          :can-edit="canEditWorkspace"
+          :busy="busy"
+          @select="controller.selectEnvironment($event)"
+          @load="controller.loadEnvironment($event)"
+          @create="createEnvironment"
+          @save="updateEnvironment"
+          @delete="deleteEnvironment"
+        />
         <RequestTabs
           :tabs="visibleRequestTabs"
           :active-tab-id="activeRequestTabId"

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { AuditService } from "../src/audit/audit-service.js";
+import { EnvironmentService } from "../src/environments/environment-service.js";
 import { createEntityId, idToBytes } from "../src/foundation/id.js";
 import { SqliteDatabase } from "../src/persistence/sqlite-database.js";
 import {
@@ -73,7 +74,17 @@ describe("collection header inheritance", () => {
         .execute();
       const audit = new AuditService(database.db, join(rootPath, "audit"));
       const workspaces = new WorkspaceService(database.db, audit);
-      const requests = new RequestService(database.db, workspaces, audit);
+      const environments = new EnvironmentService(
+        database.db,
+        workspaces,
+        audit,
+      );
+      const requests = new RequestService(
+        database.db,
+        workspaces,
+        environments,
+        audit,
+      );
       const workspace = await workspaces.create(userId, "Workspace");
       const root = await requests.createCollection(
         userId,
@@ -176,6 +187,7 @@ describe("collection header inheritance", () => {
 
       const prepared = await requests.prepareExecution(
         userId,
+        createEntityId(),
         request.requestId,
       );
       expect(prepared.request.headers).toEqual([

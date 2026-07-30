@@ -144,6 +144,8 @@ export interface components {
     SessionId: components["schemas"]["UuidV7"];
     WorkspaceId: components["schemas"]["UuidV7"];
     CollectionId: components["schemas"]["UuidV7"];
+    EnvironmentId: components["schemas"]["UuidV7"];
+    EnvironmentVariableId: components["schemas"]["UuidV7"];
     RequestId: components["schemas"]["UuidV7"];
     ExecutionId: components["schemas"]["UuidV7"];
     BlobId: components["schemas"]["UuidV7"];
@@ -204,6 +206,12 @@ export interface components {
       | components["schemas"]["CollectionCreateCommand"]
       | components["schemas"]["CollectionGetCommand"]
       | components["schemas"]["CollectionHeadersUpdateCommand"]
+      | components["schemas"]["EnvironmentListCommand"]
+      | components["schemas"]["EnvironmentCreateCommand"]
+      | components["schemas"]["EnvironmentGetCommand"]
+      | components["schemas"]["EnvironmentUpdateCommand"]
+      | components["schemas"]["EnvironmentDeleteCommand"]
+      | components["schemas"]["EnvironmentSelectCommand"]
       | components["schemas"]["RequestCreateCommand"]
       | components["schemas"]["RequestGetCommand"]
       | components["schemas"]["RequestUpdateCommand"]
@@ -323,6 +331,91 @@ export interface components {
        */
       type: "CollectionHeadersUpdateCommand";
     };
+    EnvironmentListCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "environment.list";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "EnvironmentListCommand";
+    };
+    EnvironmentCreateCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "environment.create";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+        name: string;
+        variables: components["schemas"]["EnvironmentVariableWrite"][];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "EnvironmentCreateCommand";
+    };
+    EnvironmentGetCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "environment.get";
+      payload?: {
+        environmentId: components["schemas"]["EnvironmentId"];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "EnvironmentGetCommand";
+    };
+    EnvironmentUpdateCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "environment.update";
+      payload?: {
+        environmentId: components["schemas"]["EnvironmentId"];
+        expectedRevision: number;
+        name: string;
+        variables: components["schemas"]["EnvironmentVariableWrite"][];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "EnvironmentUpdateCommand";
+    };
+    EnvironmentDeleteCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "environment.delete";
+      payload?: {
+        environmentId: components["schemas"]["EnvironmentId"];
+        expectedRevision: number;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "EnvironmentDeleteCommand";
+    };
+    EnvironmentSelectCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "environment.select";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+        environmentId: components["schemas"]["EnvironmentId"] | null;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "EnvironmentSelectCommand";
+    };
     RequestCreateCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
       type?: "request.create";
@@ -331,7 +424,7 @@ export interface components {
         parentCollectionId: components["schemas"]["CollectionId"] | null;
         name: string;
         method: components["schemas"]["HttpMethod"];
-        /** Format: uri */
+        /** @description Absolute HTTP URL template validated after variable interpolation. */
         targetUrl: string;
         query: components["schemas"]["RequestField"][];
         headers: components["schemas"]["RequestField"][];
@@ -365,7 +458,7 @@ export interface components {
         expectedDraftRevision: number;
         name: string;
         method: components["schemas"]["HttpMethod"];
-        /** Format: uri */
+        /** @description Absolute HTTP URL template validated after variable interpolation. */
         targetUrl: string;
         query: components["schemas"]["RequestField"][];
         headers: components["schemas"]["RequestField"][];
@@ -415,9 +508,15 @@ export interface components {
       /** @enum {string} */
       outcome: "success" | "error";
       correlationId: components["schemas"]["CorrelationId"];
-      payload?: unknown;
+      payload?: components["schemas"]["WebSocketReplyPayload"];
       error?: components["schemas"]["WebSocketError"];
     };
+    WebSocketReplyPayload:
+      | components["schemas"]["EnvironmentListView"]
+      | components["schemas"]["EnvironmentView"]
+      | {
+          [key: string]: unknown;
+        };
     WebSocketError: {
       code: components["schemas"]["ProblemCode"];
       message: string;
@@ -448,6 +547,89 @@ export interface components {
       position: number;
       method?: components["schemas"]["HttpMethod"];
     };
+    EnvironmentSummary: {
+      environmentId: components["schemas"]["EnvironmentId"];
+      name: string;
+      revision: number;
+    };
+    EnvironmentListView: {
+      environments: components["schemas"]["EnvironmentSummary"][];
+      selectedEnvironmentId: components["schemas"]["EnvironmentId"] | null;
+    };
+    EnvironmentVariableView:
+      | components["schemas"]["EnvironmentValueVariableView"]
+      | components["schemas"]["EnvironmentSecretVariableView"]
+      | components["schemas"]["EnvironmentAliasVariableView"]
+      | components["schemas"]["EnvironmentUnsetVariableView"];
+    EnvironmentValueVariableView: {
+      variableId: components["schemas"]["EnvironmentVariableId"];
+      name: components["schemas"]["VariableName"];
+      /** @constant */
+      kind: "value";
+      value: string;
+    };
+    EnvironmentSecretVariableView: {
+      variableId: components["schemas"]["EnvironmentVariableId"];
+      name: components["schemas"]["VariableName"];
+      /** @constant */
+      kind: "secret";
+      hasValue: boolean;
+      secretVersion: number;
+    };
+    EnvironmentAliasVariableView: {
+      variableId: components["schemas"]["EnvironmentVariableId"];
+      name: components["schemas"]["VariableName"];
+      /** @constant */
+      kind: "alias";
+      target: components["schemas"]["VariableName"];
+    };
+    EnvironmentUnsetVariableView: {
+      variableId: components["schemas"]["EnvironmentVariableId"];
+      name: components["schemas"]["VariableName"];
+      /** @constant */
+      kind: "unset";
+    };
+    EnvironmentVariableWrite:
+      | components["schemas"]["EnvironmentValueVariableWrite"]
+      | components["schemas"]["EnvironmentSecretVariableWrite"]
+      | components["schemas"]["EnvironmentAliasVariableWrite"]
+      | components["schemas"]["EnvironmentUnsetVariableWrite"];
+    EnvironmentValueVariableWrite: {
+      variableId?: components["schemas"]["EnvironmentVariableId"];
+      name: components["schemas"]["VariableName"];
+      /** @constant */
+      kind: "value";
+      value: string;
+    };
+    EnvironmentSecretVariableWrite: {
+      variableId?: components["schemas"]["EnvironmentVariableId"];
+      name: components["schemas"]["VariableName"];
+      /** @constant */
+      kind: "secret";
+      value?: string;
+      clearValue?: boolean;
+    };
+    EnvironmentAliasVariableWrite: {
+      variableId?: components["schemas"]["EnvironmentVariableId"];
+      name: components["schemas"]["VariableName"];
+      /** @constant */
+      kind: "alias";
+      target: components["schemas"]["VariableName"];
+    };
+    EnvironmentUnsetVariableWrite: {
+      variableId?: components["schemas"]["EnvironmentVariableId"];
+      name: components["schemas"]["VariableName"];
+      /** @constant */
+      kind: "unset";
+    };
+    VariableName: string;
+    EnvironmentView: {
+      environmentId: components["schemas"]["EnvironmentId"];
+      workspaceId: components["schemas"]["WorkspaceId"];
+      name: string;
+      revision: number;
+      variables: components["schemas"]["EnvironmentVariableView"][];
+    };
     CollectionView: {
       collectionId: components["schemas"]["CollectionId"];
       workspaceId: components["schemas"]["WorkspaceId"];
@@ -466,7 +648,7 @@ export interface components {
       method: components["schemas"]["HttpMethod"];
       /** @constant */
       targetMode: "absolute";
-      /** Format: uri */
+      /** @description Absolute HTTP URL template validated after variable interpolation. */
       targetUrl: string;
       /** @constant */
       queryMode: "structured";
@@ -499,7 +681,7 @@ export interface components {
     };
     RequestExecutionInput: {
       method: components["schemas"]["HttpMethod"];
-      /** Format: uri */
+      /** @description Absolute HTTP URL template validated after variable interpolation. */
       targetUrl: string;
       query: components["schemas"]["RequestField"][];
       headers: components["schemas"]["RequestField"][];

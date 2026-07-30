@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 import type { Kysely, Transaction } from "kysely";
 
 import type { AuditService } from "../audit/audit-service.js";
+import type { EnvironmentService } from "../environments/environment-service.js";
+import {
+  VariableResolver,
+  type SecretReference,
+} from "../environments/variable-resolver.js";
 import {
   bytesToId,
   createEntityId,
@@ -128,15 +133,18 @@ export class CollectionProfileConflictError extends Error {}
 export class RequestService {
   readonly #database: Kysely<DatabaseSchema>;
   readonly #workspaces: WorkspaceService;
+  readonly #environments: EnvironmentService;
   readonly #audit: AuditService;
 
   constructor(
     database: Kysely<DatabaseSchema>,
     workspaces: WorkspaceService,
+    environments: EnvironmentService,
     audit: AuditService,
   ) {
     this.#database = database;
     this.#workspaces = workspaces;
+    this.#environments = environments;
     this.#audit = audit;
   }
 
@@ -490,6 +498,7 @@ export class RequestService {
   /** Creates an execution snapshot and reuses an identical latest revision. */
   async prepareExecution(
     userId: EntityId,
+    sessionId: EntityId,
     requestId: EntityId,
   ): Promise<PreparedExecution> {
     return this.#database.transaction().execute(async (transaction) => {
@@ -505,7 +514,16 @@ export class RequestService {
         row.parent_collection_id,
         request.headers,
       );
-      const resolvedRequest = { ...request, headers: resolvedHeaders };
+      const environment = await this.#environments.selectedProfile(
+        transaction,
+        sessionId,
+        request.workspaceId,
+      );
+      const composed = composeWithVariables(
+        { ...request, headers: resolvedHeaders },
+        new VariableResolver(environment),
+      );
+      const resolvedRequest = composed.request;
       const content = JSON.stringify({
         method: request.method,
         targetMode: request.targetMode,
@@ -547,7 +565,14 @@ export class RequestService {
           request_revision_id: idToBytes(revisionId),
           created_by: idToBytes(userId),
           state: "created",
-          snapshot_json: content,
+          snapshot_json: JSON.stringify({
+            ...composed.persisted,
+            targetMode: "absolute",
+            queryMode: "structured",
+            environmentId: environment?.environmentId ?? null,
+            environmentRevision: environment?.revision ?? null,
+            secretReferences: composed.secretReferences,
+          }),
           response_status: null,
           response_headers_json: null,
           response_blob_id: null,
@@ -563,7 +588,12 @@ export class RequestService {
         type: "execution.created",
         actorUserId: userId,
         workspaceId: request.workspaceId,
-        data: { executionId, requestId, revisionId },
+        data: {
+          executionId,
+          requestId,
+          revisionId,
+          secretBearing: composed.secretReferences.length > 0,
+        },
       });
       return { executionId, revisionId, request: resolvedRequest, createdAt };
     });
@@ -572,6 +602,7 @@ export class RequestService {
   /** Creates a durable workspace-owned execution without saving a request. */
   async prepareTemporaryExecution(
     userId: EntityId,
+    sessionId: EntityId,
     workspaceId: EntityId,
     parentCollectionId: EntityId | null,
     input: RequestExecutionInput,
@@ -588,17 +619,25 @@ export class RequestService {
         parentCollectionId === null ? null : idToBytes(parentCollectionId),
         localRequest.headers,
       );
-      const request = { ...localRequest, headers: resolvedHeaders };
+      const environment = await this.#environments.selectedProfile(
+        transaction,
+        sessionId,
+        workspaceId,
+      );
+      const composed = composeWithVariables(
+        { ...localRequest, headers: resolvedHeaders },
+        new VariableResolver(environment),
+      );
+      const request = composed.request;
       const executionId = createEntityId();
       const createdAt = Date.now();
       const snapshot = JSON.stringify({
-        method: request.method,
+        ...composed.persisted,
         targetMode: "absolute",
-        targetUrl: request.targetUrl,
         queryMode: "structured",
-        query: request.query,
-        headers: request.headers,
-        body: request.body,
+        environmentId: environment?.environmentId ?? null,
+        environmentRevision: environment?.revision ?? null,
+        secretReferences: composed.secretReferences,
       });
       await transaction
         .insertInto("executions")
@@ -625,7 +664,12 @@ export class RequestService {
         type: "execution.created",
         actorUserId: userId,
         workspaceId,
-        data: { executionId, requestId: null, revisionId: null },
+        data: {
+          executionId,
+          requestId: null,
+          revisionId: null,
+          secretBearing: composed.secretReferences.length > 0,
+        },
       });
       return { executionId, request, createdAt };
     });
@@ -850,6 +894,22 @@ function validateTargetUrl(value: string): string {
   return url.toString();
 }
 
+/** Accepts either a final URL or a bounded URL template for later composition. */
+function validateTargetTemplate(value: string): string {
+  if (value.includes("<<")) {
+    if (
+      value.length === 0 ||
+      value.length > 8192 ||
+      value.includes("?") ||
+      value.includes("#")
+    ) {
+      throw new Error("Target URL template is invalid");
+    }
+    return value;
+  }
+  return validateTargetUrl(value);
+}
+
 /** Accepts one method from the request editor's supported HTTP method set. */
 function validateMethod(value: string): HttpMethod {
   switch (value) {
@@ -940,10 +1000,72 @@ function normalizeExecutionInput(
 ): RequestExecutionInput {
   return {
     method: validateMethod(input.method),
-    targetUrl: validateTargetUrl(input.targetUrl),
+    targetUrl: validateTargetTemplate(input.targetUrl),
     query: validateQuery(input.query),
     headers: validateHeaders(input.headers),
     body: validateBody(input.body),
+  };
+}
+
+/** Materializes variable-bearing request fields and builds a secret-safe view. */
+function composeWithVariables(
+  request: ExecutionRequestSnapshot,
+  resolver: VariableResolver,
+): {
+  readonly request: ExecutionRequestSnapshot;
+  readonly persisted: RequestExecutionInput;
+  readonly secretReferences: readonly SecretReference[];
+} {
+  const references = new Map<string, SecretReference>();
+  /** Deduplicates secret references across every interpolated request field. */
+  const retain = (items: readonly SecretReference[]): void => {
+    for (const item of items) {
+      references.set(item.variableId, item);
+    }
+  };
+  const target = resolver.interpolate(request.targetUrl);
+  retain(target.secretReferences);
+  const query = request.query.map((field) => {
+    if (!field.enabled) {
+      return { materialized: field, persisted: field };
+    }
+    const value = resolver.interpolate(field.value);
+    retain(value.secretReferences);
+    return {
+      materialized: { ...field, value: value.value },
+      persisted: { ...field, value: value.secret ? "[secret]" : value.value },
+    };
+  });
+  const headers = request.headers.map((field) => {
+    if (!field.enabled) {
+      return { materialized: field, persisted: field };
+    }
+    const value = resolver.interpolate(field.value);
+    retain(value.secretReferences);
+    return {
+      materialized: { ...field, value: value.value },
+      persisted: { ...field, value: value.secret ? "[secret]" : value.value },
+    };
+  });
+  const body = resolver.interpolate(request.body);
+  retain(body.secretReferences);
+  const materialized: ExecutionRequestSnapshot = {
+    ...request,
+    targetUrl: validateTargetUrl(target.value),
+    query: validateQuery(query.map((field) => field.materialized)),
+    headers: validateHeaders(headers.map((field) => field.materialized)),
+    body: validateBody(body.value),
+  };
+  return {
+    request: materialized,
+    persisted: {
+      method: materialized.method,
+      targetUrl: target.secret ? "[secret]" : materialized.targetUrl,
+      query: query.map((field) => field.persisted),
+      headers: headers.map((field) => field.persisted),
+      body: body.secret ? "[secret]" : body.value,
+    },
+    secretReferences: [...references.values()],
   };
 }
 

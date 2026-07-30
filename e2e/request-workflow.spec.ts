@@ -11,6 +11,7 @@ test("creates, restores, and sends the first workspace request", async ({
   const subcollectionName = `Examples ${suffix}`;
   const leafCollectionName = `Inherited ${suffix}`;
   const requestName = `Hello fixture ${suffix}`;
+  const environmentName = `Development ${suffix}`;
   const targetUrl = "http://127.0.0.1:8090/echo";
   const mobile = testInfo.project.name === "mobile-chromium";
 
@@ -25,6 +26,35 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.getByLabel("Workspace", { exact: true })).toContainText(
     workspaceName,
   );
+  if (mobile) {
+    await page
+      .getByRole("button", { name: "Close workspace navigator" })
+      .click();
+  }
+
+  await page.getByRole("button", { name: "Manage environments" }).click();
+  const environmentDialog = page.getByRole("dialog", {
+    name: "Create environment",
+  });
+  await environmentDialog
+    .getByLabel("Name", { exact: true })
+    .fill(environmentName);
+  await environmentDialog.getByRole("button", { name: "Add variable" }).click();
+  await environmentDialog.getByLabel("Variable name 1").fill("source");
+  await environmentDialog
+    .getByLabel("Variable value 1")
+    .fill(`environment-${suffix}`);
+  await environmentDialog.getByRole("button", { name: "Add variable" }).click();
+  await environmentDialog.getByLabel("Variable name 2").fill("token");
+  await environmentDialog.getByLabel("Variable kind 2").click();
+  await page
+    .getByRole("listbox", { name: "Variable kind 2" })
+    .getByRole("option", { name: "Secret", exact: true })
+    .click();
+  await environmentDialog.getByLabel("Secret value 2").fill(`secret-${suffix}`);
+  await environmentDialog.getByRole("button", { name: "Save" }).click();
+  await expect(environmentDialog).toBeHidden();
+  await selectMenuOption(page, "Select environment", environmentName);
 
   await page.getByRole("button", { name: "Create root collection" }).click();
   const collectionDialog = page.getByRole("dialog", {
@@ -101,7 +131,7 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(addParameterButton).toHaveCSS("white-space", "nowrap");
   await addParameterButton.click();
   await page.getByLabel("Query name 1").fill("source");
-  await page.getByLabel("Query value 1").fill(suffix);
+  await page.getByLabel("Query value 1").fill("<<source>>");
   await page.getByRole("tab", { name: "Headers 1" }).click();
   await expect(page.getByLabel("Inherited header name 1")).toHaveValue(
     "X-Inherited",
@@ -113,25 +143,25 @@ test("creates, restores, and sends the first workspace request", async ({
   await page
     .getByLabel("Header name 1", { exact: true })
     .fill("X-Fixture-Request");
-  await page.getByLabel("Header value 1", { exact: true }).fill("browser-test");
+  await page.getByLabel("Header value 1", { exact: true }).fill("<<token>>");
   await page.getByRole("tab", { name: "Body" }).click();
-  await page.getByLabel("Raw request body").fill(`payload-${suffix}`);
+  await page.getByLabel("Raw request body").fill("payload-<<source>>");
   await page.getByRole("button", { name: "Send" }).click();
 
   await expect(page.getByRole("status")).toHaveText("In progress");
   await expect(page.locator(".status-code")).toHaveText("201");
   await expect(page.locator(".body-preview")).toContainText(`"method":"POST"`);
   await expect(page.locator(".body-preview")).toContainText(
-    `"query":[["source","${suffix}"]]`,
+    `"query":[["source","environment-${suffix}"]]`,
   );
   await expect(page.locator(".body-preview")).toContainText(
-    `"requestHeader":"browser-test"`,
+    `"requestHeader":"secret-${suffix}"`,
   );
   await expect(page.locator(".body-preview")).toContainText(
     `"inheritedHeader":"root-${suffix}"`,
   );
   await expect(page.locator(".body-preview")).toContainText(
-    `"body":"payload-${suffix}"`,
+    `"body":"payload-environment-${suffix}"`,
   );
   await expect(draftRevision).toHaveText("Temporary");
   await expect(
@@ -156,7 +186,7 @@ test("creates, restores, and sends the first workspace request", async ({
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
   expect(await readFile(downloadPath, "utf8")).toContain(
-    `"body":"payload-${suffix}"`,
+    `"body":"payload-environment-${suffix}"`,
   );
 
   await page.getByRole("button", { name: "New temporary request" }).click();
@@ -236,6 +266,10 @@ test("creates, restores, and sends the first workspace request", async ({
   await page.reload();
   await openNavigator(page, mobile);
   await selectMenuOption(page, "Workspace", workspaceName);
+  await expect(page.getByLabel("Select environment")).toHaveAttribute(
+    "data-value",
+    /.+/u,
+  );
   await workspaceTree
     .getByRole("treeitem", { name: collectionName, exact: true })
     .click();
@@ -272,7 +306,7 @@ test("creates, restores, and sends the first workspace request", async ({
   );
   await page.getByRole("tab", { name: "Body" }).click();
   await expect(page.getByLabel("Raw request body")).toHaveValue(
-    `payload-${suffix}`,
+    "payload-<<source>>",
   );
   await expect(draftRevision).toHaveText("Draft 0");
 
@@ -305,6 +339,9 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.locator(".status-code")).toHaveText("201");
   await expect(page.locator(".body-preview")).toContainText(
     `"inheritedHeader":"root-${suffix}"`,
+  );
+  await expect(page.locator(".body-preview")).toContainText(
+    `"requestHeader":"secret-${suffix}"`,
   );
   await expect(draftRevision).toHaveText("Draft 0");
 

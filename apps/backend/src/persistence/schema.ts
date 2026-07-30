@@ -78,6 +78,42 @@ export interface CollectionProfileTable {
   updated_at: number;
 }
 
+export interface EnvironmentTable {
+  id: BinaryId;
+  workspace_id: BinaryId;
+  name: string;
+  name_key: string;
+  revision: number;
+  created_by: BinaryId;
+  created_at: number;
+  updated_by: BinaryId;
+  updated_at: number;
+}
+
+export interface EnvironmentVariableTable {
+  id: BinaryId;
+  environment_id: BinaryId;
+  position: number;
+  name: string;
+  kind: "value" | "secret" | "alias" | "unset";
+  value_text: string | null;
+  alias_target: string | null;
+}
+
+export interface EnvironmentVariableSecretTable {
+  variable_id: BinaryId;
+  version: number;
+  storage_format: "plaintext-v1";
+  payload: string | null;
+}
+
+export interface SessionWorkspaceEnvironmentTable {
+  session_id: BinaryId;
+  workspace_id: BinaryId;
+  selected_environment_id: BinaryId;
+  updated_at: number;
+}
+
 export interface RequestDraftTable {
   request_id: BinaryId;
   draft_revision: number;
@@ -180,6 +216,10 @@ export interface DatabaseSchema {
   workspace_memberships: WorkspaceMembershipTable;
   workspace_tree_nodes: WorkspaceTreeNodeTable;
   collection_profiles: CollectionProfileTable;
+  environments: EnvironmentTable;
+  environment_variables: EnvironmentVariableTable;
+  environment_variable_secrets: EnvironmentVariableSecretTable;
+  session_workspace_environments: SessionWorkspaceEnvironmentTable;
   request_drafts: RequestDraftTable;
   request_revisions: RequestRevisionTable;
   executions: ExecutionTable;

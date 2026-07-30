@@ -99,11 +99,16 @@ export class ExecutionService {
   /** Starts asynchronous proxy execution and returns its initial running view. */
   async start(
     userId: EntityId,
+    sessionId: EntityId,
     requestId: EntityId,
     publish: (event: ExecutionEvent) => void,
   ): Promise<ExecutionView> {
     return this.#beginStart(async () => {
-      const prepared = await this.#requests.prepareExecution(userId, requestId);
+      const prepared = await this.#requests.prepareExecution(
+        userId,
+        sessionId,
+        requestId,
+      );
       return this.#startPrepared(prepared, userId, publish);
     });
   }
@@ -111,6 +116,7 @@ export class ExecutionService {
   /** Starts a workspace-owned execution without saving a reusable request. */
   async startTemporary(
     userId: EntityId,
+    sessionId: EntityId,
     workspaceId: EntityId,
     parentCollectionId: EntityId | null,
     request: RequestExecutionInput,
@@ -119,6 +125,7 @@ export class ExecutionService {
     return this.#beginStart(async () => {
       const prepared = await this.#requests.prepareTemporaryExecution(
         userId,
+        sessionId,
         workspaceId,
         parentCollectionId,
         request,

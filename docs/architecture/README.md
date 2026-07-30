@@ -94,6 +94,25 @@ do not participate in execution or suppress inherited values. The backend
 stores this resolved header set in the immutable revision and execution
 snapshot before contacting the proxy.
 
+Workspaces may also own environments containing ordered variables. Environment
+selection is persisted per application session and workspace, so separate
+browser sessions belonging to the same user may safely target different
+environments. A new session begins with no environment selected, and deleting
+an environment clears all session selections that reference it.
+
+Environment variables may be ordinary values, write-only secrets, aliases, or
+explicitly unset values. Names are case-sensitive; aliases resolve after scope
+merging and preserve secret sensitivity. The backend interpolates variables in
+target URLs, query values, header values, and text bodies immediately before
+execution. Persisted execution evidence identifies the environment revision and
+secret versions without copying secret plaintext into the snapshot.
+
+Normal APIs never return workspace secret values. The built-in MVP persistence
+representation may store those values without at-rest encryption, isolated
+behind a versioned backend storage boundary so a later encrypted or external
+secret store does not change product or API behavior. Operators must protect
+the backend data volume accordingly.
+
 ## Control And Data Planes
 
 Backend-to-proxy communication has two logical planes:

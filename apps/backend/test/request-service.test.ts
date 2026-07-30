@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { AuditService } from "../src/audit/audit-service.js";
+import { EnvironmentService } from "../src/environments/environment-service.js";
 import { bytesToId, createEntityId, idToBytes } from "../src/foundation/id.js";
 import { SqliteDatabase } from "../src/persistence/sqlite-database.js";
 import { RequestService } from "../src/requests/request-service.js";
@@ -34,7 +35,17 @@ describe("RequestService draft updates", () => {
 
       const audit = new AuditService(database.db, join(rootPath, "audit"));
       const workspaces = new WorkspaceService(database.db, audit);
-      const requests = new RequestService(database.db, workspaces, audit);
+      const environments = new EnvironmentService(
+        database.db,
+        workspaces,
+        audit,
+      );
+      const requests = new RequestService(
+        database.db,
+        workspaces,
+        environments,
+        audit,
+      );
       const workspace = await workspaces.create(userId, "Workspace");
       const original = await requests.createRequest(
         userId,
@@ -90,6 +101,7 @@ describe("RequestService draft updates", () => {
 
       const temporary = await requests.prepareTemporaryExecution(
         userId,
+        createEntityId(),
         workspace.workspaceId,
         null,
         {

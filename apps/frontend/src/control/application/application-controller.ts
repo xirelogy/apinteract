@@ -2,6 +2,9 @@ import { v7 as uuidV7 } from "uuid";
 
 import type {
   CollectionView,
+  EnvironmentListView,
+  EnvironmentVariableWrite,
+  EnvironmentView,
   ExecutionView,
   RequestField,
   RequestView,
@@ -87,13 +90,21 @@ export class ApplicationController {
 
   /** Loads a workspace root without nesting foreground busy state. */
   async #selectWorkspace(workspaceId: string): Promise<void> {
-    const result = await this.#webSocket.command<{ children: TreeNode[] }>(
-      "tree.list",
-      { workspaceId, parentCollectionId: null },
-    );
+    const [result, environmentList] = await Promise.all([
+      this.#webSocket.command<{ children: TreeNode[] }>("tree.list", {
+        workspaceId,
+        parentCollectionId: null,
+      }),
+      this.#webSocket.command<EnvironmentListView>("environment.list", {
+        workspaceId,
+      }),
+    ]);
     const store = useApplicationStore();
     store.selectedWorkspaceId = workspaceId;
     store.rootNodes = result.children;
+    store.environments = environmentList.environments;
+    store.selectedEnvironmentId = environmentList.selectedEnvironmentId;
+    store.selectedEnvironment = null;
     store.selectedCollectionId = null;
     store.selectedCollection = null;
     store.collectionChildren = {};
@@ -104,6 +115,96 @@ export class ApplicationController {
         store.requestTabs.find((tab) => tab.workspaceId === workspaceId)
           ?.tabId ?? null;
     }
+  }
+
+  /** Selects the current session's environment for the active workspace. */
+  async selectEnvironment(environmentId: string | null): Promise<void> {
+    const store = useApplicationStore();
+    const workspaceId = requireSelection(store.selectedWorkspaceId);
+    await this.#run(async () => {
+      const result = await this.#webSocket.command<{
+        selectedEnvironmentId: string | null;
+      }>("environment.select", { workspaceId, environmentId });
+      store.selectedEnvironmentId = result.selectedEnvironmentId;
+    });
+  }
+
+  /** Loads one redacted environment profile for management. */
+  async loadEnvironment(environmentId: string): Promise<EnvironmentView> {
+    return this.#run(async () => {
+      const environment = await this.#webSocket.command<EnvironmentView>(
+        "environment.get",
+        { environmentId },
+      );
+      useApplicationStore().selectedEnvironment = environment;
+      return environment;
+    });
+  }
+
+  /** Creates an environment and reloads session-aware summaries. */
+  async createEnvironment(
+    name: string,
+    variables: readonly EnvironmentVariableWrite[],
+  ): Promise<EnvironmentView> {
+    const store = useApplicationStore();
+    const workspaceId = requireSelection(store.selectedWorkspaceId);
+    return this.#run(async () => {
+      const environment = await this.#webSocket.command<EnvironmentView>(
+        "environment.create",
+        { workspaceId, name, variables },
+      );
+      await this.#reloadEnvironments(workspaceId);
+      store.selectedEnvironment = environment;
+      return environment;
+    });
+  }
+
+  /** Saves one complete redacted environment profile. */
+  async updateEnvironment(
+    environmentId: string,
+    expectedRevision: number,
+    name: string,
+    variables: readonly EnvironmentVariableWrite[],
+  ): Promise<EnvironmentView> {
+    const store = useApplicationStore();
+    const workspaceId = requireSelection(store.selectedWorkspaceId);
+    return this.#run(async () => {
+      const environment = await this.#webSocket.command<EnvironmentView>(
+        "environment.update",
+        { environmentId, expectedRevision, name, variables },
+      );
+      await this.#reloadEnvironments(workspaceId);
+      store.selectedEnvironment = environment;
+      return environment;
+    });
+  }
+
+  /** Deletes one current environment and refreshes cleared selection state. */
+  async deleteEnvironment(
+    environmentId: string,
+    expectedRevision: number,
+  ): Promise<void> {
+    const store = useApplicationStore();
+    const workspaceId = requireSelection(store.selectedWorkspaceId);
+    await this.#run(async () => {
+      await this.#webSocket.command("environment.delete", {
+        environmentId,
+        expectedRevision,
+      });
+      store.selectedEnvironment = null;
+      await this.#reloadEnvironments(workspaceId);
+    });
+  }
+
+  /** Refreshes environment summaries and selection for one workspace. */
+  async #reloadEnvironments(workspaceId: string): Promise<void> {
+    const result = await this.#webSocket.command<EnvironmentListView>(
+      "environment.list",
+      { workspaceId },
+    );
+    const store = useApplicationStore();
+    store.environments = result.environments;
+    store.selectedEnvironmentId = result.selectedEnvironmentId;
   }
 
   /** Creates a collection under the workspace root or another collection. */

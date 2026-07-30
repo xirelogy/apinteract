@@ -104,6 +104,18 @@ async function createPersistentJourney(client, accessToken, targetUrl) {
   const workspace = await client.command("workspace.create", {
     name: workspaceName,
   });
+  const environment = await client.command("environment.create", {
+    workspaceId: workspace.workspaceId,
+    name: "Persistent environment",
+    variables: [
+      { name: "marker", kind: "value", value: marker },
+      { name: "token", kind: "secret", value: `secret-${marker}` },
+    ],
+  });
+  await client.command("environment.select", {
+    workspaceId: workspace.workspaceId,
+    environmentId: environment.environmentId,
+  });
   const collection = await client.command("collection.create", {
     workspaceId: workspace.workspaceId,
     parentCollectionId: null,
@@ -120,9 +132,11 @@ async function createPersistentJourney(client, accessToken, targetUrl) {
     name: requestName,
     method: "POST",
     targetUrl,
-    query: [{ name: "marker", value: marker, enabled: true }],
-    headers: [{ name: "X-AIO-Verification", value: marker, enabled: true }],
-    body: marker,
+    query: [{ name: "marker", value: "<<marker>>", enabled: true }],
+    headers: [
+      { name: "X-AIO-Verification", value: "<<token>>", enabled: true },
+    ],
+    body: "<<marker>>",
   });
   const execution = await client.command("execution.start", {
     requestId: request.requestId,
@@ -148,6 +162,7 @@ async function createPersistentJourney(client, accessToken, targetUrl) {
     requestName,
     workspaceId: workspace.workspaceId,
     collectionId: collection.nodeId,
+    environmentId: environment.environmentId,
     requestId: request.requestId,
     executionId: execution.executionId,
   };
@@ -184,6 +199,34 @@ async function verifyRestoredJourney(client, accessToken, state) {
   ) {
     throw new Error("The collection header profile did not survive restart");
   }
+  const environments = await client.command("environment.list", {
+    workspaceId: state.workspaceId,
+  });
+  if (
+    environments.selectedEnvironmentId !== null ||
+    !environments.environments?.some(
+      (environment) => environment.environmentId === state.environmentId,
+    )
+  ) {
+    throw new Error("The environment or new-session selection is invalid");
+  }
+  const environment = await client.command("environment.get", {
+    environmentId: state.environmentId,
+  });
+  const secret = environment.variables?.find(
+    (variable) => variable.name === "token",
+  );
+  if (
+    secret?.kind !== "secret" ||
+    secret.hasValue !== true ||
+    Object.hasOwn(secret, "value")
+  ) {
+    throw new Error("The restored environment exposed or lost its secret");
+  }
+  await client.command("environment.select", {
+    workspaceId: state.workspaceId,
+    environmentId: state.environmentId,
+  });
   const children = await client.command("tree.list", {
     workspaceId: state.workspaceId,
     parentCollectionId: state.collectionId,
@@ -197,6 +240,20 @@ async function verifyRestoredJourney(client, accessToken, state) {
     )
   ) {
     throw new Error("The verification request did not survive restart");
+  }
+  const restoredExecution = await client.command("execution.start", {
+    requestId: state.requestId,
+  });
+  const restoredTerminal = await client.waitForEvent(
+    (event) =>
+      event.type === "execution.completed" &&
+      event.payload?.executionId === restoredExecution.executionId,
+  );
+  if (
+    restoredTerminal.payload?.data?.status !== 200 ||
+    !restoredTerminal.payload?.data?.bodyPreview?.includes(state.marker)
+  ) {
+    throw new Error("The restored environment did not compose the request");
   }
   await verifyBodyDownload(accessToken, state.executionId, state.marker);
   const auditFiles = (await readdir("/data/audit")).filter((name) =>

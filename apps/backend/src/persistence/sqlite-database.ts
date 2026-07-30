@@ -11,6 +11,7 @@ const INITIAL_MIGRATION = "0001_quick_verification";
 const EXPANDED_REQUEST_MIGRATION = "0002_expanded_request_profile";
 const TEMPORARY_EXECUTION_MIGRATION = "0003_temporary_executions";
 const COLLECTION_PROFILES_MIGRATION = "0004_collection_profiles";
+const ENVIRONMENTS_MIGRATION = "0005_environments";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -285,6 +286,13 @@ export class SqliteDatabase {
     if (collectionProfilesApplied === undefined) {
       this.#migrateCollectionProfiles();
     }
+
+    const environmentsApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(ENVIRONMENTS_MIGRATION);
+    if (environmentsApplied === undefined) {
+      this.#migrateEnvironments();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -316,6 +324,7 @@ export class SqliteDatabase {
       EXPANDED_REQUEST_MIGRATION,
       TEMPORARY_EXECUTION_MIGRATION,
       COLLECTION_PROFILES_MIGRATION,
+      ENVIRONMENTS_MIGRATION,
     ].some((identifier) => !identifiers.has(identifier));
   }
 
@@ -479,6 +488,65 @@ export class SqliteDatabase {
         ) STRICT;
       `);
       this.#recordMigration(COLLECTION_PROFILES_MIGRATION);
+    })();
+  }
+
+  /** Adds workspace environments, variable profiles, secrets, and selections. */
+  #migrateEnvironments(): void {
+    this.#driver.transaction(() => {
+      this.#driver.exec(`
+        CREATE TABLE environments (
+          id BLOB PRIMARY KEY CHECK(length(id) = 16),
+          workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          name_key TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK(revision >= 0),
+          created_by BLOB NOT NULL REFERENCES users(id),
+          created_at INTEGER NOT NULL,
+          updated_by BLOB NOT NULL REFERENCES users(id),
+          updated_at INTEGER NOT NULL,
+          UNIQUE(workspace_id, name_key)
+        ) STRICT;
+        CREATE INDEX environments_workspace_created
+          ON environments(workspace_id, created_at, id);
+
+        CREATE TABLE environment_variables (
+          id BLOB PRIMARY KEY CHECK(length(id) = 16),
+          environment_id BLOB NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL CHECK(position >= 0),
+          name TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK(kind IN ('value', 'secret', 'alias', 'unset')),
+          value_text TEXT,
+          alias_target TEXT,
+          UNIQUE(environment_id, position),
+          UNIQUE(environment_id, name),
+          CHECK (
+            (kind = 'value' AND value_text IS NOT NULL AND alias_target IS NULL) OR
+            (kind = 'alias' AND value_text IS NULL AND alias_target IS NOT NULL) OR
+            (kind IN ('secret', 'unset') AND value_text IS NULL AND alias_target IS NULL)
+          )
+        ) STRICT;
+        CREATE INDEX environment_variables_environment
+          ON environment_variables(environment_id, position);
+
+        CREATE TABLE environment_variable_secrets (
+          variable_id BLOB PRIMARY KEY REFERENCES environment_variables(id) ON DELETE CASCADE,
+          version INTEGER NOT NULL CHECK(version >= 1),
+          storage_format TEXT NOT NULL CHECK(storage_format = 'plaintext-v1'),
+          payload TEXT
+        ) STRICT;
+
+        CREATE TABLE session_workspace_environments (
+          session_id BLOB NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+          workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          selected_environment_id BLOB NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY(session_id, workspace_id)
+        ) WITHOUT ROWID, STRICT;
+        CREATE INDEX session_workspace_environments_environment
+          ON session_workspace_environments(selected_environment_id);
+      `);
+      this.#recordMigration(ENVIRONMENTS_MIGRATION);
     })();
   }
 

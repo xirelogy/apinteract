@@ -109,6 +109,25 @@ describe("SelectMenu", () => {
     wrapper.unmount();
   });
 
+  it("portals a modal popup inside the native dialog top layer", async () => {
+    const dialog = document.createElement("dialog");
+    document.body.append(dialog);
+    const wrapper = mount(SelectMenu, {
+      attachTo: dialog,
+      props: {
+        modelValue: "value",
+        label: "Modal select",
+        options: [{ value: "value", label: "Value" }],
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper.get(".select-menu-trigger").trigger("click");
+    await flushPromises();
+    expect(dialog.querySelector(".select-menu-popup")).not.toBeNull();
+    wrapper.unmount();
+  });
+
   it("opens a matching option from closed-trigger typeahead", async () => {
     const wrapper = mount(SelectMenu, {
       attachTo: document.body,

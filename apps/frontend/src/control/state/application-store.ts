@@ -3,6 +3,8 @@ import { defineStore } from "pinia";
 import type {
   CollectionView,
   CurrentSession,
+  EnvironmentSummary,
+  EnvironmentView,
   TreeNode,
   WorkspaceSummary,
 } from "@/model/contracts/backend";
@@ -18,6 +20,9 @@ export const useApplicationStore = defineStore("application", {
     connection: "disconnected" as ConnectionState,
     workspaces: [] as WorkspaceSummary[],
     selectedWorkspaceId: null as string | null,
+    environments: [] as EnvironmentSummary[],
+    selectedEnvironmentId: null as string | null,
+    selectedEnvironment: null as EnvironmentView | null,
     rootNodes: [] as TreeNode[],
     selectedCollectionId: null as string | null,
     selectedCollection: null as CollectionView | null,

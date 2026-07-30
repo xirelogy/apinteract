@@ -54,6 +54,7 @@ defineSlots<{
 const root = ref<HTMLElement | null>(null);
 const trigger = ref<HTMLButtonElement | null>(null);
 const popup = ref<HTMLElement | null>(null);
+const teleportTarget = ref<HTMLElement | null>(null);
 const open = defineModel<boolean>("open", { default: false });
 const positioned = ref(false);
 const activeIndex = ref(-1);
@@ -77,6 +78,10 @@ watch(
 );
 
 onMounted(() => {
+  // Native modal dialogs occupy the browser top layer. Portaling their popup
+  // to body would place it behind the modal, so it stays inside the dialog's
+  // top-layer subtree while ordinary selects continue to use body.
+  teleportTarget.value = root.value?.closest("dialog") ?? document.body;
   document.addEventListener("pointerdown", closeFromOutside);
   window.addEventListener("resize", repositionMenu);
   window.addEventListener("scroll", closeFromScroll, true);
@@ -381,7 +386,7 @@ function closeFromScroll(event: Event): void {
       />
     </button>
 
-    <Teleport to="body">
+    <Teleport v-if="teleportTarget" :to="teleportTarget">
       <div
         v-if="open"
         :id="popupId"

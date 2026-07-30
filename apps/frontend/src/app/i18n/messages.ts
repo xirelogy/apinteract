@@ -5,6 +5,7 @@ export const enUsMessages = {
       close: "Close",
       continue: "Continue",
       create: "Create",
+      delete: "Delete",
       discard: "Discard",
       save: "Save",
     },
@@ -64,6 +65,34 @@ export const enUsMessages = {
     new: "New collection",
     newRequest: "New request",
     newSubcollection: "New subcollection",
+  },
+  environment: {
+    addVariable: "Add variable",
+    aliasTarget: "Alias target {index}",
+    clearSecret: "Clear stored value",
+    create: "Create environment",
+    deleteConfirmation:
+      "Delete {name}? Any session using it will switch to no environment.",
+    edit: "Edit environment",
+    kind: {
+      alias: "Alias",
+      secret: "Secret",
+      unset: "Unset",
+      value: "Value",
+    },
+    label: "Environment",
+    manage: "Manage environments",
+    noVariables: "No variables in this environment.",
+    none: "No environment",
+    removeVariable: "Remove variable {index}",
+    replaceSecret: "Enter a replacement value",
+    secretValue: "Secret value {index}",
+    select: "Select environment",
+    valueStored: "Value stored",
+    variableKind: "Variable kind {index}",
+    variableName: "Variable name {index}",
+    variableValue: "Variable value {index}",
+    variables: "Variables",
   },
   request: {
     addHeader: "Add header",
@@ -132,9 +161,13 @@ export const enUsMessages = {
   errors: {
     collection_profile_conflict:
       "These collection headers changed elsewhere. Reopen the editor and try again.",
+    environment_conflict:
+      "This environment changed elsewhere. Refresh it and try again.",
     operationFailed: "The operation failed.",
     parentRequired: "Select the required parent first.",
     requestTabClosed: "The request tab is no longer open.",
+    variable_resolution_failed:
+      "The request contains a variable that could not be resolved.",
   },
 } as const;
 

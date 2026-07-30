@@ -4,6 +4,11 @@ import type { RawData } from "ws";
 
 import type { Application } from "../bootstrap/application.js";
 import type { BackendConfiguration } from "../config.js";
+import {
+  EnvironmentConflictError,
+  type EnvironmentVariableWrite,
+} from "../environments/environment-service.js";
+import { VariableResolutionError } from "../environments/variable-resolver.js";
 import { createEntityId } from "../foundation/id.js";
 import {
   CollectionProfileConflictError,
@@ -183,6 +188,45 @@ async function dispatch(
         requireInteger(command.payload.expectedRevision, "expectedRevision"),
         requireRequestFields(command.payload.headers, "headers"),
       );
+    case "environment.list":
+      return application.environments.list(
+        userId,
+        identity.sessionId,
+        requireString(command.payload.workspaceId, "workspaceId"),
+      );
+    case "environment.create":
+      return application.environments.create(
+        userId,
+        requireString(command.payload.workspaceId, "workspaceId"),
+        requireString(command.payload.name, "name"),
+        requireEnvironmentVariables(command.payload.variables),
+      );
+    case "environment.get":
+      return application.environments.get(
+        userId,
+        requireString(command.payload.environmentId, "environmentId"),
+      );
+    case "environment.update":
+      return application.environments.update(
+        userId,
+        requireString(command.payload.environmentId, "environmentId"),
+        requireInteger(command.payload.expectedRevision, "expectedRevision"),
+        requireString(command.payload.name, "name"),
+        requireEnvironmentVariables(command.payload.variables),
+      );
+    case "environment.delete":
+      return application.environments.delete(
+        userId,
+        requireString(command.payload.environmentId, "environmentId"),
+        requireInteger(command.payload.expectedRevision, "expectedRevision"),
+      );
+    case "environment.select":
+      return application.environments.select(
+        userId,
+        identity.sessionId,
+        requireString(command.payload.workspaceId, "workspaceId"),
+        optionalEnvironmentId(command.payload.environmentId),
+      );
     case "request.create":
       return application.requests.createRequest(
         userId,
@@ -218,12 +262,14 @@ async function dispatch(
     case "execution.start":
       return application.executions.start(
         userId,
+        identity.sessionId,
         requireString(command.payload.requestId, "requestId"),
         (event) => publishExecutionEvent(event, publish),
       );
     case "execution.start_temporary":
       return application.executions.startTemporary(
         userId,
+        identity.sessionId,
         requireString(command.payload.workspaceId, "workspaceId"),
         optionalString(command.payload.parentCollectionId),
         requireExecutionInput(command.payload.request),
@@ -262,6 +308,12 @@ function mapCommandError(cause: unknown): CommandError {
   }
   if (cause instanceof CollectionProfileConflictError) {
     return new CommandError("collection_profile_conflict", cause.message);
+  }
+  if (cause instanceof EnvironmentConflictError) {
+    return new CommandError("environment_conflict", cause.message);
+  }
+  if (cause instanceof VariableResolutionError) {
+    return new CommandError("variable_resolution_failed", cause.message);
   }
   return new CommandError(
     "invalid_command",
@@ -363,6 +415,14 @@ function optionalString(value: unknown): string | null {
   return requireString(value, "parentCollectionId");
 }
 
+/** Reads a nullable selected environment identifier. */
+function optionalEnvironmentId(value: unknown): string | null {
+  if (value === null) {
+    return null;
+  }
+  return requireString(value, "environmentId");
+}
+
 /** Requires a non-negative safe integer command field. */
 function requireInteger(value: unknown, name: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) {
@@ -410,6 +470,74 @@ function requireRequestFields(value: unknown, name: string): RequestField[] {
       );
     }
     return field as unknown as RequestField;
+  });
+}
+
+/** Validates discriminated environment-variable writes without reading secrets. */
+function requireEnvironmentVariables(
+  value: unknown,
+): EnvironmentVariableWrite[] {
+  if (!Array.isArray(value)) {
+    throw new CommandError("validation_failed", "variables must be an array.");
+  }
+  return value.map((item) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      throw new CommandError(
+        "validation_failed",
+        "variables contains an invalid field.",
+      );
+    }
+    const variable = item as Record<string, unknown>;
+    const common = {
+      ...(variable.variableId === undefined
+        ? {}
+        : { variableId: requireString(variable.variableId, "variableId") }),
+      name: requireString(variable.name, "variable name"),
+    };
+    switch (variable.kind) {
+      case "value":
+        return { ...common, kind: "value", value: requireBody(variable.value) };
+      case "alias":
+        return {
+          ...common,
+          kind: "alias",
+          target: requireString(variable.target, "alias target"),
+        };
+      case "unset":
+        return { ...common, kind: "unset" };
+      case "secret":
+        if (
+          variable.value !== undefined &&
+          typeof variable.value !== "string"
+        ) {
+          throw new CommandError(
+            "validation_failed",
+            "secret value must be a string.",
+          );
+        }
+        if (
+          variable.clearValue !== undefined &&
+          typeof variable.clearValue !== "boolean"
+        ) {
+          throw new CommandError(
+            "validation_failed",
+            "clearValue must be a boolean.",
+          );
+        }
+        return {
+          ...common,
+          kind: "secret",
+          ...(variable.value === undefined ? {} : { value: variable.value }),
+          ...(variable.clearValue === undefined
+            ? {}
+            : { clearValue: variable.clearValue }),
+        };
+      default:
+        throw new CommandError(
+          "validation_failed",
+          "variable kind is not supported.",
+        );
+    }
   });
 }
 

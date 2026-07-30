@@ -2,6 +2,7 @@ import type { BackendConfiguration } from "../config.js";
 import { AuditService } from "../audit/audit-service.js";
 import { LocalBlobStore } from "../blobs/local-blob-store.js";
 import { ExecutionService } from "../executions/execution-service.js";
+import { EnvironmentService } from "../environments/environment-service.js";
 import { IdentityService } from "../identity/identity-service.js";
 import { SqliteDatabase } from "../persistence/sqlite-database.js";
 import { ProxyClient } from "../proxy/proxy-client.js";
@@ -16,6 +17,7 @@ export interface Application {
   readonly identity: IdentityService;
   readonly sessions: SessionService;
   readonly workspaces: WorkspaceService;
+  readonly environments: EnvironmentService;
   readonly requests: RequestService;
   readonly executions: ExecutionService;
   readonly proxy: ProxyClient;
@@ -46,7 +48,13 @@ export async function createApplication(
   });
   await sessions.initialize(configuration.server.publicOrigin);
   const workspaces = new WorkspaceService(database.db, audit);
-  const requests = new RequestService(database.db, workspaces, audit);
+  const environments = new EnvironmentService(database.db, workspaces, audit);
+  const requests = new RequestService(
+    database.db,
+    workspaces,
+    environments,
+    audit,
+  );
   const proxy = new ProxyClient(
     configuration.proxy.endpoint,
     configuration.proxy.bearerToken,
@@ -67,6 +75,7 @@ export async function createApplication(
     identity,
     sessions,
     workspaces,
+    environments,
     requests,
     executions,
     proxy,

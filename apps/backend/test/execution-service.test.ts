@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { AuditService } from "../src/audit/audit-service.js";
+import { EnvironmentService } from "../src/environments/environment-service.js";
 import { LocalBlobStore } from "../src/blobs/local-blob-store.js";
 import {
   ExecutionService,
@@ -48,7 +49,17 @@ describe("ExecutionService shutdown", () => {
       );
       await blobs.initialize();
       const workspaces = new WorkspaceService(database.db, audit);
-      const requests = new RequestService(database.db, workspaces, audit);
+      const environments = new EnvironmentService(
+        database.db,
+        workspaces,
+        audit,
+      );
+      const requests = new RequestService(
+        database.db,
+        workspaces,
+        environments,
+        audit,
+      );
       const workspace = await workspaces.create(userId, "Workspace");
       const request = await requests.createRequest(
         userId,
@@ -103,7 +114,8 @@ describe("ExecutionService shutdown", () => {
       );
       const events: ExecutionEvent[] = [];
 
-      await executions.start(userId, request.requestId, (event) =>
+      const sessionId = createEntityId();
+      await executions.start(userId, sessionId, request.requestId, (event) =>
         events.push(event),
       );
       let drained = false;
@@ -119,6 +131,7 @@ describe("ExecutionService shutdown", () => {
       await expect(
         executions.startTemporary(
           userId,
+          sessionId,
           workspace.workspaceId,
           null,
           {

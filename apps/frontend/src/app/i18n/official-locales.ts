@@ -8,6 +8,7 @@ const zhHansMessages = {
       close: "关闭",
       continue: "继续",
       create: "创建",
+      delete: "删除",
       discard: "放弃",
       save: "保存",
     },
@@ -67,6 +68,7 @@ const zhHansMessages = {
     newRequest: "新建请求",
     newSubcollection: "新建子集合",
   },
+  environment: enUsMessages.environment,
   request: {
     addHeader: "添加请求头",
     addParameter: "添加参数",
@@ -133,9 +135,11 @@ const zhHansMessages = {
   errors: {
     collection_profile_conflict:
       "这些集合请求头已在其他位置更改。请重新打开编辑器后再试。",
+    environment_conflict: "此环境已在其他位置更改。请刷新后重试。",
     operationFailed: "操作失败。",
     parentRequired: "请先选择所需的上级集合。",
     requestTabClosed: "此请求标签页已关闭。",
+    variable_resolution_failed: "请求包含无法解析的变量。",
   },
 } satisfies MessageSchema;
 
@@ -146,6 +150,7 @@ const zhHantMessages = {
       close: "關閉",
       continue: "繼續",
       create: "建立",
+      delete: "刪除",
       discard: "捨棄",
       save: "儲存",
     },
@@ -205,6 +210,7 @@ const zhHantMessages = {
     newRequest: "新增請求",
     newSubcollection: "新增子集合",
   },
+  environment: enUsMessages.environment,
   request: {
     addHeader: "新增標頭",
     addParameter: "新增參數",
@@ -271,9 +277,11 @@ const zhHantMessages = {
   errors: {
     collection_profile_conflict:
       "這些集合標頭已在其他位置變更。請重新開啟編輯器後再試。",
+    environment_conflict: "此環境已在其他位置變更。請重新整理後再試。",
     operationFailed: "操作失敗。",
     parentRequired: "請先選擇所需的上層集合。",
     requestTabClosed: "此請求分頁已關閉。",
+    variable_resolution_failed: "請求包含無法解析的變數。",
   },
 } satisfies MessageSchema;
 
