@@ -61,6 +61,9 @@ export async function prepareRuntime(options = {}) {
   const dataRoot = options.dataRoot ?? "/data";
   const cacheRoot = options.cacheRoot ?? "/cache";
   const frontendRoot = options.frontendRoot ?? "/opt/apinteract/frontend";
+  const defaultPublicOrigin =
+    (options.environment ?? process.env).APINTERACT_AIO_PUBLIC_ORIGIN ??
+    DEFAULT_BACKEND_CONFIGURATION.server.publicOrigin;
   const tokenFactory =
     options.tokenFactory ?? (() => randomBytes(GENERATED_TOKEN_BYTES));
 
@@ -80,6 +83,7 @@ export async function prepareRuntime(options = {}) {
 
   const backend = mergeRecords(
     mergeRecords(DEFAULT_BACKEND_CONFIGURATION, {
+      server: { publicOrigin: defaultPublicOrigin },
       persistence: {
         databasePath: resolve(dataRoot, "database", "apinteract.sqlite3"),
         migrationBackupDirectory: resolve(dataRoot, "backups"),

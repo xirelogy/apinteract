@@ -93,9 +93,12 @@ boundary:
 APINTERACT_AIO_BIND_ADDRESS=0.0.0.0 deploy/scripts/aio up
 ```
 
-If `APINTERACT_AIO_PORT` changes the browser-visible port, provide an
-administrator `publicOrigin` containing that exact port. Host publication does
-not silently rewrite the backend's origin security policy.
+Changing `APINTERACT_AIO_PORT` also changes the default loopback browser origin,
+so local login works on the published port without extra configuration:
+
+```sh
+APINTERACT_AIO_PORT=9980 deploy/scripts/aio up
+```
 
 Direct cleartext access is permitted only for a loopback public origin. A
 deployment exposed through a reverse proxy should terminate TLS and provide a

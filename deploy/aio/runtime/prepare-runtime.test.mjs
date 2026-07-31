@@ -49,6 +49,9 @@ test("generates matching private AIO component credentials", async () => {
     dataRoot: resolve(root, "data"),
     cacheRoot: resolve(root, "cache"),
     frontendRoot: "/test/frontend",
+    environment: {
+      APINTERACT_AIO_PUBLIC_ORIGIN: "http://localhost:9980",
+    },
     tokenFactory: () => Buffer.alloc(48, 7),
   });
 
@@ -85,6 +88,28 @@ test("generates matching private AIO component credentials", async () => {
     tokenFactory: () => Buffer.alloc(48, 9),
   });
   assert.equal(repeated.bearerToken, prepared.bearerToken);
+});
+
+test("uses the published local origin unless an administrator overrides it", async () => {
+  const root = await mkdtemp(
+    resolve(tmpdir(), "apinteract-aio-default-origin-"),
+  );
+  const administratorRoot = resolve(root, "configuration");
+  await mkdir(administratorRoot);
+
+  const prepared = await prepareRuntime({
+    administratorRoot,
+    runtimeRoot: resolve(root, "runtime"),
+    dataRoot: resolve(root, "data"),
+    cacheRoot: resolve(root, "cache"),
+    environment: {
+      APINTERACT_AIO_PUBLIC_ORIGIN: "http://localhost:9980",
+    },
+    tokenFactory: () => Buffer.alloc(48, 7),
+  });
+
+  assert.equal(prepared.backend.server.publicOrigin, "http://localhost:9980");
+  assert.equal(prepared.backend.sessions.secureCookie, false);
 });
 
 /** Requires a generated runtime file to remain readable only by its owner. */

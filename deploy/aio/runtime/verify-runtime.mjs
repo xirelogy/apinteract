@@ -13,7 +13,11 @@ async function main() {
   const { values } = parseArgs({
     options: {
       phase: { type: "string" },
-      origin: { type: "string", default: "http://localhost:8080" },
+      origin: {
+        type: "string",
+        default:
+          process.env.APINTERACT_AIO_PUBLIC_ORIGIN ?? "http://localhost:8080",
+      },
       target: { type: "string", default: "http://target:8090/echo" },
       state: { type: "string" },
     },

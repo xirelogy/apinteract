@@ -16,6 +16,8 @@ services:
     stop_grace_period: 45s
     security_opt:
       - no-new-privileges:true
+    environment:
+      APINTERACT_AIO_PUBLIC_ORIGIN: "http://localhost:${APINTERACT_AIO_PORT:-8080}"
     ports:
       - "${APINTERACT_AIO_BIND_ADDRESS:-127.0.0.1}:${APINTERACT_AIO_PORT:-8080}:8080"
     tmpfs:
