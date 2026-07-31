@@ -1,7 +1,4 @@
-import type {
-  ResolvedEnvironmentVariable,
-  SelectedEnvironmentProfile,
-} from "./environment-service.js";
+import type { ResolvedVariable } from "../variables/variable-profile-store.js";
 
 export interface SecretReference {
   readonly variableId: string;
@@ -24,11 +21,23 @@ export class VariableResolutionError extends Error {}
 
 /** Resolves aliases lazily so unused invalid variables do not block execution. */
 export class VariableResolver {
-  readonly #variables: ReadonlyMap<string, ResolvedEnvironmentVariable>;
+  readonly #variables: ReadonlyMap<string, ResolvedVariable>;
 
-  constructor(profile: SelectedEnvironmentProfile | null) {
+  constructor(
+    profile:
+      | { readonly variables: readonly ResolvedVariable[] }
+      | readonly ResolvedVariable[]
+      | null,
+  ) {
+    const variables: readonly ResolvedVariable[] =
+      profile === null
+        ? []
+        : Array.isArray(profile)
+          ? profile
+          : (profile as { readonly variables: readonly ResolvedVariable[] })
+              .variables;
     this.#variables = new Map(
-      (profile?.variables ?? []).map((variable) => [variable.name, variable]),
+      variables.map((variable) => [variable.name, variable]),
     );
   }
 

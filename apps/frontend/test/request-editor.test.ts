@@ -36,10 +36,11 @@ describe("RequestEditor", () => {
     });
 
     const buttons = wrapper.findAll(".command-bar button");
-    expect(buttons).toHaveLength(2);
-    expect(buttons[0]?.attributes("disabled")).toBeUndefined();
-    expect(buttons[1]?.attributes("disabled")).toBeUndefined();
-    await buttons[1]?.trigger("click");
+    const save = buttons.find((button) => button.text().includes("Save"));
+    const send = buttons.find((button) => button.text().includes("Send"));
+    expect(save?.attributes("disabled")).toBeUndefined();
+    expect(send?.attributes("disabled")).toBeUndefined();
+    await send?.trigger("click");
     expect(wrapper.emitted("execute")?.[0]?.[0]).toMatchObject({
       targetUrl: "<<base_url>>/resource",
     });
@@ -74,7 +75,9 @@ describe("RequestEditor", () => {
       global: { plugins: [i18n] },
     });
 
-    const save = wrapper.get(".command-bar .secondary-button");
+    const save = wrapper
+      .findAll(".command-bar button")
+      .find((button) => button.text().includes("Save"))!;
     expect(save.attributes("disabled")).toBeUndefined();
     await save.trigger("click");
     expect(wrapper.emitted("save")).toEqual([

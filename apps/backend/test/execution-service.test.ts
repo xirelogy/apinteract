@@ -17,6 +17,7 @@ import { SqliteDatabase } from "../src/persistence/sqlite-database.js";
 import type { ProxyClient } from "../src/proxy/proxy-client.js";
 import { RequestService } from "../src/requests/request-service.js";
 import { WorkspaceService } from "../src/workspaces/workspace-service.js";
+import { VariableService } from "../src/variables/variable-service.js";
 
 describe("ExecutionService shutdown", () => {
   it("drains active proxy work and rejects new starts", async () => {
@@ -57,7 +58,7 @@ describe("ExecutionService shutdown", () => {
       const requests = new RequestService(
         database.db,
         workspaces,
-        environments,
+        new VariableService(database.db, workspaces, environments, audit),
         audit,
       );
       const workspace = await workspaces.create(userId, "Workspace");

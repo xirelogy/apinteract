@@ -6,6 +6,7 @@ import type {
   EnvironmentSummary,
   EnvironmentView,
   TreeNode,
+  VariableProfileView,
   VariablePreview,
   WorkspaceSummary,
 } from "@/model/contracts/backend";
@@ -24,6 +25,7 @@ export const useApplicationStore = defineStore("application", {
     environments: [] as EnvironmentSummary[],
     selectedEnvironmentId: null as string | null,
     selectedEnvironment: null as EnvironmentView | null,
+    selectedVariableProfile: null as VariableProfileView | null,
     variablePreviews: [] as VariablePreview[],
     rootNodes: [] as TreeNode[],
     selectedCollectionId: null as string | null,

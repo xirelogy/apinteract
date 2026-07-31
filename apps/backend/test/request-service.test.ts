@@ -9,6 +9,7 @@ import { EnvironmentService } from "../src/environments/environment-service.js";
 import { bytesToId, createEntityId, idToBytes } from "../src/foundation/id.js";
 import { SqliteDatabase } from "../src/persistence/sqlite-database.js";
 import { RequestService } from "../src/requests/request-service.js";
+import { VariableService } from "../src/variables/variable-service.js";
 import { WorkspaceService } from "../src/workspaces/workspace-service.js";
 
 describe("RequestService draft updates", () => {
@@ -43,7 +44,7 @@ describe("RequestService draft updates", () => {
       const requests = new RequestService(
         database.db,
         workspaces,
-        environments,
+        new VariableService(database.db, workspaces, environments, audit),
         audit,
       );
       const workspace = await workspaces.create(userId, "Workspace");

@@ -90,9 +90,19 @@ export interface EnvironmentTable {
   updated_at: number;
 }
 
-export interface EnvironmentVariableTable {
+export interface VariableProfileTable {
   id: BinaryId;
-  environment_id: BinaryId;
+  workspace_id: BinaryId;
+  scope_kind: "workspace" | "collection" | "environment" | "request";
+  scope_id: BinaryId;
+  revision: number;
+  updated_by: BinaryId;
+  updated_at: number;
+}
+
+export interface VariableTable {
+  id: BinaryId;
+  profile_id: BinaryId;
   position: number;
   name: string;
   kind: "value" | "secret" | "alias" | "unset";
@@ -100,7 +110,7 @@ export interface EnvironmentVariableTable {
   alias_target: string | null;
 }
 
-export interface EnvironmentVariableSecretTable {
+export interface VariableSecretTable {
   variable_id: BinaryId;
   version: number;
   storage_format: "plaintext-v1";
@@ -217,8 +227,9 @@ export interface DatabaseSchema {
   workspace_tree_nodes: WorkspaceTreeNodeTable;
   collection_profiles: CollectionProfileTable;
   environments: EnvironmentTable;
-  environment_variables: EnvironmentVariableTable;
-  environment_variable_secrets: EnvironmentVariableSecretTable;
+  variable_profiles: VariableProfileTable;
+  variables: VariableTable;
+  variable_secrets: VariableSecretTable;
   session_workspace_environments: SessionWorkspaceEnvironmentTable;
   request_drafts: RequestDraftTable;
   request_revisions: RequestRevisionTable;

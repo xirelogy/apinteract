@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 test("creates, restores, and sends the first workspace request", async ({
   page,
@@ -25,6 +25,25 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.getByLabel("Workspace", { exact: true })).toContainText(
     workspaceName,
   );
+  if (mobile) {
+    await page.getByTitle("Close workspace navigator", { exact: true }).click();
+  }
+
+  await openNavigator(page, mobile);
+  await page
+    .getByRole("button", { name: "Manage workspace variables" })
+    .click();
+  const workspaceVariables = page.getByRole("dialog", {
+    name: `Variables for ${workspaceName}`,
+  });
+  await addValueVariable(
+    workspaceVariables,
+    1,
+    "workspace_source",
+    `workspace-${suffix}`,
+  );
+  await addValueVariable(workspaceVariables, 2, "scope_chain", "workspace");
+  await workspaceVariables.getByRole("button", { name: "Save" }).click();
   if (mobile) {
     await page.getByTitle("Close workspace navigator", { exact: true }).click();
   }
@@ -54,6 +73,7 @@ test("creates, restores, and sends the first workspace request", async ({
     .getByRole("option", { name: "Secret", exact: true })
     .click();
   await environmentDialog.getByLabel("Secret value 3").fill(`secret-${suffix}`);
+  await addValueVariable(environmentDialog, 4, "scope_chain", "environment");
   await environmentDialog.getByRole("button", { name: "Save" }).click();
   await expect(environmentDialog).toBeHidden();
   await selectMenuOption(page, "Select environment", environmentName);
@@ -74,20 +94,31 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(collection).toBeVisible();
   await collection.click();
 
-  await openCollectionAction(page, collectionName, "Edit headers");
-  const headersDialog = page.getByRole("dialog", {
-    name: `Common headers for ${collectionName}`,
+  await openCollectionAction(page, collectionName, "Collection properties");
+  const propertiesDialog = page.getByRole("dialog", {
+    name: "Collection properties",
   });
-  await headersDialog
+  await expect(propertiesDialog.getByLabel("Collection name")).toHaveValue(
+    collectionName,
+  );
+  await propertiesDialog
     .getByRole("button", { name: "Add common header" })
     .click();
-  await headersDialog
+  await propertiesDialog
     .getByLabel("Header name 1", { exact: true })
     .fill("X-Inherited");
-  await headersDialog
+  await propertiesDialog
     .getByLabel("Header value 1", { exact: true })
     .fill(`root-${suffix}`);
-  await headersDialog.getByRole("button", { name: "Save" }).click();
+  await propertiesDialog.getByRole("tab", { name: "Variables" }).click();
+  await addValueVariable(
+    propertiesDialog,
+    1,
+    "collection_source",
+    `collection-${suffix}`,
+  );
+  await addValueVariable(propertiesDialog, 2, "scope_chain", "collection");
+  await propertiesDialog.getByRole("button", { name: "Save" }).click();
 
   await openCollectionAction(page, collectionName, "New subcollection");
   const subcollectionDialog = page.getByRole("dialog", {
@@ -142,6 +173,7 @@ test("creates, restores, and sends the first workspace request", async ({
   await addParameterButton.click();
   await page.getByLabel("Query name 1").fill("source");
   await page.getByLabel("Query value 1").fill("<<source>>");
+  await addRequestQuery(page, 2, "scope", "<<scope_chain>>");
   await page.getByRole("tab", { name: "Headers 1" }).click();
   await expect(page.getByLabel("Inherited header name 1")).toHaveValue(
     "X-Inherited",
@@ -161,14 +193,18 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.getByRole("tooltip")).toContainText("Secret value stored");
   await expect(page.getByRole("tooltip")).not.toContainText(`secret-${suffix}`);
   await page.getByRole("tab", { name: "Body" }).click();
-  await page.getByLabel("Raw request body").fill("payload-<<source>>");
+  await page
+    .getByLabel("Raw request body")
+    .fill(
+      "payload-<<source>>-<<workspace_source>>-<<collection_source>>-<<scope_chain>>",
+    );
   await page.getByRole("button", { name: "Send" }).click();
 
   await expect(page.getByRole("status")).toHaveText("In progress");
   await expect(page.locator(".status-code")).toHaveText("201");
   await expect(page.locator(".body-preview")).toContainText(`"method":"POST"`);
   await expect(page.locator(".body-preview")).toContainText(
-    `"query":[["source","environment-${suffix}"]]`,
+    `"query":[["source","environment-${suffix}"],["scope","collection"]]`,
   );
   await expect(page.locator(".body-preview")).toContainText(
     `"requestHeader":"secret-${suffix}"`,
@@ -177,7 +213,7 @@ test("creates, restores, and sends the first workspace request", async ({
     `"inheritedHeader":"root-${suffix}"`,
   );
   await expect(page.locator(".body-preview")).toContainText(
-    `"body":"payload-environment-${suffix}"`,
+    `"body":"payload-environment-${suffix}-workspace-${suffix}-collection-${suffix}-collection"`,
   );
   await expect(draftRevision).toHaveText("Temporary");
   await expect(
@@ -202,7 +238,7 @@ test("creates, restores, and sends the first workspace request", async ({
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
   expect(await readFile(downloadPath, "utf8")).toContain(
-    `"body":"payload-environment-${suffix}"`,
+    `"body":"payload-environment-${suffix}-workspace-${suffix}-collection-${suffix}-collection"`,
   );
 
   await page.getByRole("button", { name: "New temporary request" }).click();
@@ -279,6 +315,14 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(subcollection.locator("..")).not.toHaveClass(/is-selected/u);
   await expect(draftRevision).toHaveText("Draft 0");
 
+  await page.getByRole("button", { name: "Manage request variables" }).click();
+  const requestVariables = page.getByRole("dialog", {
+    name: `Variables for ${requestName}`,
+  });
+  await addValueVariable(requestVariables, 1, "source", `request-${suffix}`);
+  await addValueVariable(requestVariables, 2, "scope_chain", "request");
+  await requestVariables.getByRole("button", { name: "Save" }).click();
+
   await page.reload();
   await openNavigator(page, mobile);
   await selectMenuOption(page, "Workspace", workspaceName);
@@ -322,8 +366,13 @@ test("creates, restores, and sends the first workspace request", async ({
   );
   await page.getByRole("tab", { name: "Body" }).click();
   await expect(page.getByLabel("Raw request body")).toHaveValue(
-    "payload-<<source>>",
+    "payload-<<source>>-<<workspace_source>>-<<collection_source>>-<<scope_chain>>",
   );
+  await inspectTemplateAt(page, "Raw request body", 10);
+  await expect(page.getByRole("tooltip")).toContainText(
+    `Request: ${requestName}`,
+  );
+  await expect(page.getByRole("tooltip")).toContainText(`request-${suffix}`);
   await expect(draftRevision).toHaveText("Draft 0");
 
   await openNavigator(page, mobile);
@@ -358,6 +407,12 @@ test("creates, restores, and sends the first workspace request", async ({
   );
   await expect(page.locator(".body-preview")).toContainText(
     `"requestHeader":"secret-${suffix}"`,
+  );
+  await expect(page.locator(".body-preview")).toContainText(
+    `["source","request-${suffix}"],["scope","request"]`,
+  );
+  await expect(page.locator(".body-preview")).toContainText(
+    `"body":"payload-request-${suffix}-workspace-${suffix}-collection-${suffix}-request"`,
   );
   await expect(draftRevision).toHaveText("Draft 0");
 
@@ -448,6 +503,30 @@ async function inspectTemplateAt(
       element.dispatchEvent(new Event("select", { bubbles: true }));
     }
   }, position);
+}
+
+/** Adds one ordinary variable to an open environment or scope profile dialog. */
+async function addValueVariable(
+  dialog: Locator,
+  index: number,
+  name: string,
+  value: string,
+): Promise<void> {
+  await dialog.getByRole("button", { name: "Add variable" }).click();
+  await dialog.getByLabel(`Variable name ${index}`).fill(name);
+  await dialog.getByLabel(`Variable value ${index}`).fill(value);
+}
+
+/** Adds one structured query field through the active request editor. */
+async function addRequestQuery(
+  page: Page,
+  index: number,
+  name: string,
+  value: string,
+): Promise<void> {
+  await page.getByRole("button", { name: "Add parameter" }).click();
+  await page.getByLabel(`Query name ${index}`).fill(name);
+  await page.getByLabel(`Query value ${index}`).fill(value);
 }
 
 /** Verifies the application work area consumes all space below the header. */

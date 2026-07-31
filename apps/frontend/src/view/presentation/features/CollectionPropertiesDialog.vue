@@ -1,0 +1,253 @@
+<script setup lang="ts">
+import { computed, ref } from "vue";
+import { Plus, Trash2, X } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
+
+import type {
+  CollectionView,
+  RequestField,
+  VariableProfileView,
+  VariableWrite,
+} from "@/model/contracts/backend";
+import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
+import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
+import FormField from "@/view/presentation/controls/FormField.vue";
+import IconButton from "@/view/presentation/controls/IconButton.vue";
+import TextInput from "@/view/presentation/controls/TextInput.vue";
+import DialogControl from "@/view/presentation/controls/dialog/DialogControl.vue";
+import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
+import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
+import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
+import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
+import VariableFieldsEditor from "./VariableFieldsEditor.vue";
+
+interface VariableFieldsEditorApi {
+  writes(): VariableWrite[];
+}
+
+const props = defineProps<{
+  collection: CollectionView;
+  variableProfile: VariableProfileView;
+  canEdit: boolean;
+  busy: boolean;
+}>();
+const emit = defineEmits<{
+  close: [];
+  save: [
+    name: string,
+    headers: readonly RequestField[],
+    variables: readonly VariableWrite[],
+  ];
+}>();
+const { t } = useI18n();
+const open = ref(true);
+const activeSection = ref<"headers" | "variables">("headers");
+const name = ref(props.collection.name);
+const headers = ref<RequestField[]>(props.collection.headers.map(cloneHeader));
+const variableEditor = ref<VariableFieldsEditorApi | null>(null);
+const canSave = computed(
+  () =>
+    name.value.trim() !== "" &&
+    headers.value.every(
+      (header) => !header.enabled || header.name.trim() !== "",
+    ),
+);
+
+/** Copies one contract field into mutable dialog-local state. */
+function cloneHeader(header: RequestField): RequestField {
+  return { ...header };
+}
+
+/** Adds one enabled empty row ready for keyboard entry. */
+function addHeader(): void {
+  headers.value.push({ name: "", value: "", enabled: true });
+}
+
+/** Removes one common header by its visible ordered position. */
+function removeHeader(index: number): void {
+  headers.value.splice(index, 1);
+}
+
+/** Requests closure through the shared controlled dialog lifecycle. */
+function close(): void {
+  open.value = false;
+}
+
+/** Emits all editable collection properties as one user operation. */
+function save(): void {
+  if (!props.canEdit || !canSave.value) {
+    return;
+  }
+  emit(
+    "save",
+    name.value.trim(),
+    headers.value
+      .filter((header) => header.name !== "" || header.value !== "")
+      .map(cloneHeader),
+    variableEditor.value?.writes() ?? [],
+  );
+}
+</script>
+
+<template>
+  <DialogControl
+    v-model:open="open"
+    class="resource-dialog environment-dialog collection-properties-dialog"
+    aria-labelledby="collection-properties-title"
+    :busy="busy"
+    @close="emit('close')"
+  >
+    <div class="resource-dialog-surface">
+      <header class="resource-dialog-header">
+        <h2 id="collection-properties-title">
+          {{ t("collection.propertiesTitle") }}
+        </h2>
+        <IconButton
+          :label="t('common.actions.close')"
+          :disabled="busy"
+          @click="close"
+        >
+          <X :size="18" aria-hidden="true" />
+        </IconButton>
+      </header>
+      <form class="resource-dialog-form" @submit.prevent="save">
+        <p class="resource-dialog-context">
+          {{ t("collection.propertiesDescription") }}
+        </p>
+        <FormField
+          v-slot="{ controlId, describedBy, invalid }"
+          :label="t('collection.name')"
+        >
+          <TextInput
+            :id="controlId"
+            v-model="name"
+            :aria-describedby="describedBy"
+            :aria-label="t('collection.name')"
+            :invalid="invalid"
+            autocomplete="off"
+            :disabled="busy || !canEdit"
+          />
+        </FormField>
+        <TabsRoot v-model="activeSection" class="collection-properties-tabs">
+          <TabsList
+            class="request-tabs"
+            :label="t('collection.propertiesTitle')"
+          >
+            <TabsTrigger class="tab-button" value="headers">
+              {{ t("collection.commonHeaders") }}
+            </TabsTrigger>
+            <TabsTrigger class="tab-button" value="variables">
+              {{ t("environment.variables") }}
+            </TabsTrigger>
+          </TabsList>
+          <TabsPanel value="headers" class="collection-properties-section">
+            <p class="resource-dialog-context">
+              {{ t("collection.headersDescription") }}
+            </p>
+            <div class="collection-header-fields">
+              <div class="request-field-heading" aria-hidden="true">
+                <span></span>
+                <span>{{ t("common.fields.name") }}</span>
+                <span>{{ t("common.fields.value") }}</span>
+                <span></span>
+              </div>
+              <div
+                v-for="(header, index) in headers"
+                :key="index"
+                class="request-field-row"
+              >
+                <CheckboxControl
+                  v-model="header.enabled"
+                  visually-hidden-label
+                  :label="
+                    t('request.enableField', {
+                      kind: t('request.headerField'),
+                      index: index + 1,
+                    })
+                  "
+                  :disabled="busy || !canEdit"
+                />
+                <TextInput
+                  v-model="header.name"
+                  class="field-cell-input"
+                  density="compact"
+                  font="mono"
+                  :aria-label="t('request.headerName', { index: index + 1 })"
+                  autocomplete="off"
+                  spellcheck="false"
+                  :disabled="busy || !canEdit"
+                />
+                <TextInput
+                  v-model="header.value"
+                  class="field-cell-input"
+                  density="compact"
+                  font="mono"
+                  :aria-label="t('request.headerValue', { index: index + 1 })"
+                  autocomplete="off"
+                  spellcheck="false"
+                  :disabled="busy || !canEdit"
+                />
+                <IconButton
+                  v-if="canEdit"
+                  size="compact"
+                  :label="
+                    t('request.removeField', {
+                      kind: t('request.headerField'),
+                      index: index + 1,
+                    })
+                  "
+                  :disabled="busy"
+                  @click="removeHeader(index)"
+                >
+                  <Trash2 :size="15" aria-hidden="true" />
+                </IconButton>
+              </div>
+              <ButtonControl
+                v-if="canEdit"
+                class="add-field-button"
+                type="button"
+                variant="ghost"
+                size="compact"
+                :disabled="busy"
+                @click="addHeader"
+              >
+                <template #leading>
+                  <Plus :size="15" aria-hidden="true" />
+                </template>
+                {{ t("collection.addHeader") }}
+              </ButtonControl>
+            </div>
+          </TabsPanel>
+          <TabsPanel value="variables" class="collection-properties-section">
+            <VariableFieldsEditor
+              ref="variableEditor"
+              :profile-variables="variableProfile.variables"
+              :can-edit="canEdit"
+              :busy="busy"
+            />
+          </TabsPanel>
+        </TabsRoot>
+        <footer class="resource-dialog-actions">
+          <ButtonControl
+            type="button"
+            variant="secondary"
+            :disabled="busy"
+            @click="close"
+          >
+            {{
+              canEdit ? t("common.actions.cancel") : t("common.actions.close")
+            }}
+          </ButtonControl>
+          <ButtonControl
+            v-if="canEdit"
+            variant="primary"
+            type="submit"
+            :disabled="busy || !canSave"
+          >
+            {{ t("common.actions.save") }}
+          </ButtonControl>
+        </footer>
+      </form>
+    </div>
+  </DialogControl>
+</template>

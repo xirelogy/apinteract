@@ -104,6 +104,14 @@ async function createPersistentJourney(client, accessToken, targetUrl) {
   const workspace = await client.command("workspace.create", {
     name: workspaceName,
   });
+  await client.command("variable_profile.update", {
+    scopeKind: "workspace",
+    scopeId: workspace.workspaceId,
+    expectedRevision: 0,
+    variables: [
+      { name: "workspace_marker", kind: "value", value: `workspace-${marker}` },
+    ],
+  });
   const environment = await client.command("environment.create", {
     workspaceId: workspace.workspaceId,
     name: "Persistent environment",
@@ -127,6 +135,19 @@ async function createPersistentJourney(client, accessToken, targetUrl) {
     expectedRevision: 0,
     headers: [{ name: "X-AIO-Inherited", value: marker, enabled: true }],
   });
+  await client.command("variable_profile.update", {
+    scopeKind: "collection",
+    scopeId: collection.nodeId,
+    expectedRevision: 0,
+    variables: [
+      {
+        name: "collection_marker",
+        kind: "value",
+        value: `collection-${marker}`,
+      },
+      { name: "marker", kind: "value", value: `collection-${marker}` },
+    ],
+  });
   const request = await client.command("request.create", {
     workspaceId: workspace.workspaceId,
     parentCollectionId: collection.nodeId,
@@ -137,7 +158,15 @@ async function createPersistentJourney(client, accessToken, targetUrl) {
     headers: [
       { name: "X-AIO-Verification", value: "<<token>>", enabled: true },
     ],
-    body: "<<marker>>",
+    body: "<<workspace_marker>>|<<collection_marker>>|<<request_marker>>|<<marker>>",
+  });
+  await client.command("variable_profile.update", {
+    scopeKind: "request",
+    scopeId: request.requestId,
+    expectedRevision: 0,
+    variables: [
+      { name: "request_marker", kind: "value", value: `request-${marker}` },
+    ],
   });
   const execution = await client.command("execution.start", {
     requestId: request.requestId,
@@ -151,7 +180,8 @@ async function createPersistentJourney(client, accessToken, targetUrl) {
   if (
     view.status !== 200 ||
     view.bodyComplete !== true ||
-    !view.bodyPreview?.includes(`"inherited":"${marker}"`)
+    !view.bodyPreview?.includes(`"inherited":"${marker}"`) ||
+    !view.bodyPreview.includes(`collection-${marker}`)
   ) {
     throw new Error("AIO proxy execution did not return the expected response");
   }
@@ -201,6 +231,29 @@ async function verifyRestoredJourney(client, accessToken, state) {
   ) {
     throw new Error("The collection header profile did not survive restart");
   }
+  const workspaceVariables = await client.command("variable_profile.get", {
+    scopeKind: "workspace",
+    scopeId: state.workspaceId,
+  });
+  const collectionVariables = await client.command("variable_profile.get", {
+    scopeKind: "collection",
+    scopeId: state.collectionId,
+  });
+  const requestVariables = await client.command("variable_profile.get", {
+    scopeKind: "request",
+    scopeId: state.requestId,
+  });
+  if (
+    workspaceVariables.revision !== 1 ||
+    workspaceVariables.variables?.[0]?.value !== `workspace-${state.marker}` ||
+    collectionVariables.revision !== 1 ||
+    collectionVariables.variables?.[0]?.value !==
+      `collection-${state.marker}` ||
+    requestVariables.revision !== 1 ||
+    requestVariables.variables?.[0]?.value !== `request-${state.marker}`
+  ) {
+    throw new Error("Persisted variable scopes did not survive restart");
+  }
   const environments = await client.command("environment.list", {
     workspaceId: state.workspaceId,
   });
@@ -247,6 +300,37 @@ async function verifyRestoredJourney(client, accessToken, state) {
   ) {
     throw new Error("Variable previews were stale or exposed a secret");
   }
+  const scopedPreview = await client.command("variable.preview", {
+    workspaceId: state.workspaceId,
+    parentCollectionId: state.collectionId,
+    requestId: state.requestId,
+    names: [
+      "workspace_marker",
+      "collection_marker",
+      "request_marker",
+      "marker",
+      "token",
+    ],
+  });
+  const previewSources = Object.fromEntries(
+    scopedPreview.previews.map((variable) => [
+      variable.name,
+      variable.source?.scope ?? null,
+    ]),
+  );
+  if (
+    previewSources.workspace_marker !== "workspace" ||
+    previewSources.collection_marker !== "collection" ||
+    previewSources.request_marker !== "request" ||
+    previewSources.marker !== "collection" ||
+    scopedPreview.previews.find((variable) => variable.name === "marker")
+      ?.value !== `collection-${state.marker}` ||
+    scopedPreview.previews.find((variable) => variable.name === "token")
+      ?.value !== null ||
+    JSON.stringify(scopedPreview).includes(`secret-${state.marker}`)
+  ) {
+    throw new Error("Scoped variable previews were incorrect or unsafe");
+  }
   const children = await client.command("tree.list", {
     workspaceId: state.workspaceId,
     parentCollectionId: state.collectionId,
@@ -271,7 +355,9 @@ async function verifyRestoredJourney(client, accessToken, state) {
   );
   if (
     restoredTerminal.payload?.data?.status !== 200 ||
-    !restoredTerminal.payload?.data?.bodyPreview?.includes(state.marker)
+    !restoredTerminal.payload?.data?.bodyPreview?.includes(
+      `collection-${state.marker}`,
+    )
   ) {
     throw new Error("The restored environment did not compose the request");
   }

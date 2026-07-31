@@ -205,6 +205,7 @@ export interface components {
       | components["schemas"]["TreeListCommand"]
       | components["schemas"]["CollectionCreateCommand"]
       | components["schemas"]["CollectionGetCommand"]
+      | components["schemas"]["CollectionUpdateCommand"]
       | components["schemas"]["CollectionHeadersUpdateCommand"]
       | components["schemas"]["EnvironmentListCommand"]
       | components["schemas"]["EnvironmentCreateCommand"]
@@ -213,6 +214,9 @@ export interface components {
       | components["schemas"]["EnvironmentDeleteCommand"]
       | components["schemas"]["EnvironmentSelectCommand"]
       | components["schemas"]["EnvironmentPreviewVariablesCommand"]
+      | components["schemas"]["VariableProfileGetCommand"]
+      | components["schemas"]["VariableProfileUpdateCommand"]
+      | components["schemas"]["VariablePreviewCommand"]
       | components["schemas"]["RequestCreateCommand"]
       | components["schemas"]["RequestGetCommand"]
       | components["schemas"]["RequestUpdateCommand"]
@@ -316,6 +320,22 @@ export interface components {
        * @enum {string}
        */
       type: "CollectionGetCommand";
+    };
+    CollectionUpdateCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "collection.update";
+      payload?: {
+        collectionId: components["schemas"]["CollectionId"];
+        expectedRevision: number;
+        name: string;
+        headers: components["schemas"]["RequestField"][];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "CollectionUpdateCommand";
     };
     CollectionHeadersUpdateCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
@@ -431,6 +451,52 @@ export interface components {
        */
       type: "EnvironmentPreviewVariablesCommand";
     };
+    VariableProfileGetCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "variable_profile.get";
+      payload?: {
+        scopeKind: components["schemas"]["EditableVariableScopeKind"];
+        scopeId: components["schemas"]["UuidV7"];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "VariableProfileGetCommand";
+    };
+    VariableProfileUpdateCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "variable_profile.update";
+      payload?: {
+        scopeKind: components["schemas"]["EditableVariableScopeKind"];
+        scopeId: components["schemas"]["UuidV7"];
+        expectedRevision: number;
+        variables: components["schemas"]["VariableWrite"][];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "VariableProfileUpdateCommand";
+    };
+    VariablePreviewCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "variable.preview";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+        parentCollectionId: components["schemas"]["CollectionId"] | null;
+        requestId: components["schemas"]["RequestId"] | null;
+        names: components["schemas"]["VariableName"][];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "VariablePreviewCommand";
+    };
     RequestCreateCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
       type?: "request.create";
@@ -529,6 +595,7 @@ export interface components {
     WebSocketReplyPayload:
       | components["schemas"]["EnvironmentListView"]
       | components["schemas"]["EnvironmentView"]
+      | components["schemas"]["VariableProfileView"]
       | components["schemas"]["VariablePreviewResult"]
       | {
           [key: string]: unknown;
@@ -589,11 +656,23 @@ export interface components {
       source: components["schemas"]["VariablePreviewSource"] | null;
     };
     VariablePreviewSource: {
-      /** @constant */
-      scope: "environment";
-      environmentId: components["schemas"]["EnvironmentId"];
-      environmentName: string;
-      environmentRevision: number;
+      /** @enum {string} */
+      scope: "workspace" | "collection" | "environment" | "request";
+      scopeId: components["schemas"]["UuidV7"];
+      scopeName: string;
+      revision: number;
+    };
+    /** @enum {string} */
+    EditableVariableScopeKind: "workspace" | "collection" | "request";
+    VariableView: components["schemas"]["EnvironmentVariableView"];
+    VariableWrite: components["schemas"]["EnvironmentVariableWrite"];
+    VariableProfileView: {
+      workspaceId: components["schemas"]["WorkspaceId"];
+      scopeKind: components["schemas"]["EditableVariableScopeKind"];
+      scopeId: components["schemas"]["UuidV7"];
+      scopeName: string;
+      revision: number;
+      variables: components["schemas"]["VariableView"][];
     };
     EnvironmentVariableView:
       | components["schemas"]["EnvironmentValueVariableView"]

@@ -5,7 +5,7 @@ import { mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
-import CollectionHeadersDialog from "../src/view/presentation/features/CollectionHeadersDialog.vue";
+import CollectionPropertiesDialog from "../src/view/presentation/features/CollectionPropertiesDialog.vue";
 
 let showModalDescriptor: PropertyDescriptor | undefined;
 let closeDescriptor: PropertyDescriptor | undefined;
@@ -58,14 +58,14 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-describe("CollectionHeadersDialog", () => {
-  it("edits ordered enabled state and emits meaningful common headers", async () => {
+describe("CollectionPropertiesDialog", () => {
+  it("edits the name, common headers, and variables together", async () => {
     const i18n = createI18n({
       legacy: false,
       locale: "en-US",
       messages: { "en-US": enUsMessages },
     });
-    const wrapper = mount(CollectionHeadersDialog, {
+    const wrapper = mount(CollectionPropertiesDialog, {
       attachTo: document.body,
       props: {
         collection: {
@@ -77,20 +77,70 @@ describe("CollectionHeadersDialog", () => {
           effectiveHeaders: [],
           revision: 0,
         },
+        variableProfile: {
+          workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
+          scopeKind: "collection",
+          scopeId: "019fa8be-a510-76b9-b73b-69f4c7af7875",
+          scopeName: "Examples",
+          revision: 0,
+          variables: [],
+        },
+        canEdit: true,
         busy: false,
       },
       global: { plugins: [i18n] },
     });
 
+    await wrapper
+      .get('input[aria-label="Collection name"]')
+      .setValue("Renamed examples");
     await wrapper.get("button.add-field-button").trigger("click");
     await wrapper.get('input[aria-label="Header name 1"]').setValue("X-Team");
     await wrapper
       .get('input[aria-label="Header value 1"]')
       .setValue("platform");
-    await wrapper.get('button[type="submit"]').trigger("click");
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toContain(
+      "Common headers",
+    );
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().includes("Variables"))
+      ?.trigger("click");
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toContain(
+      "Variables",
+    );
+    expect(
+      wrapper
+        .findAll('[role="tabpanel"]')
+        .find((panel) =>
+          panel.attributes("aria-labelledby")?.includes("headers"),
+        )
+        ?.attributes("hidden"),
+    ).toBeDefined();
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Add variable"))
+      ?.trigger("click");
+    await wrapper
+      .get('input[aria-label="Variable name 1"]')
+      .setValue("base_url");
+    await wrapper
+      .get('input[aria-label="Variable value 1"]')
+      .setValue("https://collection.test");
+    await wrapper.get('button[type="submit"]').trigger("submit");
 
     expect(wrapper.emitted("save")).toEqual([
-      [[{ name: "X-Team", value: "platform", enabled: true }]],
+      [
+        "Renamed examples",
+        [{ name: "X-Team", value: "platform", enabled: true }],
+        [
+          {
+            name: "base_url",
+            kind: "value",
+            value: "https://collection.test",
+          },
+        ],
+      ],
     ]);
     wrapper.unmount();
   });

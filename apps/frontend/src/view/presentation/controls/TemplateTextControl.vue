@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useAttrs, useId, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  ref,
+  useAttrs,
+  useId,
+  watch,
+} from "vue";
 import { useI18n } from "vue-i18n";
 
 import type { VariablePreview } from "@/model/contracts/backend";
@@ -7,6 +15,8 @@ import {
   parseTemplateSegments,
   type TemplateSegment,
 } from "@/model/domain/template-variables";
+
+type VariableScope = NonNullable<VariablePreview["source"]>["scope"];
 
 defineOptions({ inheritAttrs: false });
 
@@ -38,6 +48,8 @@ const attrs = useAttrs();
 const { t } = useI18n();
 const control = ref<HTMLInputElement | HTMLTextAreaElement | null>(null);
 const mirrorContent = ref<HTMLElement | null>(null);
+const tooltip = ref<HTMLElement | null>(null);
+const tooltipStyle = ref<Record<string, string>>({ visibility: "hidden" });
 const tooltipId = `variable-preview-${useId()}`;
 const segments = computed(() => parseTemplateSegments(props.modelValue));
 const previewByName = computed(
@@ -94,6 +106,18 @@ watch(
   () => void nextTick(synchronizeMirror),
 );
 
+watch([activeSegment, activePreview], ([segment]) => {
+  if (segment === null) {
+    stopTooltipPositionTracking();
+    return;
+  }
+  startTooltipPositionTracking();
+  tooltipStyle.value = { visibility: "hidden" };
+  void nextTick(positionTooltip);
+});
+
+onBeforeUnmount(stopTooltipPositionTracking);
+
 /** Emits native edits while retaining the underlying accessible form control. */
 function updateValue(event: Event): void {
   const target = event.currentTarget;
@@ -119,6 +143,49 @@ function synchronizeMirror(): void {
     return;
   }
   mirror.style.transform = `translate(${-element.scrollLeft}px, ${-element.scrollTop}px)`;
+}
+
+/** Starts repositioning the viewport overlay when an ancestor or window moves. */
+function startTooltipPositionTracking(): void {
+  window.addEventListener("resize", positionTooltip);
+  window.addEventListener("scroll", positionTooltip, true);
+}
+
+/** Stops viewport listeners when no inspection overlay is visible. */
+function stopTooltipPositionTracking(): void {
+  window.removeEventListener("resize", positionTooltip);
+  window.removeEventListener("scroll", positionTooltip, true);
+}
+
+/** Positions the tooltip without contributing to an editor's scrollable overflow. */
+function positionTooltip(): void {
+  const anchor = control.value;
+  const overlay = tooltip.value;
+  if (anchor === null || overlay === null) {
+    return;
+  }
+  const anchorRect = anchor.getBoundingClientRect();
+  const overlayRect = overlay.getBoundingClientRect();
+  const gap = 4;
+  const viewportPadding = 12;
+  const roomBelow =
+    window.innerHeight - anchorRect.bottom - gap - viewportPadding;
+  const top =
+    overlayRect.height <= roomBelow
+      ? anchorRect.bottom + gap
+      : Math.max(viewportPadding, anchorRect.top - gap - overlayRect.height);
+  const maximumLeft = Math.max(
+    viewportPadding,
+    window.innerWidth - viewportPadding - overlayRect.width,
+  );
+  const left = Math.min(
+    Math.max(viewportPadding, anchorRect.left),
+    maximumLeft,
+  );
+  tooltipStyle.value = {
+    top: `${Math.round(top)}px`,
+    left: `${Math.round(left)}px`,
+  };
 }
 
 /** Selects the placeholder containing the native caret for safe inspection. */
@@ -183,6 +250,11 @@ function kindLabel(kind: VariablePreview["declaredKind"]): string {
     case null:
       return t("environment.preview.unknownKind");
   }
+}
+
+/** Translates one effective persisted variable scope for inspection. */
+function scopeLabel(scope: VariableScope): string {
+  return t(`variables.scope.${scope}`);
 }
 </script>
 
@@ -253,8 +325,10 @@ function kindLabel(kind: VariablePreview["declaredKind"]): string {
     <div
       v-if="activeSegment"
       :id="tooltipId"
+      ref="tooltip"
       class="variable-preview-popover"
       role="tooltip"
+      :style="tooltipStyle"
     >
       <strong><code v-text="activeSegment.text"></code></strong>
       <span v-if="!activeSegment.valid" class="variable-preview-error">
@@ -266,8 +340,9 @@ function kindLabel(kind: VariablePreview["declaredKind"]): string {
           <template v-if="activePreview.source">
             ·
             {{
-              t("environment.preview.environmentSource", {
-                name: activePreview.source.environmentName,
+              t("environment.preview.scopeSource", {
+                scope: scopeLabel(activePreview.source.scope),
+                name: activePreview.source.scopeName,
               })
             }}
           </template>

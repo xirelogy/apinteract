@@ -266,6 +266,9 @@
             "environmentProfile": {
               "$ref": "#/components/schemas/EnvironmentView"
             },
+            "variableProfile": {
+              "$ref": "#/components/schemas/VariableProfileView"
+            },
             "variablePreview": {
               "$ref": "#/components/schemas/VariablePreviewResult"
             }
@@ -567,6 +570,9 @@
             "$ref": "#/components/schemas/CollectionGetCommand"
           },
           {
+            "$ref": "#/components/schemas/CollectionUpdateCommand"
+          },
+          {
             "$ref": "#/components/schemas/CollectionHeadersUpdateCommand"
           },
           {
@@ -589,6 +595,15 @@
           },
           {
             "$ref": "#/components/schemas/EnvironmentPreviewVariablesCommand"
+          },
+          {
+            "$ref": "#/components/schemas/VariableProfileGetCommand"
+          },
+          {
+            "$ref": "#/components/schemas/VariableProfileUpdateCommand"
+          },
+          {
+            "$ref": "#/components/schemas/VariablePreviewCommand"
           },
           {
             "$ref": "#/components/schemas/RequestCreateCommand"
@@ -823,6 +838,51 @@
           }
         ]
       },
+      "CollectionUpdateCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "collection.update"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "collectionId",
+                  "expectedRevision",
+                  "name",
+                  "headers"
+                ],
+                "properties": {
+                  "collectionId": {
+                    "$ref": "#/components/schemas/CollectionId"
+                  },
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "headers": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/RequestField"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
       "CollectionHeadersUpdateCommand": {
         "allOf": [
           {
@@ -1026,6 +1086,104 @@
                 "required": ["workspaceId", "names"],
                 "properties": {
                   "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+                  "names": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "uniqueItems": true,
+                    "items": { "$ref": "#/components/schemas/VariableName" }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "VariableProfileGetCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "variable_profile.get" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["scopeKind", "scopeId"],
+                "properties": {
+                  "scopeKind": {
+                    "$ref": "#/components/schemas/EditableVariableScopeKind"
+                  },
+                  "scopeId": { "$ref": "#/components/schemas/UuidV7" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "VariableProfileUpdateCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "variable_profile.update" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "scopeKind",
+                  "scopeId",
+                  "expectedRevision",
+                  "variables"
+                ],
+                "properties": {
+                  "scopeKind": {
+                    "$ref": "#/components/schemas/EditableVariableScopeKind"
+                  },
+                  "scopeId": { "$ref": "#/components/schemas/UuidV7" },
+                  "expectedRevision": { "type": "integer", "minimum": 0 },
+                  "variables": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/VariableWrite"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "VariablePreviewCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "variable.preview" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "workspaceId",
+                  "parentCollectionId",
+                  "requestId",
+                  "names"
+                ],
+                "properties": {
+                  "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+                  "parentCollectionId": {
+                    "oneOf": [
+                      { "$ref": "#/components/schemas/CollectionId" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "requestId": {
+                    "oneOf": [
+                      { "$ref": "#/components/schemas/RequestId" },
+                      { "type": "null" }
+                    ]
+                  },
                   "names": {
                     "type": "array",
                     "maxItems": 100,
@@ -1307,6 +1465,7 @@
         "anyOf": [
           { "$ref": "#/components/schemas/EnvironmentListView" },
           { "$ref": "#/components/schemas/EnvironmentView" },
+          { "$ref": "#/components/schemas/VariableProfileView" },
           { "$ref": "#/components/schemas/VariablePreviewResult" },
           { "type": "object", "additionalProperties": true }
         ]
@@ -1507,17 +1666,50 @@
       "VariablePreviewSource": {
         "type": "object",
         "additionalProperties": false,
+        "required": ["scope", "scopeId", "scopeName", "revision"],
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": ["workspace", "collection", "environment", "request"]
+          },
+          "scopeId": { "$ref": "#/components/schemas/UuidV7" },
+          "scopeName": { "type": "string" },
+          "revision": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "EditableVariableScopeKind": {
+        "type": "string",
+        "enum": ["workspace", "collection", "request"]
+      },
+      "VariableView": {
+        "$ref": "#/components/schemas/EnvironmentVariableView"
+      },
+      "VariableWrite": {
+        "$ref": "#/components/schemas/EnvironmentVariableWrite"
+      },
+      "VariableProfileView": {
+        "type": "object",
+        "additionalProperties": false,
         "required": [
-          "scope",
-          "environmentId",
-          "environmentName",
-          "environmentRevision"
+          "workspaceId",
+          "scopeKind",
+          "scopeId",
+          "scopeName",
+          "revision",
+          "variables"
         ],
         "properties": {
-          "scope": { "const": "environment" },
-          "environmentId": { "$ref": "#/components/schemas/EnvironmentId" },
-          "environmentName": { "type": "string" },
-          "environmentRevision": { "type": "integer", "minimum": 0 }
+          "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+          "scopeKind": {
+            "$ref": "#/components/schemas/EditableVariableScopeKind"
+          },
+          "scopeId": { "$ref": "#/components/schemas/UuidV7" },
+          "scopeName": { "type": "string" },
+          "revision": { "type": "integer", "minimum": 0 },
+          "variables": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/VariableView" }
+          }
         }
       },
       "EnvironmentVariableView": {

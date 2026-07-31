@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Lock, Play, Plus, Save, Trash2 } from "@lucide/vue";
+import { Lock, Play, Plus, Save, Settings2, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -49,6 +49,7 @@ const emit = defineEmits<{
   change: [draft: RequestDraftInput];
   download: [executionId: string];
   preview: [names: readonly string[]];
+  manageVariables: [];
 }>();
 
 const methods: readonly HttpMethod[] = [
@@ -254,6 +255,18 @@ function activeFieldKind(): string {
             </span>
           </div>
           <div class="command-bar">
+            <IconButton
+              :label="t('request.variables')"
+              :disabled="busy || temporary"
+              :title="
+                temporary
+                  ? t('variables.requestUnavailable')
+                  : t('request.variables')
+              "
+              @click="emit('manageVariables')"
+            >
+              <Settings2 :size="17" aria-hidden="true" />
+            </IconButton>
             <ButtonControl
               variant="secondary"
               :disabled="busy || !canSave"

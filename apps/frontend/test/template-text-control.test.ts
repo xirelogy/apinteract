@@ -34,9 +34,9 @@ describe("template variable editing", () => {
     const modelValue = "<<base_url>>/resource?token=<<token>>";
     const source = {
       scope: "environment" as const,
-      environmentId: "019facab-1eee-765f-bd9f-ac2449151bf0",
-      environmentName: "Development",
-      environmentRevision: 3,
+      scopeId: "019facab-1eee-765f-bd9f-ac2449151bf0",
+      scopeName: "Development",
+      revision: 3,
     };
     const wrapper = mount(TemplateTextControl, {
       props: {
@@ -80,9 +80,9 @@ describe("template variable editing", () => {
     input.element.setSelectionRange(3, 3);
     await input.trigger("focus");
     await input.trigger("keyup");
-    expect(wrapper.get('[role="tooltip"]').text()).toContain(
-      "https://api.example.test",
-    );
+    const ordinaryTooltip = wrapper.get('[role="tooltip"]');
+    expect(ordinaryTooltip.text()).toContain("https://api.example.test");
+    expect(ordinaryTooltip.attributes("style")).toMatch(/top: .*; left: .*/);
 
     const tokenPosition = modelValue.indexOf("<<token>>") + 3;
     input.element.setSelectionRange(tokenPosition, tokenPosition);

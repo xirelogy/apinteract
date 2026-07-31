@@ -8,6 +8,15 @@ import {
   type EntityId,
 } from "../foundation/id.js";
 import type { DatabaseSchema } from "../persistence/schema.js";
+import {
+  type ResolvedVariable,
+  type SecretMutation,
+  VariableProfileConflictError,
+  VariableProfileStore,
+  type VariableView,
+  type VariableWrite,
+  validateVariableName,
+} from "../variables/variable-profile-store.js";
 import type { WorkspaceService } from "../workspaces/workspace-service.js";
 import {
   normalizeName,
@@ -15,57 +24,8 @@ import {
 } from "../workspaces/workspace-service.js";
 import { VariableResolver } from "./variable-resolver.js";
 
-export type EnvironmentVariableWrite =
-  | {
-      readonly variableId?: EntityId;
-      readonly name: string;
-      readonly kind: "value";
-      readonly value: string;
-    }
-  | {
-      readonly variableId?: EntityId;
-      readonly name: string;
-      readonly kind: "alias";
-      readonly target: string;
-    }
-  | {
-      readonly variableId?: EntityId;
-      readonly name: string;
-      readonly kind: "unset";
-    }
-  | {
-      readonly variableId?: EntityId;
-      readonly name: string;
-      readonly kind: "secret";
-      readonly value?: string;
-      readonly clearValue?: boolean;
-    };
-
-export type EnvironmentVariableView =
-  | {
-      readonly variableId: EntityId;
-      readonly name: string;
-      readonly kind: "value";
-      readonly value: string;
-    }
-  | {
-      readonly variableId: EntityId;
-      readonly name: string;
-      readonly kind: "alias";
-      readonly target: string;
-    }
-  | {
-      readonly variableId: EntityId;
-      readonly name: string;
-      readonly kind: "unset";
-    }
-  | {
-      readonly variableId: EntityId;
-      readonly name: string;
-      readonly kind: "secret";
-      readonly hasValue: boolean;
-      readonly secretVersion: number;
-    };
+export type EnvironmentVariableWrite = VariableWrite;
+export type EnvironmentVariableView = VariableView;
 
 export interface EnvironmentView {
   readonly environmentId: EntityId;
@@ -86,14 +46,7 @@ export interface EnvironmentListView {
   readonly selectedEnvironmentId: EntityId | null;
 }
 
-export interface ResolvedEnvironmentVariable {
-  readonly variableId: EntityId;
-  readonly name: string;
-  readonly kind: "value" | "secret" | "alias" | "unset";
-  readonly value: string | null;
-  readonly aliasTarget: string | null;
-  readonly secretVersion: number | null;
-}
+export type ResolvedEnvironmentVariable = ResolvedVariable;
 
 export interface SelectedEnvironmentProfile {
   readonly environmentId: EntityId;
@@ -105,9 +58,9 @@ export interface SelectedEnvironmentProfile {
 /** Identifies the effective persisted scope supplying a previewed variable. */
 export interface VariablePreviewSource {
   readonly scope: "environment";
-  readonly environmentId: EntityId;
-  readonly environmentName: string;
-  readonly environmentRevision: number;
+  readonly scopeId: EntityId;
+  readonly scopeName: string;
+  readonly revision: number;
 }
 
 /** Describes one editor-visible resolution without exposing secret plaintext. */
@@ -128,22 +81,15 @@ export interface VariablePreviewResult {
   readonly previews: readonly VariablePreview[];
 }
 
-interface SecretMutation {
-  readonly type: "created" | "replaced" | "cleared" | "deleted";
-  readonly variableId: EntityId;
-  readonly version: number;
-}
-
 /** Raised when an environment profile changed before a submitted mutation. */
 export class EnvironmentConflictError extends Error {}
-
-const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_.-]*$/u;
 
 /** Owns workspace environments, redacted variables, and session selections. */
 export class EnvironmentService {
   readonly #database: Kysely<DatabaseSchema>;
   readonly #workspaces: WorkspaceService;
   readonly #audit: AuditService;
+  readonly #variables: VariableProfileStore;
 
   constructor(
     database: Kysely<DatabaseSchema>,
@@ -153,6 +99,7 @@ export class EnvironmentService {
     this.#database = database;
     this.#workspaces = workspaces;
     this.#audit = audit;
+    this.#variables = new VariableProfileStore(database);
   }
 
   /** Lists one workspace's environments and the current session's selection. */
@@ -216,9 +163,13 @@ export class EnvironmentService {
           updated_at: now,
         })
         .execute();
-      const secretMutations = await this.#replaceVariables(
+      const secretMutations = await this.#variables.create(
         transaction,
+        workspaceId,
+        "environment",
         environmentId,
+        0,
+        userId,
         variables,
       );
       await this.#audit.record(transaction, {
@@ -268,11 +219,22 @@ export class EnvironmentService {
         throw new EnvironmentConflictError("The environment profile changed");
       }
       const displayName = normalizeName(name).normalize("NFC");
-      const secretMutations = await this.#replaceVariables(
-        transaction,
-        environmentId,
-        variables,
-      );
+      let secretMutations: readonly SecretMutation[];
+      try {
+        ({ mutations: secretMutations } = await this.#variables.replace(
+          transaction,
+          "environment",
+          environmentId,
+          expectedRevision,
+          userId,
+          variables,
+        ));
+      } catch (cause) {
+        if (cause instanceof VariableProfileConflictError) {
+          throw new EnvironmentConflictError(cause.message);
+        }
+        throw cause;
+      }
       await transaction
         .updateTable("environments")
         .set({
@@ -315,15 +277,18 @@ export class EnvironmentService {
         throw new EnvironmentConflictError("The environment profile changed");
       }
       const deletedSecrets = await transaction
-        .selectFrom("environment_variables as variable")
+        .selectFrom("variable_profiles as profile")
+        .innerJoin("variables as variable", "variable.profile_id", "profile.id")
         .innerJoin(
-          "environment_variable_secrets as secret",
+          "variable_secrets as secret",
           "secret.variable_id",
           "variable.id",
         )
         .select(["variable.id", "secret.version"])
-        .where("variable.environment_id", "=", idToBytes(environmentId))
+        .where("profile.scope_kind", "=", "environment")
+        .where("profile.scope_id", "=", idToBytes(environmentId))
         .execute();
+      await this.#variables.delete(transaction, "environment", environmentId);
       await transaction
         .deleteFrom("environments")
         .where("id", "=", idToBytes(environmentId))
@@ -433,9 +398,9 @@ export class EnvironmentService {
     const resolver = new VariableResolver(profile);
     const source: VariablePreviewSource = {
       scope: "environment",
-      environmentId: profile.environmentId,
-      environmentName: profile.name,
-      environmentRevision: profile.revision,
+      scopeId: profile.environmentId,
+      scopeName: profile.name,
+      revision: profile.revision,
     };
     return {
       previews: names.map((name) => {
@@ -521,173 +486,18 @@ export class EnvironmentService {
     if (selected === undefined) {
       return null;
     }
-    const variables = await database
-      .selectFrom("environment_variables as variable")
-      .leftJoin(
-        "environment_variable_secrets as secret",
-        "secret.variable_id",
-        "variable.id",
-      )
-      .select([
-        "variable.id",
-        "variable.name",
-        "variable.kind",
-        "variable.value_text",
-        "variable.alias_target",
-        "secret.payload",
-        "secret.version as secret_version",
-      ])
-      .where("variable.environment_id", "=", selected.id)
-      .orderBy("variable.position")
-      .execute();
+    const environmentId = bytesToId(selected.id);
+    const variables = await this.#variables.resolvedVariables(
+      database,
+      "environment",
+      environmentId,
+    );
     return {
-      environmentId: bytesToId(selected.id),
+      environmentId,
       name: selected.name,
       revision: selected.revision,
-      variables: variables.map((variable) => ({
-        variableId: bytesToId(variable.id),
-        name: variable.name,
-        kind: variable.kind,
-        value:
-          variable.kind === "secret" ? variable.payload : variable.value_text,
-        aliasTarget: variable.alias_target,
-        secretVersion: variable.secret_version,
-      })),
+      variables,
     };
-  }
-
-  /** Replaces ordered variables while preserving omitted existing secrets. */
-  async #replaceVariables(
-    transaction: Transaction<DatabaseSchema>,
-    environmentId: EntityId,
-    writes: readonly EnvironmentVariableWrite[],
-  ): Promise<SecretMutation[]> {
-    const existingRows = await transaction
-      .selectFrom("environment_variables as variable")
-      .leftJoin(
-        "environment_variable_secrets as secret",
-        "secret.variable_id",
-        "variable.id",
-      )
-      .select([
-        "variable.id",
-        "variable.kind",
-        "secret.version",
-        "secret.payload",
-      ])
-      .where("variable.environment_id", "=", idToBytes(environmentId))
-      .execute();
-    const existing = new Map(
-      existingRows.map((row) => [bytesToId(row.id), row] as const),
-    );
-    const usedIds = new Set<EntityId>();
-    const usedNames = new Set<string>();
-    const prepared = writes.map((write, position) => {
-      validateVariableName(write.name);
-      if (usedNames.has(write.name)) {
-        throw new Error(`Variable name ${write.name} is duplicated`);
-      }
-      usedNames.add(write.name);
-      const variableId = write.variableId ?? createEntityId();
-      if (usedIds.has(variableId)) {
-        throw new Error("A variable identifier was submitted more than once");
-      }
-      usedIds.add(variableId);
-      const previous = existing.get(variableId);
-      if (write.variableId !== undefined && previous === undefined) {
-        throw new ResourceNotFoundError("Environment variable not found");
-      }
-      if (previous !== undefined && previous.kind !== write.kind) {
-        throw new EnvironmentConflictError(
-          "An existing environment variable's kind cannot be changed",
-        );
-      }
-      if (write.kind === "alias") {
-        validateVariableName(write.target);
-      }
-      if (write.kind === "secret") {
-        const replacing = write.value !== undefined;
-        if (replacing && write.clearValue === true) {
-          throw new Error("A secret cannot be replaced and cleared together");
-        }
-        if (previous?.kind !== "secret" && !replacing) {
-          throw new Error("A new secret requires a value");
-        }
-      }
-      return { write, variableId, position, previous };
-    });
-    const mutations: SecretMutation[] = [];
-    for (const [variableId, previous] of existing) {
-      if (previous.kind === "secret" && !usedIds.has(variableId)) {
-        mutations.push({
-          type: "deleted",
-          variableId,
-          version: previous.version ?? 1,
-        });
-      }
-    }
-
-    await transaction
-      .deleteFrom("environment_variables")
-      .where("environment_id", "=", idToBytes(environmentId))
-      .execute();
-    for (const item of prepared) {
-      const { write } = item;
-      await transaction
-        .insertInto("environment_variables")
-        .values({
-          id: idToBytes(item.variableId),
-          environment_id: idToBytes(environmentId),
-          position: item.position,
-          name: write.name,
-          kind: write.kind,
-          value_text: write.kind === "value" ? write.value : null,
-          alias_target: write.kind === "alias" ? write.target : null,
-        })
-        .execute();
-      if (write.kind === "secret") {
-        const changed = write.value !== undefined || write.clearValue === true;
-        const version =
-          item.previous?.kind === "secret"
-            ? (item.previous.version ?? 0) + (changed ? 1 : 0)
-            : 1;
-        const payload =
-          write.value !== undefined
-            ? write.value
-            : write.clearValue === true
-              ? null
-              : (item.previous?.payload ?? null);
-        await transaction
-          .insertInto("environment_variable_secrets")
-          .values({
-            variable_id: idToBytes(item.variableId),
-            version,
-            storage_format: "plaintext-v1",
-            payload,
-          })
-          .execute();
-        if (item.previous?.kind !== "secret") {
-          mutations.push({
-            type: "created",
-            variableId: item.variableId,
-            version,
-          });
-        } else if (write.clearValue === true) {
-          mutations.push({
-            type: "cleared",
-            variableId: item.variableId,
-            version,
-          });
-        } else if (write.value !== undefined) {
-          mutations.push({
-            type: "replaced",
-            variableId: item.variableId,
-            version,
-          });
-        }
-      }
-    }
-    return mutations;
   }
 
   /** Records allowlisted secret lifecycle metadata without secret plaintext. */
@@ -734,59 +544,16 @@ export class EnvironmentService {
     environmentId: EntityId,
   ): Promise<EnvironmentView> {
     const environment = await this.#row(database, environmentId);
-    const variables = await database
-      .selectFrom("environment_variables as variable")
-      .leftJoin(
-        "environment_variable_secrets as secret",
-        "secret.variable_id",
-        "variable.id",
-      )
-      .select([
-        "variable.id",
-        "variable.name",
-        "variable.kind",
-        "variable.value_text",
-        "variable.alias_target",
-        "secret.version",
-        "secret.payload",
-      ])
-      .where("variable.environment_id", "=", idToBytes(environmentId))
-      .orderBy("variable.position")
-      .execute();
     return {
       environmentId,
       workspaceId: bytesToId(environment.workspace_id),
       name: environment.name,
       revision: environment.revision,
-      variables: variables.map((variable): EnvironmentVariableView => {
-        const common = {
-          variableId: bytesToId(variable.id),
-          name: variable.name,
-        };
-        switch (variable.kind) {
-          case "value":
-            return {
-              ...common,
-              kind: "value",
-              value: variable.value_text ?? "",
-            };
-          case "alias":
-            return {
-              ...common,
-              kind: "alias",
-              target: variable.alias_target ?? "",
-            };
-          case "unset":
-            return { ...common, kind: "unset" };
-          case "secret":
-            return {
-              ...common,
-              kind: "secret",
-              hasValue: variable.payload !== null,
-              secretVersion: variable.version ?? 1,
-            };
-        }
-      }),
+      variables: await this.#variables.redactedVariables(
+        database,
+        "environment",
+        environmentId,
+      ),
     };
   }
 }
@@ -794,11 +561,4 @@ export class EnvironmentService {
 /** Produces the database-independent case-insensitive environment name key. */
 export function environmentNameKey(name: string): string {
   return name.normalize("NFC").toLowerCase();
-}
-
-/** Validates one case-sensitive variable or alias name. */
-function validateVariableName(name: string): void {
-  if (!VARIABLE_NAME.test(name)) {
-    throw new Error("Variable names must match [A-Za-z_][A-Za-z0-9_.-]*");
-  }
 }

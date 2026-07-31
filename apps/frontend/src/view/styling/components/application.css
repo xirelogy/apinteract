@@ -439,7 +439,9 @@
 
 .workspace-select-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--control-height);
+  grid-template-columns: minmax(0, 1fr) var(--control-height) var(
+      --control-height
+    );
   gap: var(--space-1);
 }
 
@@ -992,14 +994,28 @@
   font-size: var(--font-size-xs);
 }
 
-.collection-headers-dialog {
-  width: min(42rem, calc(100vi - var(--space-6)));
+.collection-properties-section {
+  padding-top: var(--space-3);
+}
+
+.collection-properties-section,
+.variable-fields-editor {
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.collection-properties-section:not([hidden]),
+.variable-fields-editor {
+  display: flex;
+}
+
+.collection-properties-tabs > .request-tabs {
+  margin-top: 0;
 }
 
 .collection-header-fields {
   min-width: 0;
-  max-height: 50dvh;
-  overflow: auto;
 }
 
 .resource-dialog-form {

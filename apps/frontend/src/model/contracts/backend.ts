@@ -12,6 +12,10 @@ export type EnvironmentVariableView =
   components["schemas"]["EnvironmentVariableView"];
 export type EnvironmentVariableWrite =
   components["schemas"]["EnvironmentVariableWrite"];
+export type EditableVariableScopeKind =
+  components["schemas"]["EditableVariableScopeKind"];
+export type VariableProfileView = components["schemas"]["VariableProfileView"];
+export type VariableWrite = components["schemas"]["VariableWrite"];
 export type VariablePreview = components["schemas"]["VariablePreview"];
 export type VariablePreviewResult =
   components["schemas"]["VariablePreviewResult"];

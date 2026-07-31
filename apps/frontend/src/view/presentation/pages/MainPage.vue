@@ -7,8 +7,10 @@ import { useRouter } from "vue-router";
 import { useApplicationController } from "@/app/dependencies";
 import { useApplicationStore } from "@/control/state/application-store";
 import type {
+  EditableVariableScopeKind,
   EnvironmentVariableWrite,
   RequestField,
+  VariableWrite,
 } from "@/model/contracts/backend";
 import {
   isRequestTabDirty,
@@ -17,12 +19,13 @@ import {
 } from "@/model/domain/application";
 import AppHeader from "@/view/presentation/layout/AppHeader.vue";
 import DiscardChangesDialog from "@/view/presentation/features/DiscardChangesDialog.vue";
-import CollectionHeadersDialog from "@/view/presentation/features/CollectionHeadersDialog.vue";
+import CollectionPropertiesDialog from "@/view/presentation/features/CollectionPropertiesDialog.vue";
 import EnvironmentManager from "@/view/presentation/features/EnvironmentManager.vue";
 import RequestEditor from "@/view/presentation/features/RequestEditor.vue";
 import RequestTabs from "@/view/presentation/features/RequestTabs.vue";
 import SaveRequestDialog from "@/view/presentation/features/SaveRequestDialog.vue";
 import WorkspaceNavigator from "@/view/presentation/features/WorkspaceNavigator.vue";
+import VariableProfileDialog from "@/view/presentation/features/VariableProfileDialog.vue";
 
 const controller = useApplicationController();
 const store = useApplicationStore();
@@ -31,7 +34,8 @@ const { t } = useI18n();
 const navigatorOpen = ref(false);
 const saveDialogTab = ref<RequestTab | null>(null);
 const discardDialogTab = ref<RequestTab | null>(null);
-const collectionHeadersOpen = ref(false);
+const collectionPropertiesOpen = ref(false);
+const variableProfileOpen = ref(false);
 const environmentManager = ref<InstanceType<typeof EnvironmentManager> | null>(
   null,
 );
@@ -43,6 +47,7 @@ const {
   environments,
   selectedEnvironmentId,
   selectedEnvironment,
+  selectedVariableProfile,
   variablePreviews,
   rootNodes,
   selectedCollectionId,
@@ -64,9 +69,25 @@ const visibleRequestTabs = computed(() =>
     (tab) => tab.workspaceId === selectedWorkspaceId.value,
   ),
 );
-const variablePreviewContextKey = computed(
-  () =>
-    `${selectedWorkspaceId.value ?? ""}:${selectedEnvironmentId.value ?? ""}`,
+const collectionProperties = computed(() => {
+  const collection = selectedCollection.value;
+  const variableProfile = selectedVariableProfile.value;
+  return collectionPropertiesOpen.value &&
+    collection !== null &&
+    variableProfile?.scopeKind === "collection" &&
+    variableProfile.scopeId === collection.collectionId
+    ? { collection, variableProfile }
+    : null;
+});
+const variablePreviewContextKey = computed(() =>
+  [
+    selectedWorkspaceId.value ?? "",
+    selectedEnvironmentId.value ?? "",
+    activeTab.value?.request?.requestId ?? "",
+    activeTab.value?.request?.parentCollectionId ??
+      activeTab.value?.pendingParentCollectionId ??
+      "",
+  ].join(":"),
 );
 const canEditWorkspace = computed(() => {
   const workspace = workspaces.value.find(
@@ -137,10 +158,45 @@ async function selectRequest(requestId: string): Promise<void> {
   closeNavigator();
 }
 
-/** Selects a collection and opens its common-header editor. */
-async function editCollectionHeaders(collectionId: string): Promise<void> {
+/** Loads a collection and its redacted variables before opening properties. */
+async function editCollectionProperties(collectionId: string): Promise<void> {
   await controller.selectCollection(collectionId);
-  collectionHeadersOpen.value = true;
+  await controller.loadVariableProfile("collection", collectionId);
+  collectionPropertiesOpen.value = true;
+}
+
+/** Loads and opens one workspace, collection, or saved-request variable profile. */
+async function editVariableProfile(
+  scopeKind: EditableVariableScopeKind,
+  scopeId: string,
+): Promise<void> {
+  await controller.loadVariableProfile(scopeKind, scopeId);
+  variableProfileOpen.value = true;
+}
+
+/** Saves the open scope profile and closes its editor on success. */
+async function saveVariableProfile(
+  variables: readonly VariableWrite[],
+): Promise<void> {
+  const profile = selectedVariableProfile.value;
+  if (profile === null) {
+    return;
+  }
+  await controller.updateVariableProfile(
+    profile.scopeKind,
+    profile.scopeId,
+    profile.revision,
+    variables,
+  );
+  variableProfileOpen.value = false;
+}
+
+/** Opens persisted variables for the active saved request. */
+async function editRequestVariables(): Promise<void> {
+  const requestId = activeTab.value?.request?.requestId;
+  if (requestId !== undefined) {
+    await editVariableProfile("request", requestId);
+  }
 }
 
 /** Saves a tab or asks for a temporary request destination. */
@@ -198,20 +254,31 @@ async function downloadExecutionBody(executionId: string): Promise<void> {
   }
 }
 
-/** Saves the selected collection profile and closes its editor on success. */
-async function saveCollectionHeaders(
+/** Saves every editable property for the selected collection. */
+async function saveCollectionProperties(
+  name: string,
   headers: readonly RequestField[],
+  variables: readonly VariableWrite[],
 ): Promise<void> {
   const collection = selectedCollection.value;
-  if (collection === null) {
+  const profile = selectedVariableProfile.value;
+  if (
+    collection === null ||
+    profile === null ||
+    profile.scopeKind !== "collection" ||
+    profile.scopeId !== collection.collectionId
+  ) {
     return;
   }
-  await controller.updateCollectionHeaders(
+  await controller.updateCollectionProperties(
     collection.collectionId,
     collection.revision,
+    name,
     headers,
+    profile.revision,
+    variables,
   );
-  collectionHeadersOpen.value = false;
+  collectionPropertiesOpen.value = false;
 }
 
 /** Creates an environment and closes its editor after summaries refresh. */
@@ -299,7 +366,8 @@ function discardRequestTab(): void {
         @select-collection="controller.selectCollection($event)"
         @toggle-collection="controller.toggleCollection($event)"
         @create-request="createRequestInCollection"
-        @edit-collection-headers="editCollectionHeaders"
+        @edit-collection-properties="editCollectionProperties"
+        @edit-workspace-variables="editVariableProfile('workspace', $event)"
         @select-request="selectRequest"
         @dismiss="closeNavigator"
       />
@@ -352,6 +420,7 @@ function discardRequestTab(): void {
           @save="saveRequest"
           @execute="executeRequest"
           @preview="controller.previewVariables($event)"
+          @manage-variables="editRequestVariables"
           @download="downloadExecutionBody"
         />
       </div>
@@ -375,12 +444,22 @@ function discardRequestTab(): void {
       @close="discardDialogTab = null"
       @discard="discardRequestTab"
     />
-    <CollectionHeadersDialog
-      v-if="collectionHeadersOpen && selectedCollection"
-      :collection="selectedCollection"
+    <CollectionPropertiesDialog
+      v-if="collectionProperties"
+      :collection="collectionProperties.collection"
+      :variable-profile="collectionProperties.variableProfile"
+      :can-edit="canEditWorkspace"
       :busy="busy"
-      @close="collectionHeadersOpen = false"
-      @save="saveCollectionHeaders"
+      @close="collectionPropertiesOpen = false"
+      @save="saveCollectionProperties"
+    />
+    <VariableProfileDialog
+      v-if="variableProfileOpen && selectedVariableProfile"
+      :profile="selectedVariableProfile"
+      :can-edit="canEditWorkspace"
+      :busy="busy"
+      @close="variableProfileOpen = false"
+      @save="saveVariableProfile"
     />
   </div>
 </template>

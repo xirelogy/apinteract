@@ -42,6 +42,7 @@ export const enUsMessages = {
     noCollections: "No collections yet",
     select: "Select a workspace",
     tree: "Workspace tree",
+    variables: "Manage workspace variables",
   },
   collection: {
     addHeader: "Add common header",
@@ -49,22 +50,23 @@ export const enUsMessages = {
     createBeforeSaving: "Create a collection before saving this request.",
     createSubcollection: "Create subcollection in {name}",
     createRequestIn: "Create request in {name}",
+    commonHeaders: "Common headers",
     destination: "Destination collection",
     empty: "This collection is empty",
-    editHeaders: "Edit selected collection headers",
-    editHeadersShort: "Edit headers",
-    editHeadersFor: "Edit common headers for {name}",
     expand: "Expand {name}",
     inside: "Inside {name}",
     moreActions: "More actions for {name}",
     label: "Collection",
     headersDescription:
       "Enabled headers apply to requests in this collection and its descendants.",
-    headersTitle: "Common headers for {name}",
     name: "Collection name",
     new: "New collection",
     newRequest: "New request",
     newSubcollection: "New subcollection",
+    properties: "Collection properties",
+    propertiesDescription:
+      "Rename this collection and manage inherited headers and variables.",
+    propertiesTitle: "Collection properties",
   },
   environment: {
     addVariable: "Add variable",
@@ -89,6 +91,7 @@ export const enUsMessages = {
       checking: "Checking variable…",
       emptyValue: "(empty string)",
       environmentSource: "Environment: {name}",
+      scopeSource: "{scope}: {name}",
       invalidPlaceholder: "Invalid variable placeholder",
       secretStored: "Secret value stored · version {version}",
       unknownKind: "Unknown variable",
@@ -102,6 +105,19 @@ export const enUsMessages = {
     variableName: "Variable name {index}",
     variableValue: "Variable value {index}",
     variables: "Variables",
+  },
+  variables: {
+    description:
+      "Values in this scope override lower-precedence variables with the same name.",
+    noVariables: "No variables in this scope.",
+    requestUnavailable: "Save this request before adding request variables.",
+    title: "Variables for {name}",
+    scope: {
+      collection: "Collection",
+      environment: "Environment",
+      request: "Request",
+      workspace: "Workspace",
+    },
   },
   request: {
     addHeader: "Add header",
@@ -141,6 +157,7 @@ export const enUsMessages = {
     send: "Send",
     temporary: "Temporary",
     targetUrl: "Target URL",
+    variables: "Manage request variables",
     untitled: "Untitled request",
     unsavedChanges: "Unsaved changes",
     discard: {
@@ -172,6 +189,8 @@ export const enUsMessages = {
       "These collection headers changed elsewhere. Reopen the editor and try again.",
     environment_conflict:
       "This environment changed elsewhere. Refresh it and try again.",
+    variable_profile_conflict:
+      "These variables changed elsewhere. Reopen the editor and try again.",
     operationFailed: "The operation failed.",
     parentRequired: "Select the required parent first.",
     requestTabClosed: "The request tab is no longer open.",

@@ -12,6 +12,7 @@ const EXPANDED_REQUEST_MIGRATION = "0002_expanded_request_profile";
 const TEMPORARY_EXECUTION_MIGRATION = "0003_temporary_executions";
 const COLLECTION_PROFILES_MIGRATION = "0004_collection_profiles";
 const ENVIRONMENTS_MIGRATION = "0005_environments";
+const VARIABLE_SCOPES_MIGRATION = "0006_variable_scopes";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -293,6 +294,13 @@ export class SqliteDatabase {
     if (environmentsApplied === undefined) {
       this.#migrateEnvironments();
     }
+
+    const variableScopesApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(VARIABLE_SCOPES_MIGRATION);
+    if (variableScopesApplied === undefined) {
+      this.#migrateVariableScopes();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -325,6 +333,7 @@ export class SqliteDatabase {
       TEMPORARY_EXECUTION_MIGRATION,
       COLLECTION_PROFILES_MIGRATION,
       ENVIRONMENTS_MIGRATION,
+      VARIABLE_SCOPES_MIGRATION,
     ].some((identifier) => !identifiers.has(identifier));
   }
 
@@ -547,6 +556,71 @@ export class SqliteDatabase {
           ON session_workspace_environments(selected_environment_id);
       `);
       this.#recordMigration(ENVIRONMENTS_MIGRATION);
+    })();
+  }
+
+  /** Generalizes environment variables into revisioned persisted scope profiles. */
+  #migrateVariableScopes(): void {
+    this.#driver.transaction(() => {
+      this.#driver.exec(`
+        CREATE TABLE variable_profiles (
+          id BLOB PRIMARY KEY CHECK(length(id) = 16),
+          workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          scope_kind TEXT NOT NULL CHECK(scope_kind IN ('workspace', 'collection', 'environment', 'request')),
+          scope_id BLOB NOT NULL CHECK(length(scope_id) = 16),
+          revision INTEGER NOT NULL CHECK(revision >= 0),
+          updated_by BLOB NOT NULL REFERENCES users(id),
+          updated_at INTEGER NOT NULL,
+          UNIQUE(scope_kind, scope_id)
+        ) STRICT;
+        CREATE INDEX variable_profiles_workspace
+          ON variable_profiles(workspace_id, scope_kind, scope_id);
+
+        CREATE TABLE variables (
+          id BLOB PRIMARY KEY CHECK(length(id) = 16),
+          profile_id BLOB NOT NULL REFERENCES variable_profiles(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL CHECK(position >= 0),
+          name TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK(kind IN ('value', 'secret', 'alias', 'unset')),
+          value_text TEXT,
+          alias_target TEXT,
+          UNIQUE(profile_id, position),
+          UNIQUE(profile_id, name),
+          CHECK (
+            (kind = 'value' AND value_text IS NOT NULL AND alias_target IS NULL) OR
+            (kind = 'alias' AND value_text IS NULL AND alias_target IS NOT NULL) OR
+            (kind IN ('secret', 'unset') AND value_text IS NULL AND alias_target IS NULL)
+          )
+        ) STRICT;
+        CREATE INDEX variables_profile ON variables(profile_id, position);
+
+        CREATE TABLE variable_secrets (
+          variable_id BLOB PRIMARY KEY REFERENCES variables(id) ON DELETE CASCADE,
+          version INTEGER NOT NULL CHECK(version >= 1),
+          storage_format TEXT NOT NULL CHECK(storage_format = 'plaintext-v1'),
+          payload TEXT
+        ) STRICT;
+
+        INSERT INTO variable_profiles (
+          id, workspace_id, scope_kind, scope_id, revision, updated_by, updated_at
+        )
+        SELECT id, workspace_id, 'environment', id, revision, updated_by, updated_at
+        FROM environments;
+
+        INSERT INTO variables (
+          id, profile_id, position, name, kind, value_text, alias_target
+        )
+        SELECT id, environment_id, position, name, kind, value_text, alias_target
+        FROM environment_variables;
+
+        INSERT INTO variable_secrets (variable_id, version, storage_format, payload)
+        SELECT variable_id, version, storage_format, payload
+        FROM environment_variable_secrets;
+
+        DROP TABLE environment_variable_secrets;
+        DROP TABLE environment_variables;
+      `);
+      this.#recordMigration(VARIABLE_SCOPES_MIGRATION);
     })();
   }
 

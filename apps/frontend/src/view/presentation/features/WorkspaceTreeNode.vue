@@ -31,7 +31,7 @@ const { t } = useI18n();
 const emit = defineEmits<{
   createCollection: [parentCollectionId: string];
   createRequest: [parentCollectionId: string];
-  editCollectionHeaders: [collectionId: string];
+  editCollectionProperties: [collectionId: string];
   selectCollection: [collectionId: string];
   toggleCollection: [collectionId: string];
   selectRequest: [requestId: string];
@@ -55,8 +55,8 @@ const collectionActions = computed<readonly ActionMenuItem[]>(() => [
     label: t("collection.newSubcollection"),
   },
   {
-    value: "edit-headers",
-    label: t("collection.editHeadersShort"),
+    value: "edit-properties",
+    label: t("collection.properties"),
   },
 ]);
 
@@ -66,8 +66,8 @@ function selectCollectionAction(value: string): void {
     emit("createRequest", props.node.nodeId);
   } else if (value === "create-subcollection") {
     emit("createCollection", props.node.nodeId);
-  } else if (value === "edit-headers") {
-    emit("editCollectionHeaders", props.node.nodeId);
+  } else if (value === "edit-properties") {
+    emit("editCollectionProperties", props.node.nodeId);
   }
 }
 </script>
@@ -194,7 +194,7 @@ function selectCollectionAction(value: string): void {
         :level="level + 1"
         @create-collection="emit('createCollection', $event)"
         @create-request="emit('createRequest', $event)"
-        @edit-collection-headers="emit('editCollectionHeaders', $event)"
+        @edit-collection-properties="emit('editCollectionProperties', $event)"
         @select-collection="emit('selectCollection', $event)"
         @toggle-collection="emit('toggleCollection', $event)"
         @select-request="emit('selectRequest', $event)"

@@ -100,15 +100,22 @@ browser sessions belonging to the same user may safely target different
 environments. A new session begins with no environment selected, and deleting
 an environment clears all session selections that reference it.
 
-Environment variables may be ordinary values, write-only secrets, aliases, or
-explicitly unset values. A variable's kind is immutable after creation; changing
-kind requires removing it and creating a new variable, so a stored secret can
-never be recast as a readable value. Names are case-sensitive; aliases resolve
-after scope merging and preserve secret sensitivity. The backend interpolates
+Persisted variable profiles belong to workspaces, collections, environments,
+and saved requests. A selected environment overrides workspace defaults,
+collection profiles then inherit root-to-leaf, and request profiles are the
+highest persisted scope. Profiles are independently revisioned so
+request-scoped secret values do not enter mutable drafts or immutable request
+revisions.
+
+Variables may be ordinary values, write-only secrets, aliases, or explicitly
+unset values. A variable's kind is immutable after creation; changing kind
+requires removing it and creating a new variable, so a stored secret can never
+be recast as a readable value. Names are case-sensitive; aliases resolve after
+scope merging and preserve secret sensitivity. The backend interpolates
 `<<variable-name>>` placeholders in target URLs, query values, header values,
 and text bodies immediately before execution. Persisted execution evidence
-identifies the environment revision and secret versions without copying secret
-plaintext into the snapshot.
+identifies every contributing profile revision and referenced secret version
+without copying secret plaintext into the snapshot.
 
 The request editor recognizes the same placeholder grammar before execution and
 requests redacted resolution previews from the backend. Ordinary variables may

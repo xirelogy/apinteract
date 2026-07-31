@@ -9,7 +9,10 @@ import type {
   RequestField,
   RequestView,
   TreeNode,
+  EditableVariableScopeKind,
+  VariableProfileView,
   VariablePreviewResult,
+  VariableWrite,
   WorkspaceSummary,
 } from "@/model/contracts/backend";
 import { useApplicationStore } from "@/control/state/application-store";
@@ -108,6 +111,7 @@ export class ApplicationController {
     store.environments = environmentList.environments;
     store.selectedEnvironmentId = environmentList.selectedEnvironmentId;
     store.selectedEnvironment = null;
+    store.selectedVariableProfile = null;
     store.variablePreviews = [];
     this.#previewNames = [];
     this.#previewSequence += 1;
@@ -154,8 +158,16 @@ export class ApplicationController {
     }
     try {
       const result = await this.#webSocket.command<VariablePreviewResult>(
-        "environment.preview_variables",
-        { workspaceId, names },
+        "variable.preview",
+        {
+          workspaceId,
+          parentCollectionId:
+            activeRequestTab(store)?.request?.parentCollectionId ??
+            activeRequestTab(store)?.pendingParentCollectionId ??
+            null,
+          requestId: activeRequestTab(store)?.request?.requestId ?? null,
+          names,
+        },
       );
       if (sequence === this.#previewSequence) {
         store.variablePreviews = [...result.previews];
@@ -165,6 +177,39 @@ export class ApplicationController {
         store.variablePreviews = [];
       }
     }
+  }
+
+  /** Loads one redacted workspace, collection, or request variable profile. */
+  async loadVariableProfile(
+    scopeKind: EditableVariableScopeKind,
+    scopeId: string,
+  ): Promise<VariableProfileView> {
+    return this.#run(async () => {
+      const profile = await this.#webSocket.command<VariableProfileView>(
+        "variable_profile.get",
+        { scopeKind, scopeId },
+      );
+      useApplicationStore().selectedVariableProfile = profile;
+      return profile;
+    });
+  }
+
+  /** Saves one complete scope profile and refreshes active request previews. */
+  async updateVariableProfile(
+    scopeKind: EditableVariableScopeKind,
+    scopeId: string,
+    expectedRevision: number,
+    variables: readonly VariableWrite[],
+  ): Promise<VariableProfileView> {
+    return this.#run(async () => {
+      const profile = await this.#webSocket.command<VariableProfileView>(
+        "variable_profile.update",
+        { scopeKind, scopeId, expectedRevision, variables },
+      );
+      useApplicationStore().selectedVariableProfile = profile;
+      await this.#refreshVariablePreviews();
+      return profile;
+    });
   }
 
   /** Loads one redacted environment profile for management. */
@@ -293,21 +338,39 @@ export class ApplicationController {
     );
   }
 
-  /** Saves ordered common headers for the currently selected collection. */
-  async updateCollectionHeaders(
+  /** Saves a collection's name, headers, and variable profile as one UI operation. */
+  async updateCollectionProperties(
     collectionId: string,
     expectedRevision: number,
+    name: string,
     headers: readonly RequestField[],
+    expectedVariableRevision: number,
+    variables: readonly VariableWrite[],
   ): Promise<void> {
     await this.#run(async () => {
       const collection = await this.#webSocket.command<CollectionView>(
-        "collection.headers.update",
-        { collectionId, expectedRevision, headers },
+        "collection.update",
+        { collectionId, expectedRevision, name, headers },
       );
       const store = useApplicationStore();
       if (store.selectedCollectionId === collectionId) {
         store.selectedCollection = collection;
       }
+      await this.#reloadCollection(
+        collection.workspaceId,
+        collection.parentCollectionId,
+      );
+      const profile = await this.#webSocket.command<VariableProfileView>(
+        "variable_profile.update",
+        {
+          scopeKind: "collection",
+          scopeId: collectionId,
+          expectedRevision: expectedVariableRevision,
+          variables,
+        },
+      );
+      store.selectedVariableProfile = profile;
+      await this.#refreshVariablePreviews();
     });
   }
 

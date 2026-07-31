@@ -18,6 +18,7 @@ import {
   ResourceNotFoundError,
   WorkspaceService,
 } from "../src/workspaces/workspace-service.js";
+import { VariableService } from "../src/variables/variable-service.js";
 
 describe("collection header inheritance", () => {
   it("overlays case-insensitive groups while preserving winning duplicates", () => {
@@ -82,7 +83,7 @@ describe("collection header inheritance", () => {
       const requests = new RequestService(
         database.db,
         workspaces,
-        environments,
+        new VariableService(database.db, workspaces, environments, audit),
         audit,
       );
       const workspace = await workspaces.create(userId, "Workspace");
@@ -136,6 +137,19 @@ describe("collection header inheritance", () => {
         ],
       );
       expect(rootProfile.revision).toBe(1);
+      const renamedRoot = await requests.updateCollection(
+        userId,
+        root.nodeId,
+        rootProfile.revision,
+        "  Renamed root  ",
+        rootProfile.headers,
+      );
+      expect(renamedRoot).toMatchObject({ name: "Renamed root", revision: 2 });
+      await expect(
+        requests.listChildren(userId, workspace.workspaceId, null),
+      ).resolves.toEqual([
+        expect.objectContaining({ nodeId: root.nodeId, name: "Renamed root" }),
+      ]);
       await requests.updateCollectionHeaders(userId, child.nodeId, 0, [
         { name: "x-shared", value: "child-1", enabled: true },
         { name: "X-SHARED", value: "child-2", enabled: true },

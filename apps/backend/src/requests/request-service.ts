@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import type { Kysely, Transaction } from "kysely";
 
 import type { AuditService } from "../audit/audit-service.js";
-import type { EnvironmentService } from "../environments/environment-service.js";
 import {
   VariableResolver,
   type SecretReference,
@@ -15,6 +14,7 @@ import {
   type EntityId,
 } from "../foundation/id.js";
 import type { DatabaseSchema } from "../persistence/schema.js";
+import type { VariableService } from "../variables/variable-service.js";
 import type { WorkspaceService } from "../workspaces/workspace-service.js";
 import {
   normalizeName,
@@ -133,18 +133,18 @@ export class CollectionProfileConflictError extends Error {}
 export class RequestService {
   readonly #database: Kysely<DatabaseSchema>;
   readonly #workspaces: WorkspaceService;
-  readonly #environments: EnvironmentService;
+  readonly #variables: VariableService;
   readonly #audit: AuditService;
 
   constructor(
     database: Kysely<DatabaseSchema>,
     workspaces: WorkspaceService,
-    environments: EnvironmentService,
+    variables: VariableService,
     audit: AuditService,
   ) {
     this.#database = database;
     this.#workspaces = workspaces;
-    this.#environments = environments;
+    this.#variables = variables;
     this.#audit = audit;
   }
 
@@ -238,13 +238,15 @@ export class RequestService {
     return this.#collectionView(this.#database, row);
   }
 
-  /** Replaces a collection's common headers using optimistic concurrency. */
-  async updateCollectionHeaders(
+  /** Replaces a collection's name and common headers using one revision. */
+  async updateCollection(
     userId: EntityId,
     collectionId: EntityId,
     expectedRevision: number,
+    name: string,
     headers: readonly RequestField[],
   ): Promise<CollectionView> {
+    const normalizedName = normalizeName(name);
     const normalizedHeaders = validateHeaders(headers);
     const headersJson = JSON.stringify(normalizedHeaders);
     return this.#database.transaction().execute(async (transaction) => {
@@ -254,10 +256,12 @@ export class RequestService {
       const currentRevision = row.profile_revision ?? 0;
       if (currentRevision !== expectedRevision) {
         throw new CollectionProfileConflictError(
-          "The collection header profile changed",
+          "The collection properties changed",
         );
       }
-      if ((row.headers_json ?? "[]") === headersJson) {
+      const nameChanged = row.name !== normalizedName;
+      const headersChanged = (row.headers_json ?? "[]") !== headersJson;
+      if (!nameChanged && !headersChanged) {
         return this.#collectionView(transaction, row);
       }
       const revision = currentRevision + 1;
@@ -278,7 +282,7 @@ export class RequestService {
           .executeTakeFirst();
         if (result.numInsertedOrUpdatedRows !== 1n) {
           throw new CollectionProfileConflictError(
-            "The collection header profile changed",
+            "The collection properties changed",
           );
         }
       } else {
@@ -295,18 +299,27 @@ export class RequestService {
           .executeTakeFirst();
         if (result.numUpdatedRows !== 1n) {
           throw new CollectionProfileConflictError(
-            "The collection header profile changed",
+            "The collection properties changed",
           );
         }
       }
+      if (nameChanged) {
+        await transaction
+          .updateTable("workspace_tree_nodes")
+          .set({ name: normalizedName })
+          .where("id", "=", idToBytes(collectionId))
+          .where("kind", "=", "collection")
+          .execute();
+      }
       await this.#audit.record(transaction, {
-        type: "collection.headers_updated",
+        type: "collection.updated",
         actorUserId: userId,
         workspaceId,
-        data: { collectionId, revision },
+        data: { collectionId, revision, nameChanged, headersChanged },
       });
       return {
         ...mapCollection(row),
+        name: normalizedName,
         headers: normalizedHeaders,
         effectiveHeaders: await this.#resolveHeaders(
           transaction,
@@ -316,6 +329,23 @@ export class RequestService {
         revision,
       };
     });
+  }
+
+  /** Preserves the focused common-header update boundary for existing callers. */
+  async updateCollectionHeaders(
+    userId: EntityId,
+    collectionId: EntityId,
+    expectedRevision: number,
+    headers: readonly RequestField[],
+  ): Promise<CollectionView> {
+    const row = await this.#collectionRow(this.#database, collectionId);
+    return this.updateCollection(
+      userId,
+      collectionId,
+      expectedRevision,
+      row.name,
+      headers,
+    );
   }
 
   /** Appends a request draft to an authorized workspace parent. */
@@ -514,14 +544,16 @@ export class RequestService {
         row.parent_collection_id,
         request.headers,
       );
-      const environment = await this.#environments.selectedProfile(
+      const variableProfile = await this.#variables.effectiveProfile(
         transaction,
         sessionId,
         request.workspaceId,
+        request.parentCollectionId,
+        requestId,
       );
       const composed = composeWithVariables(
         { ...request, headers: resolvedHeaders },
-        new VariableResolver(environment),
+        new VariableResolver(variableProfile.variables),
       );
       const resolvedRequest = composed.request;
       const content = JSON.stringify({
@@ -569,8 +601,7 @@ export class RequestService {
             ...composed.persisted,
             targetMode: "absolute",
             queryMode: "structured",
-            environmentId: environment?.environmentId ?? null,
-            environmentRevision: environment?.revision ?? null,
+            variableProfiles: variableProfile.evidence,
             secretReferences: composed.secretReferences,
           }),
           response_status: null,
@@ -619,14 +650,16 @@ export class RequestService {
         parentCollectionId === null ? null : idToBytes(parentCollectionId),
         localRequest.headers,
       );
-      const environment = await this.#environments.selectedProfile(
+      const variableProfile = await this.#variables.effectiveProfile(
         transaction,
         sessionId,
         workspaceId,
+        parentCollectionId,
+        null,
       );
       const composed = composeWithVariables(
         { ...localRequest, headers: resolvedHeaders },
-        new VariableResolver(environment),
+        new VariableResolver(variableProfile.variables),
       );
       const request = composed.request;
       const executionId = createEntityId();
@@ -635,8 +668,7 @@ export class RequestService {
         ...composed.persisted,
         targetMode: "absolute",
         queryMode: "structured",
-        environmentId: environment?.environmentId ?? null,
-        environmentRevision: environment?.revision ?? null,
+        variableProfiles: variableProfile.evidence,
         secretReferences: composed.secretReferences,
       });
       await transaction

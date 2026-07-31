@@ -22,6 +22,8 @@ import {
   AccessDeniedError,
   ResourceNotFoundError,
 } from "../workspaces/workspace-service.js";
+import { type EditableVariableScopeKind } from "../variables/variable-service.js";
+import { VariableProfileConflictError } from "../variables/variable-profile-store.js";
 
 interface Command {
   readonly protocolVersion: 1;
@@ -181,6 +183,14 @@ async function dispatch(
         userId,
         requireString(command.payload.collectionId, "collectionId"),
       );
+    case "collection.update":
+      return application.requests.updateCollection(
+        userId,
+        requireString(command.payload.collectionId, "collectionId"),
+        requireInteger(command.payload.expectedRevision, "expectedRevision"),
+        requireString(command.payload.name, "name"),
+        requireRequestFields(command.payload.headers, "headers"),
+      );
     case "collection.headers.update":
       return application.requests.updateCollectionHeaders(
         userId,
@@ -232,6 +242,29 @@ async function dispatch(
         userId,
         identity.sessionId,
         requireString(command.payload.workspaceId, "workspaceId"),
+        requireVariableNames(command.payload.names),
+      );
+    case "variable_profile.get":
+      return application.variables.get(
+        userId,
+        requireVariableScopeKind(command.payload.scopeKind),
+        requireString(command.payload.scopeId, "scopeId"),
+      );
+    case "variable_profile.update":
+      return application.variables.update(
+        userId,
+        requireVariableScopeKind(command.payload.scopeKind),
+        requireString(command.payload.scopeId, "scopeId"),
+        requireInteger(command.payload.expectedRevision, "expectedRevision"),
+        requireEnvironmentVariables(command.payload.variables),
+      );
+    case "variable.preview":
+      return application.variables.previewVariables(
+        userId,
+        identity.sessionId,
+        requireString(command.payload.workspaceId, "workspaceId"),
+        optionalString(command.payload.parentCollectionId),
+        optionalString(command.payload.requestId),
         requireVariableNames(command.payload.names),
       );
     case "request.create":
@@ -318,6 +351,9 @@ function mapCommandError(cause: unknown): CommandError {
   }
   if (cause instanceof EnvironmentConflictError) {
     return new CommandError("environment_conflict", cause.message);
+  }
+  if (cause instanceof VariableProfileConflictError) {
+    return new CommandError("variable_profile_conflict", cause.message);
   }
   if (cause instanceof VariableResolutionError) {
     return new CommandError("variable_resolution_failed", cause.message);
@@ -546,6 +582,17 @@ function requireEnvironmentVariables(
         );
     }
   });
+}
+
+/** Accepts only persisted variable scopes exposed by the generic profile API. */
+function requireVariableScopeKind(value: unknown): EditableVariableScopeKind {
+  if (value === "workspace" || value === "collection" || value === "request") {
+    return value;
+  }
+  throw new CommandError(
+    "validation_failed",
+    "scopeKind must be workspace, collection, or request.",
+  );
 }
 
 /** Validates a bounded unique list of variable names requested for preview. */

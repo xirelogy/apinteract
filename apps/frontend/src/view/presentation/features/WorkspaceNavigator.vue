@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { FolderPlus, Plus } from "@lucide/vue";
+import { FolderPlus, Plus, Settings2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type { TreeNode, WorkspaceSummary } from "@/model/contracts/backend";
@@ -32,7 +32,8 @@ const emit = defineEmits<{
   selectCollection: [collectionId: string];
   toggleCollection: [collectionId: string];
   createRequest: [parentCollectionId: string];
-  editCollectionHeaders: [collectionId: string];
+  editCollectionProperties: [collectionId: string];
+  editWorkspaceVariables: [workspaceId: string];
   selectRequest: [requestId: string];
   dismiss: [];
 }>();
@@ -187,6 +188,14 @@ function findLoadedNodeName(nodeId: string): string | null {
           @update:model-value="emit('selectWorkspace', $event)"
         />
         <IconButton
+          v-if="selectedWorkspaceId"
+          :label="t('workspace.variables')"
+          :disabled="busy"
+          @click="emit('editWorkspaceVariables', selectedWorkspaceId)"
+        >
+          <Settings2 :size="17" aria-hidden="true" />
+        </IconButton>
+        <IconButton
           :label="t('workspace.create')"
           :disabled="busy"
           @click="openCreationDialog('workspace')"
@@ -234,7 +243,9 @@ function findLoadedNodeName(nodeId: string): string | null {
             :level="1"
             @create-collection="openCreationDialog('collection', $event)"
             @create-request="emit('createRequest', $event)"
-            @edit-collection-headers="emit('editCollectionHeaders', $event)"
+            @edit-collection-properties="
+              emit('editCollectionProperties', $event)
+            "
             @select-collection="emit('selectCollection', $event)"
             @toggle-collection="emit('toggleCollection', $event)"
             @select-request="emit('selectRequest', $event)"
