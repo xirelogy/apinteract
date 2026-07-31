@@ -18,8 +18,9 @@ deploy/scripts/aio init-admin
 ```
 
 Open `http://localhost:8080/web-ui/` and sign in with the administrator just
-created. The administrator command reads the password interactively and does
-not place it in a command argument or environment variable.
+created. Opening `http://localhost:8080/` redirects to that canonical UI path.
+The administrator command reads the password interactively and does not place
+it in a command argument or environment variable.
 
 The maintained wrapper provides these operations:
 

@@ -46,6 +46,8 @@ export async function createBackendServer(
     server.get("/web-ui", async (_request, reply) =>
       reply.redirect("/web-ui/"),
     );
+    /** Sends the deployment origin to the only browser-facing application. */
+    server.get("/", async (_request, reply) => reply.redirect("/web-ui/"));
   }
 
   const auditInterval = setInterval(() => {

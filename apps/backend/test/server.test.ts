@@ -78,6 +78,10 @@ describe("backend static frontend hosting", () => {
       });
       expect(redirect.statusCode).toBe(302);
       expect(redirect.headers.location).toBe("/web-ui/");
+
+      const deploymentRoot = await server.inject({ method: "GET", url: "/" });
+      expect(deploymentRoot.statusCode).toBe(302);
+      expect(deploymentRoot.headers.location).toBe("/web-ui/");
     } finally {
       await server.close();
       await rm(rootPath, { recursive: true, force: true });
