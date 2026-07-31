@@ -136,7 +136,9 @@ This command pulls the pinned Playwright image on first use. The browser
 service starts an isolated proxy, backend, and Vite server with disposable
 state. It verifies rejected credentials, successful login, refresh-cookie
 session restoration, logout, and protected-route redirection. Reports and
-failure traces are written to the `playwright-output` volume.
+failure traces are written to the ignored repository directory
+`var/playwright/` so they remain available after the disposable browser
+container exits.
 
 ## Exposed Ports
 
