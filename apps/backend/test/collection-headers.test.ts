@@ -16,6 +16,7 @@ import {
 import {
   AccessDeniedError,
   ResourceNotFoundError,
+  WorkspaceConflictError,
   WorkspaceService,
 } from "../src/workspaces/workspace-service.js";
 import { VariableService } from "../src/variables/variable-service.js";
@@ -87,6 +88,19 @@ describe("collection header inheritance", () => {
         audit,
       );
       const workspace = await workspaces.create(userId, "Workspace");
+      const workspaceProfile = await workspaces.update(
+        userId,
+        workspace.workspaceId,
+        0,
+        "Workspace",
+        [
+          { name: "X-Workspace", value: "workspace", enabled: true },
+          { name: "X-Shared", value: "workspace", enabled: true },
+        ],
+      );
+      expect(await workspaces.get(userId, workspace.workspaceId)).toEqual(
+        workspaceProfile,
+      );
       const root = await requests.createCollection(
         userId,
         workspace.workspaceId,
@@ -163,6 +177,7 @@ describe("collection header inheritance", () => {
         requests.getCollection(userId, leaf.nodeId),
       ).resolves.toMatchObject({
         effectiveHeaders: [
+          { name: "X-Workspace", value: "workspace", enabled: true },
           { name: "X-Root", value: "root", enabled: true },
           { name: "x-shared", value: "child-1", enabled: true },
           { name: "X-SHARED", value: "child-2", enabled: true },
@@ -174,6 +189,7 @@ describe("collection header inheritance", () => {
       ).resolves.toMatchObject({
         parentCollectionId: leaf.nodeId,
         inheritedHeaders: [
+          { name: "X-Workspace", value: "workspace", enabled: true },
           { name: "X-Root", value: "root", enabled: true },
           { name: "x-shared", value: "child-1", enabled: true },
           { name: "X-SHARED", value: "child-2", enabled: true },
@@ -184,6 +200,9 @@ describe("collection header inheritance", () => {
       await expect(
         requests.updateCollectionHeaders(userId, root.nodeId, 0, []),
       ).rejects.toBeInstanceOf(CollectionProfileConflictError);
+      await expect(
+        workspaces.update(userId, workspace.workspaceId, 0, "Workspace", []),
+      ).rejects.toBeInstanceOf(WorkspaceConflictError);
       await expect(
         requests.getCollection(foreignUserId, root.nodeId),
       ).rejects.toBeInstanceOf(ResourceNotFoundError);
@@ -205,6 +224,7 @@ describe("collection header inheritance", () => {
         request.requestId,
       );
       expect(prepared.request.headers).toEqual([
+        { name: "X-Workspace", value: "workspace", enabled: true },
         { name: "X-Root", value: "root", enabled: true },
         { name: "X-Leaf", value: "leaf", enabled: true },
         { name: "X-Shared", value: "request", enabled: true },

@@ -56,7 +56,9 @@ describe("SqliteDatabase migrations", () => {
         )
         .run(userId, Date.now());
       driver
-        .prepare("INSERT INTO workspaces VALUES (?, 'Workspace', ?, ?)")
+        .prepare(
+          "INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, 'Workspace', ?, ?)",
+        )
         .run(workspaceId, userId, Date.now());
       driver
         .prepare(

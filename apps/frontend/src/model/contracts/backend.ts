@@ -3,6 +3,7 @@ import type { components } from "@apinteract/api-contracts/backend";
 export type AccessCredential = components["schemas"]["AccessCredential"];
 export type CurrentSession = components["schemas"]["CurrentSession"];
 export type WorkspaceSummary = components["schemas"]["WorkspaceSummary"];
+export type WorkspaceView = components["schemas"]["WorkspaceView"];
 export type TreeNode = components["schemas"]["TreeNode"];
 export type CollectionView = components["schemas"]["CollectionView"];
 export type EnvironmentSummary = components["schemas"]["EnvironmentSummary"];

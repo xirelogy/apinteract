@@ -21,6 +21,7 @@ import type { SessionIdentity } from "../sessions/session-service.js";
 import {
   AccessDeniedError,
   ResourceNotFoundError,
+  WorkspaceConflictError,
 } from "../workspaces/workspace-service.js";
 import { type EditableVariableScopeKind } from "../variables/variable-service.js";
 import { VariableProfileConflictError } from "../variables/variable-profile-store.js";
@@ -162,6 +163,19 @@ async function dispatch(
       return application.workspaces.create(
         userId,
         requireString(command.payload.name, "name"),
+      );
+    case "workspace.get":
+      return application.workspaces.get(
+        userId,
+        requireString(command.payload.workspaceId, "workspaceId"),
+      );
+    case "workspace.update":
+      return application.workspaces.update(
+        userId,
+        requireString(command.payload.workspaceId, "workspaceId"),
+        requireInteger(command.payload.expectedRevision, "expectedRevision"),
+        requireString(command.payload.name, "name"),
+        requireRequestFields(command.payload.headers, "headers"),
       );
     case "tree.list":
       return {
@@ -348,6 +362,9 @@ function mapCommandError(cause: unknown): CommandError {
   }
   if (cause instanceof CollectionProfileConflictError) {
     return new CommandError("collection_profile_conflict", cause.message);
+  }
+  if (cause instanceof WorkspaceConflictError) {
+    return new CommandError("workspace_conflict", cause.message);
   }
   if (cause instanceof EnvironmentConflictError) {
     return new CommandError("environment_conflict", cause.message);

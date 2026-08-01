@@ -323,6 +323,7 @@ export class RequestService {
         headers: normalizedHeaders,
         effectiveHeaders: await this.#resolveHeaders(
           transaction,
+          row.workspace_id,
           row.parent_collection_id,
           normalizedHeaders,
         ),
@@ -416,6 +417,7 @@ export class RequestService {
       });
       const inheritedHeaders = await this.#resolveHeaders(
         transaction,
+        idToBytes(workspaceId),
         parentCollectionId === null ? null : idToBytes(parentCollectionId),
         [],
       );
@@ -541,6 +543,7 @@ export class RequestService {
       );
       const resolvedHeaders = await this.#resolveHeaders(
         transaction,
+        row.workspace_id,
         row.parent_collection_id,
         request.headers,
       );
@@ -647,6 +650,7 @@ export class RequestService {
       await this.#validateParent(transaction, workspaceId, parentCollectionId);
       const resolvedHeaders = await this.#resolveHeaders(
         transaction,
+        idToBytes(workspaceId),
         parentCollectionId === null ? null : idToBytes(parentCollectionId),
         localRequest.headers,
       );
@@ -803,6 +807,7 @@ export class RequestService {
       ...collection,
       effectiveHeaders: await this.#resolveHeaders(
         database,
+        row.workspace_id,
         row.parent_collection_id,
         collection.headers,
       ),
@@ -818,19 +823,32 @@ export class RequestService {
       ...mapRequest(row),
       inheritedHeaders: await this.#resolveHeaders(
         database,
+        row.workspace_id,
         row.parent_collection_id,
         [],
       ),
     };
   }
 
-  /** Resolves collection header layers root-first and overlays request headers. */
+  /** Resolves workspace and collection header layers before local overrides. */
   async #resolveHeaders(
     database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    workspaceId: Uint8Array,
     parentCollectionId: Uint8Array | null,
     requestHeaders: readonly RequestField[],
   ): Promise<RequestField[]> {
-    const layers: RequestField[][] = [];
+    const workspace = await database
+      .selectFrom("workspaces")
+      .select("headers_json")
+      .where("id", "=", workspaceId)
+      .executeTakeFirst();
+    if (workspace === undefined) {
+      throw new ResourceNotFoundError("Workspace not found");
+    }
+    const workspaceHeaders = validateHeaders(
+      JSON.parse(workspace.headers_json) as readonly RequestField[],
+    );
+    const collectionLayers: RequestField[][] = [];
     const visited = new Set<string>();
     let currentId = parentCollectionId;
     while (currentId !== null) {
@@ -853,14 +871,18 @@ export class RequestService {
       if (row === undefined) {
         throw new ResourceNotFoundError("Parent collection not found");
       }
-      layers.unshift(
+      collectionLayers.unshift(
         validateHeaders(
           JSON.parse(row.headers_json ?? "[]") as readonly RequestField[],
         ),
       );
       currentId = row.parent_collection_id;
     }
-    return resolveHeaderLayers([...layers, validateHeaders(requestHeaders)]);
+    return resolveHeaderLayers([
+      workspaceHeaders,
+      ...collectionLayers,
+      validateHeaders(requestHeaders),
+    ]);
   }
 
   /** Requires a parent to be a collection in the same workspace. */

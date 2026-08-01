@@ -33,7 +33,7 @@ const emit = defineEmits<{
   toggleCollection: [collectionId: string];
   createRequest: [parentCollectionId: string];
   editCollectionProperties: [collectionId: string];
-  editWorkspaceVariables: [workspaceId: string];
+  editWorkspaceProperties: [workspaceId: string];
   selectRequest: [requestId: string];
   dismiss: [];
 }>();
@@ -189,9 +189,9 @@ function findLoadedNodeName(nodeId: string): string | null {
         />
         <IconButton
           v-if="selectedWorkspaceId"
-          :label="t('workspace.variables')"
+          :label="t('workspace.properties')"
           :disabled="busy"
-          @click="emit('editWorkspaceVariables', selectedWorkspaceId)"
+          @click="emit('editWorkspaceProperties', selectedWorkspaceId)"
         >
           <Settings2 :size="17" aria-hidden="true" />
         </IconButton>

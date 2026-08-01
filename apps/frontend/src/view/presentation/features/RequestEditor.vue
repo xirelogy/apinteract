@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Lock, Play, Plus, Save, Settings2, Trash2 } from "@lucide/vue";
+import { Lock, Play, Plus, Save, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -8,7 +8,9 @@ import type {
   HttpMethod,
   RequestField,
   RequestView,
+  VariableProfileView,
   VariablePreview,
+  VariableWrite,
 } from "@/model/contracts/backend";
 import type { RequestDraftInput } from "@/model/domain/application";
 import { collectTemplateVariableNames } from "@/model/domain/template-variables";
@@ -23,6 +25,11 @@ import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
 import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
 import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 import ResponsePanel from "./ResponsePanel.vue";
+import VariableFieldsEditor from "./VariableFieldsEditor.vue";
+
+interface VariableFieldsEditorApi {
+  writes(): VariableWrite[];
+}
 
 const props = withDefaults(
   defineProps<{
@@ -32,13 +39,17 @@ const props = withDefaults(
     tabId: string | null;
     temporary: boolean;
     inheritedHeaders: readonly RequestField[];
+    requestVariableProfile?: VariableProfileView | null;
     variablePreviews?: readonly VariablePreview[];
     previewContextKey?: string | null;
     busy: boolean;
+    canEdit?: boolean;
   }>(),
   {
     variablePreviews: () => [],
+    requestVariableProfile: null,
     previewContextKey: null,
+    canEdit: true,
   },
 );
 const { t } = useI18n();
@@ -49,7 +60,8 @@ const emit = defineEmits<{
   change: [draft: RequestDraftInput];
   download: [executionId: string];
   preview: [names: readonly string[]];
-  manageVariables: [];
+  loadVariables: [];
+  saveVariables: [variables: readonly VariableWrite[]];
 }>();
 
 const methods: readonly HttpMethod[] = [
@@ -65,14 +77,15 @@ const methodOptions = methods.map((option) => ({
   value: option,
   label: option,
 }));
-const requestTabs = ["query", "headers", "body"] as const;
+const requestTabs = ["query", "headers", "body", "variables"] as const;
 const name = ref("");
 const method = ref<HttpMethod>("GET");
 const targetUrl = ref("");
 const query = ref<RequestField[]>([]);
 const headers = ref<RequestField[]>([]);
 const body = ref("");
-const activeTab = ref<"query" | "headers" | "body">("query");
+const activeTab = ref<"query" | "headers" | "body" | "variables">("query");
+const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
 
 watch(
@@ -105,6 +118,23 @@ watch(
   [previewSignature, () => props.previewContextKey],
   scheduleVariablePreview,
   { immediate: true },
+);
+
+watch(
+  [
+    activeTab,
+    () => props.request?.requestId,
+    () => props.requestVariableProfile?.scopeId,
+  ],
+  ([tab, requestId, profileScopeId]) => {
+    if (
+      tab === "variables" &&
+      requestId !== undefined &&
+      profileScopeId !== requestId
+    ) {
+      emit("loadVariables");
+    }
+  },
 );
 
 onBeforeUnmount(() => {
@@ -216,7 +246,10 @@ function requestTabLabel(tab: (typeof requestTabs)[number]): string {
   if (tab === "query") {
     return t("request.query");
   }
-  return tab === "headers" ? t("request.headers") : t("request.body");
+  if (tab === "headers") {
+    return t("request.headers");
+  }
+  return tab === "body" ? t("request.body") : t("environment.variables");
 }
 
 /** Returns the translated singular label for the active structured field. */
@@ -224,6 +257,13 @@ function activeFieldKind(): string {
   return activeTab.value === "headers"
     ? t("request.headerField")
     : t("request.queryField");
+}
+
+/** Emits the complete persisted request-variable profile from its inline tab. */
+function saveVariables(): void {
+  if (props.canEdit && props.requestVariableProfile !== null) {
+    emit("saveVariables", variableEditor.value?.writes() ?? []);
+  }
 }
 </script>
 
@@ -255,18 +295,6 @@ function activeFieldKind(): string {
             </span>
           </div>
           <div class="command-bar">
-            <IconButton
-              :label="t('request.variables')"
-              :disabled="busy || temporary"
-              :title="
-                temporary
-                  ? t('variables.requestUnavailable')
-                  : t('request.variables')
-              "
-              @click="emit('manageVariables')"
-            >
-              <Settings2 :size="17" aria-hidden="true" />
-            </IconButton>
             <ButtonControl
               variant="secondary"
               :disabled="busy || !canSave"
@@ -330,7 +358,10 @@ function activeFieldKind(): string {
               :value="tab"
             >
               {{ requestTabLabel(tab) }}
-              <span v-if="tab !== 'body'" class="tab-count">
+              <span
+                v-if="tab === 'query' || tab === 'headers'"
+                class="tab-count"
+              >
                 {{
                   tab === "query"
                     ? query.length
@@ -341,7 +372,7 @@ function activeFieldKind(): string {
           </TabsList>
 
           <TabsPanel
-            v-if="activeTab !== 'body'"
+            v-if="activeTab === 'query' || activeTab === 'headers'"
             :value="activeTab"
             class="request-fields"
           >
@@ -490,7 +521,11 @@ function activeFieldKind(): string {
             </ButtonControl>
           </TabsPanel>
 
-          <TabsPanel v-else value="body" class="request-body-editor">
+          <TabsPanel
+            v-if="activeTab === 'body'"
+            value="body"
+            class="request-body-editor"
+          >
             <TemplateTextControl
               v-model="body"
               class="body-template-input"
@@ -503,6 +538,44 @@ function activeFieldKind(): string {
               :disabled="busy"
               @input="emitChange"
             />
+          </TabsPanel>
+
+          <TabsPanel
+            v-if="activeTab === 'variables'"
+            value="variables"
+            class="request-variables-editor"
+          >
+            <p v-if="temporary" class="resource-dialog-context">
+              {{ t("variables.requestUnavailable") }}
+            </p>
+            <p
+              v-else-if="requestVariableProfile === null"
+              class="resource-dialog-context"
+              role="status"
+            >
+              {{ t("variables.loading") }}
+            </p>
+            <template v-else>
+              <p class="resource-dialog-context">
+                {{ t("variables.requestDescription") }}
+              </p>
+              <VariableFieldsEditor
+                :key="`${requestVariableProfile.scopeId}:${requestVariableProfile.revision}`"
+                ref="variableEditor"
+                :profile-variables="requestVariableProfile.variables"
+                :can-edit="canEdit"
+                :busy="busy"
+              />
+              <div v-if="canEdit" class="request-variable-actions">
+                <ButtonControl
+                  variant="primary"
+                  :disabled="busy"
+                  @click="saveVariables"
+                >
+                  {{ t("variables.saveRequest") }}
+                </ButtonControl>
+              </div>
+            </template>
           </TabsPanel>
         </TabsRoot>
       </section>

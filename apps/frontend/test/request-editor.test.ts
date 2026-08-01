@@ -139,4 +139,79 @@ describe("RequestEditor", () => {
       wrapper.get('input[aria-label="Header name 1"]').attributes("disabled"),
     ).toBeUndefined();
   });
+
+  it("edits persisted request variables in a first-class request tab", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const requestId = "019facab-1eee-765f-bd9f-ac2449151be3";
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151be4";
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: {
+          requestId,
+          workspaceId,
+          parentCollectionId: null,
+          name: "Saved request",
+          method: "GET",
+          targetMode: "absolute",
+          targetUrl: "https://example.test",
+          queryMode: "structured",
+          query: [],
+          headers: [],
+          inheritedHeaders: [],
+          body: "",
+          draftRevision: 0,
+        },
+        draft: {
+          name: "Saved request",
+          method: "GET",
+          targetUrl: "https://example.test",
+          query: [],
+          headers: [],
+          body: "",
+        },
+        execution: null,
+        tabId: "019facab-1eee-765f-bd9f-ac2449151be5",
+        temporary: false,
+        inheritedHeaders: [],
+        requestVariableProfile: null,
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().includes("Variables"))
+      ?.trigger("click");
+    expect(wrapper.emitted("loadVariables")).toHaveLength(1);
+    await wrapper.setProps({
+      requestVariableProfile: {
+        workspaceId,
+        scopeKind: "request",
+        scopeId: requestId,
+        scopeName: "Saved request",
+        revision: 0,
+        variables: [],
+      },
+    });
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Add variable"))
+      ?.trigger("click");
+    await wrapper.get('input[aria-label="Variable name 1"]').setValue("source");
+    await wrapper
+      .get('input[aria-label="Variable value 1"]')
+      .setValue("request");
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Save request variables"))
+      ?.trigger("click");
+    expect(wrapper.emitted("saveVariables")).toEqual([
+      [[{ name: "source", kind: "value", value: "request" }]],
+    ]);
+  });
 });

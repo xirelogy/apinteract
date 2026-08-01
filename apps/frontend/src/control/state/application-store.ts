@@ -9,6 +9,7 @@ import type {
   VariableProfileView,
   VariablePreview,
   WorkspaceSummary,
+  WorkspaceView,
 } from "@/model/contracts/backend";
 import type {
   ApplicationError,
@@ -22,6 +23,7 @@ export const useApplicationStore = defineStore("application", {
     connection: "disconnected" as ConnectionState,
     workspaces: [] as WorkspaceSummary[],
     selectedWorkspaceId: null as string | null,
+    selectedWorkspace: null as WorkspaceView | null,
     environments: [] as EnvironmentSummary[],
     selectedEnvironmentId: null as string | null,
     selectedEnvironment: null as EnvironmentView | null,

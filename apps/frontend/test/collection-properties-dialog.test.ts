@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
 import CollectionPropertiesDialog from "../src/view/presentation/features/CollectionPropertiesDialog.vue";
+import WorkspacePropertiesDialog from "../src/view/presentation/features/WorkspacePropertiesDialog.vue";
 
 let showModalDescriptor: PropertyDescriptor | undefined;
 let closeDescriptor: PropertyDescriptor | undefined;
@@ -140,6 +141,70 @@ describe("CollectionPropertiesDialog", () => {
             value: "https://collection.test",
           },
         ],
+      ],
+    ]);
+    wrapper.unmount();
+  });
+});
+
+describe("WorkspacePropertiesDialog", () => {
+  it("edits root common headers and variables together", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const workspaceId = "019fa8be-a510-76b9-b73b-69f4c7af7876";
+    const wrapper = mount(WorkspacePropertiesDialog, {
+      attachTo: document.body,
+      props: {
+        workspace: {
+          workspaceId,
+          name: "Platform",
+          role: "owner",
+          headers: [],
+          revision: 0,
+        },
+        variableProfile: {
+          workspaceId,
+          scopeKind: "workspace",
+          scopeId: workspaceId,
+          scopeName: "Platform",
+          revision: 0,
+          variables: [],
+        },
+        canEdit: true,
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper.get("button.add-field-button").trigger("click");
+    await wrapper
+      .get('input[aria-label="Header name 1"]')
+      .setValue("X-Workspace");
+    await wrapper
+      .get('input[aria-label="Header value 1"]')
+      .setValue("platform");
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().includes("Variables"))
+      ?.trigger("click");
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Add variable"))
+      ?.trigger("click");
+    await wrapper.get('input[aria-label="Variable name 1"]').setValue("team");
+    await wrapper
+      .get('input[aria-label="Variable value 1"]')
+      .setValue("platform");
+    await wrapper.get('button[type="submit"]').trigger("submit");
+
+    expect(wrapper.emitted("save")).toEqual([
+      [
+        "Platform",
+        [{ name: "X-Workspace", value: "platform", enabled: true }],
+        [{ name: "team", kind: "value", value: "platform" }],
       ],
     ]);
     wrapper.unmount();

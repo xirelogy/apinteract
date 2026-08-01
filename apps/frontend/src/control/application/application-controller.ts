@@ -14,6 +14,7 @@ import type {
   VariablePreviewResult,
   VariableWrite,
   WorkspaceSummary,
+  WorkspaceView,
 } from "@/model/contracts/backend";
 import { useApplicationStore } from "@/control/state/application-store";
 import type { SessionController } from "@/control/session/session-controller";
@@ -96,7 +97,7 @@ export class ApplicationController {
 
   /** Loads a workspace root without nesting foreground busy state. */
   async #selectWorkspace(workspaceId: string): Promise<void> {
-    const [result, environmentList] = await Promise.all([
+    const [result, environmentList, workspace] = await Promise.all([
       this.#webSocket.command<{ children: TreeNode[] }>("tree.list", {
         workspaceId,
         parentCollectionId: null,
@@ -104,9 +105,11 @@ export class ApplicationController {
       this.#webSocket.command<EnvironmentListView>("environment.list", {
         workspaceId,
       }),
+      this.#webSocket.command<WorkspaceView>("workspace.get", { workspaceId }),
     ]);
     const store = useApplicationStore();
     store.selectedWorkspaceId = workspaceId;
+    store.selectedWorkspace = workspace;
     store.rootNodes = result.children;
     store.environments = environmentList.environments;
     store.selectedEnvironmentId = environmentList.selectedEnvironmentId;
@@ -125,6 +128,57 @@ export class ApplicationController {
         store.requestTabs.find((tab) => tab.workspaceId === workspaceId)
           ?.tabId ?? null;
     }
+  }
+
+  /** Loads the selected workspace's editable name and common headers. */
+  async loadWorkspace(workspaceId: string): Promise<WorkspaceView> {
+    return this.#run(async () => {
+      const workspace = await this.#webSocket.command<WorkspaceView>(
+        "workspace.get",
+        { workspaceId },
+      );
+      useApplicationStore().selectedWorkspace = workspace;
+      return workspace;
+    });
+  }
+
+  /** Saves workspace properties and variables as one coordinated UI action. */
+  async updateWorkspaceProperties(
+    workspaceId: string,
+    expectedRevision: number,
+    name: string,
+    headers: readonly RequestField[],
+    expectedVariableRevision: number,
+    variables: readonly VariableWrite[],
+  ): Promise<void> {
+    await this.#run(async () => {
+      const workspace = await this.#webSocket.command<WorkspaceView>(
+        "workspace.update",
+        { workspaceId, expectedRevision, name, headers },
+      );
+      const store = useApplicationStore();
+      store.selectedWorkspace = workspace;
+      store.workspaces = store.workspaces.map((candidate) =>
+        candidate.workspaceId === workspaceId
+          ? {
+              workspaceId: workspace.workspaceId,
+              name: workspace.name,
+              role: workspace.role,
+            }
+          : candidate,
+      );
+      const profile = await this.#webSocket.command<VariableProfileView>(
+        "variable_profile.update",
+        {
+          scopeKind: "workspace",
+          scopeId: workspaceId,
+          expectedRevision: expectedVariableRevision,
+          variables,
+        },
+      );
+      store.selectedVariableProfile = profile;
+      await this.#refreshVariablePreviews();
+    });
   }
 
   /** Selects the current session's environment for the active workspace. */
@@ -435,11 +489,14 @@ export class ApplicationController {
       baseline: null,
       pendingParentCollectionId: parentCollectionId,
       inheritedHeaders:
-        store.selectedCollectionId === parentCollectionId
-          ? (store.selectedCollection?.effectiveHeaders.map((field) => ({
-              ...field,
-            })) ?? [])
-          : [],
+        parentCollectionId === null
+          ? (store.selectedWorkspace?.headers.map((field) => ({ ...field })) ??
+            [])
+          : store.selectedCollectionId === parentCollectionId
+            ? (store.selectedCollection?.effectiveHeaders.map((field) => ({
+                ...field,
+              })) ?? [])
+            : [],
       execution: null,
       busy: false,
     };

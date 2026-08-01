@@ -561,6 +561,12 @@
             "$ref": "#/components/schemas/WorkspaceCreateCommand"
           },
           {
+            "$ref": "#/components/schemas/WorkspaceGetCommand"
+          },
+          {
+            "$ref": "#/components/schemas/WorkspaceUpdateCommand"
+          },
+          {
             "$ref": "#/components/schemas/TreeListCommand"
           },
           {
@@ -731,6 +737,77 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "WorkspaceGetCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "workspace.get"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["workspaceId"],
+                "properties": {
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/WorkspaceId"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "WorkspaceUpdateCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "workspace.update"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "workspaceId",
+                  "expectedRevision",
+                  "name",
+                  "headers"
+                ],
+                "properties": {
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/WorkspaceId"
+                  },
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "headers": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "items": {
+                      "$ref": "#/components/schemas/RequestField"
+                    }
                   }
                 }
               }
@@ -1463,6 +1540,7 @@
       },
       "WebSocketReplyPayload": {
         "anyOf": [
+          { "$ref": "#/components/schemas/WorkspaceView" },
           { "$ref": "#/components/schemas/EnvironmentListView" },
           { "$ref": "#/components/schemas/EnvironmentView" },
           { "$ref": "#/components/schemas/VariableProfileView" },
@@ -1539,6 +1617,33 @@
           "role": {
             "type": "string",
             "enum": ["owner", "editor", "viewer"]
+          }
+        }
+      },
+      "WorkspaceView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["workspaceId", "name", "role", "headers", "revision"],
+        "properties": {
+          "workspaceId": {
+            "$ref": "#/components/schemas/WorkspaceId"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["owner", "editor", "viewer"]
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestField"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },

@@ -48,6 +48,8 @@ export interface RefreshTokenTable {
 export interface WorkspaceTable {
   id: BinaryId;
   name: string;
+  revision: number;
+  headers_json: string;
   created_by: BinaryId;
   created_at: number;
 }

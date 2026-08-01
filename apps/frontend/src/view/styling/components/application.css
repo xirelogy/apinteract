@@ -700,6 +700,22 @@
   padding-top: var(--space-3);
 }
 
+.request-variables-editor {
+  min-width: 0;
+  padding-top: var(--space-3);
+}
+
+.request-variables-editor:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.request-variable-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .request-field-heading,
 .request-field-row {
   display: grid;

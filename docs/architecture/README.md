@@ -86,13 +86,13 @@ Target HTTP statuses, including `4xx` and `5xx`, are valid target responses.
 Proxy, network, and malformed HTTP response failures are separate execution
 errors.
 
-Collection common headers resolve from the workspace root toward the request's
-direct parent. Header names match case-insensitively: when a nearer enabled
-layer declares a name, its complete ordered group replaces the farther group
-with that name. Request-local headers are the nearest layer. Disabled fields
-do not participate in execution or suppress inherited values. The backend
-stores this resolved header set in the immutable revision and execution
-snapshot before contacting the proxy.
+Common headers resolve from the workspace profile through root-to-leaf
+collection profiles toward the request's direct parent. Header names match
+case-insensitively: when a nearer enabled layer declares a name, its complete
+ordered group replaces the farther group with that name. Request-local headers
+are the nearest layer. Disabled fields do not participate in execution or
+suppress inherited values. The backend stores this resolved header set in the
+immutable revision and execution snapshot before contacting the proxy.
 
 Workspaces may also own environments containing ordered variables. Environment
 selection is persisted per application session and workspace, so separate

@@ -30,20 +30,31 @@ test("creates, restores, and sends the first workspace request", async ({
   }
 
   await openNavigator(page, mobile);
-  await page
-    .getByRole("button", { name: "Manage workspace variables" })
-    .click();
-  const workspaceVariables = page.getByRole("dialog", {
-    name: `Variables for ${workspaceName}`,
+  await page.getByRole("button", { name: "Workspace properties" }).click();
+  const workspaceProperties = page.getByRole("dialog", {
+    name: "Workspace properties",
   });
+  await expect(workspaceProperties.getByLabel("Workspace name")).toHaveValue(
+    workspaceName,
+  );
+  await workspaceProperties
+    .getByRole("button", { name: "Add common header" })
+    .click();
+  await workspaceProperties
+    .getByLabel("Header name 1", { exact: true })
+    .fill("X-Workspace");
+  await workspaceProperties
+    .getByLabel("Header value 1", { exact: true })
+    .fill(`workspace-header-${suffix}`);
+  await workspaceProperties.getByRole("tab", { name: "Variables" }).click();
   await addValueVariable(
-    workspaceVariables,
+    workspaceProperties,
     1,
     "workspace_source",
     `workspace-${suffix}`,
   );
-  await addValueVariable(workspaceVariables, 2, "scope_chain", "workspace");
-  await workspaceVariables.getByRole("button", { name: "Save" }).click();
+  await addValueVariable(workspaceProperties, 2, "scope_chain", "workspace");
+  await workspaceProperties.getByRole("button", { name: "Save" }).click();
   if (mobile) {
     await page.getByTitle("Close workspace navigator", { exact: true }).click();
   }
@@ -174,11 +185,17 @@ test("creates, restores, and sends the first workspace request", async ({
   await page.getByLabel("Query name 1").fill("source");
   await page.getByLabel("Query value 1").fill("<<source>>");
   await addRequestQuery(page, 2, "scope", "<<scope_chain>>");
-  await page.getByRole("tab", { name: "Headers 1" }).click();
+  await page.getByRole("tab", { name: "Headers 2" }).click();
   await expect(page.getByLabel("Inherited header name 1")).toHaveValue(
+    "X-Workspace",
+  );
+  await expect(page.getByLabel("Inherited header value 1")).toHaveValue(
+    `workspace-header-${suffix}`,
+  );
+  await expect(page.getByLabel("Inherited header name 2")).toHaveValue(
     "X-Inherited",
   );
-  await expect(page.getByLabel("Inherited header name 1")).toBeDisabled();
+  await expect(page.getByLabel("Inherited header name 2")).toBeDisabled();
   const addHeaderButton = page.getByRole("button", { name: "Add header" });
   await expect(addHeaderButton).toHaveCSS("white-space", "nowrap");
   await addHeaderButton.click();
@@ -315,13 +332,13 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(subcollection.locator("..")).not.toHaveClass(/is-selected/u);
   await expect(draftRevision).toHaveText("Draft 0");
 
-  await page.getByRole("button", { name: "Manage request variables" }).click();
-  const requestVariables = page.getByRole("dialog", {
-    name: `Variables for ${requestName}`,
-  });
+  await page.getByRole("tab", { name: "Variables" }).click();
+  const requestVariables = page.locator(".request-variables-editor");
   await addValueVariable(requestVariables, 1, "source", `request-${suffix}`);
   await addValueVariable(requestVariables, 2, "scope_chain", "request");
-  await requestVariables.getByRole("button", { name: "Save" }).click();
+  await requestVariables
+    .getByRole("button", { name: "Save request variables" })
+    .click();
 
   await page.reload();
   await openNavigator(page, mobile);
@@ -356,12 +373,18 @@ test("creates, restores, and sends the first workspace request", async ({
     "data-value",
     "POST",
   );
-  await page.getByRole("tab", { name: "Headers 2" }).click();
+  await page.getByRole("tab", { name: "Headers 3" }).click();
   await expect(page.getByLabel("Inherited header name 1")).toHaveValue(
+    "X-Workspace",
+  );
+  await expect(page.getByLabel("Inherited header value 1")).toHaveValue(
+    `workspace-header-${suffix}`,
+  );
+  await expect(page.getByLabel("Inherited header name 2")).toHaveValue(
     "X-Inherited",
   );
-  await expect(page.getByLabel("Inherited header name 1")).toBeDisabled();
-  await expect(page.getByLabel("Inherited header value 1")).toHaveValue(
+  await expect(page.getByLabel("Inherited header name 2")).toBeDisabled();
+  await expect(page.getByLabel("Inherited header value 2")).toHaveValue(
     `root-${suffix}`,
   );
   await page.getByRole("tab", { name: "Body" }).click();

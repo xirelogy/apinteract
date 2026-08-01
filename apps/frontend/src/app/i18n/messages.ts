@@ -39,7 +39,14 @@ export const enUsMessages = {
     createRootCollection: "Create root collection",
     label: "Workspace",
     navigation: "Workspace navigation",
+    name: "Workspace name",
     noCollections: "No collections yet",
+    properties: "Workspace properties",
+    propertiesDescription:
+      "Rename this workspace and manage headers and variables inherited by every request.",
+    propertiesTitle: "Workspace properties",
+    headersDescription:
+      "Enabled headers apply to every request in this workspace unless a nearer scope overrides them.",
     select: "Select a workspace",
     tree: "Workspace tree",
     variables: "Manage workspace variables",
@@ -111,6 +118,10 @@ export const enUsMessages = {
       "Values in this scope override lower-precedence variables with the same name.",
     noVariables: "No variables in this scope.",
     requestUnavailable: "Save this request before adding request variables.",
+    requestDescription:
+      "These persisted variables override collection, environment, and workspace variables for this request.",
+    loading: "Loading request variables…",
+    saveRequest: "Save request variables",
     title: "Variables for {name}",
     scope: {
       collection: "Collection",
@@ -191,6 +202,8 @@ export const enUsMessages = {
       "This environment changed elsewhere. Refresh it and try again.",
     variable_profile_conflict:
       "These variables changed elsewhere. Reopen the editor and try again.",
+    workspace_conflict:
+      "This workspace changed elsewhere. Reopen its properties and try again.",
     operationFailed: "The operation failed.",
     parentRequired: "Select the required parent first.",
     requestTabClosed: "The request tab is no longer open.",

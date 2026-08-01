@@ -13,6 +13,7 @@ const TEMPORARY_EXECUTION_MIGRATION = "0003_temporary_executions";
 const COLLECTION_PROFILES_MIGRATION = "0004_collection_profiles";
 const ENVIRONMENTS_MIGRATION = "0005_environments";
 const VARIABLE_SCOPES_MIGRATION = "0006_variable_scopes";
+const WORKSPACE_HEADERS_MIGRATION = "0007_workspace_headers";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -301,6 +302,13 @@ export class SqliteDatabase {
     if (variableScopesApplied === undefined) {
       this.#migrateVariableScopes();
     }
+
+    const workspaceHeadersApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(WORKSPACE_HEADERS_MIGRATION);
+    if (workspaceHeadersApplied === undefined) {
+      this.#migrateWorkspaceHeaders();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -334,6 +342,7 @@ export class SqliteDatabase {
       COLLECTION_PROFILES_MIGRATION,
       ENVIRONMENTS_MIGRATION,
       VARIABLE_SCOPES_MIGRATION,
+      WORKSPACE_HEADERS_MIGRATION,
     ].some((identifier) => !identifiers.has(identifier));
   }
 
@@ -621,6 +630,19 @@ export class SqliteDatabase {
         DROP TABLE environment_variables;
       `);
       this.#recordMigration(VARIABLE_SCOPES_MIGRATION);
+    })();
+  }
+
+  /** Adds revisioned common headers to the workspace inheritance root. */
+  #migrateWorkspaceHeaders(): void {
+    this.#driver.transaction(() => {
+      this.#driver.exec(`
+        ALTER TABLE workspaces
+          ADD COLUMN revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0);
+        ALTER TABLE workspaces
+          ADD COLUMN headers_json TEXT NOT NULL DEFAULT '[]';
+      `);
+      this.#recordMigration(WORKSPACE_HEADERS_MIGRATION);
     })();
   }
 

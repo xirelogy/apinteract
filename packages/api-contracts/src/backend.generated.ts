@@ -202,6 +202,8 @@ export interface components {
       | components["schemas"]["SystemPingCommand"]
       | components["schemas"]["WorkspaceListCommand"]
       | components["schemas"]["WorkspaceCreateCommand"]
+      | components["schemas"]["WorkspaceGetCommand"]
+      | components["schemas"]["WorkspaceUpdateCommand"]
       | components["schemas"]["TreeListCommand"]
       | components["schemas"]["CollectionCreateCommand"]
       | components["schemas"]["CollectionGetCommand"]
@@ -278,6 +280,35 @@ export interface components {
        * @enum {string}
        */
       type: "WorkspaceCreateCommand";
+    };
+    WorkspaceGetCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "workspace.get";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "WorkspaceGetCommand";
+    };
+    WorkspaceUpdateCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "workspace.update";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+        expectedRevision: number;
+        name: string;
+        headers: components["schemas"]["RequestField"][];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "WorkspaceUpdateCommand";
     };
     TreeListCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
@@ -593,6 +624,7 @@ export interface components {
       error?: components["schemas"]["WebSocketError"];
     };
     WebSocketReplyPayload:
+      | components["schemas"]["WorkspaceView"]
       | components["schemas"]["EnvironmentListView"]
       | components["schemas"]["EnvironmentView"]
       | components["schemas"]["VariableProfileView"]
@@ -621,6 +653,14 @@ export interface components {
       name: string;
       /** @enum {string} */
       role: "owner" | "editor" | "viewer";
+    };
+    WorkspaceView: {
+      workspaceId: components["schemas"]["WorkspaceId"];
+      name: string;
+      /** @enum {string} */
+      role: "owner" | "editor" | "viewer";
+      headers: components["schemas"]["RequestField"][];
+      revision: number;
     };
     TreeNode: {
       nodeId: components["schemas"]["UuidV7"];
