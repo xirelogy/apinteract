@@ -20,7 +20,15 @@ deploy/scripts/aio init-admin
 Open `http://localhost:8080/web-ui/` and sign in with the administrator just
 created. Opening `http://localhost:8080/` redirects to that canonical UI path.
 The administrator command reads the password interactively and does not place
-it in a command argument or environment variable.
+it in a command argument or environment variable. If an administrator loses
+access, reset the password from the host as a break-glass operation:
+
+```sh
+deploy/scripts/aio reset-password admin
+```
+
+The reset also revokes the user's active sessions. `init-admin` remains safe to
+rerun and does not replace credentials after the instance is initialized.
 
 The maintained wrapper provides these operations:
 
@@ -31,6 +39,7 @@ deploy/scripts/aio down
 deploy/scripts/aio ps
 deploy/scripts/aio logs
 deploy/scripts/aio init-admin
+deploy/scripts/aio reset-password USER
 deploy/scripts/aio verify
 deploy/scripts/aio config
 ```

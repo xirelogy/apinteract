@@ -13,14 +13,15 @@ usage() {
 Usage: deploy/scripts/aio <command>
 
 Commands:
-  build       Build the production-style all-in-one image
-  up          Build and start APInteract in the background
-  down        Stop and remove the AIO container and network; preserve volumes
-  ps          Show AIO container status
-  logs        Follow backend, proxy, and supervisor output
-  init-admin  Interactively initialize the first administrator
-  verify      Run isolated build, restart, persistence, and failure checks
-  config      Print the resolved Compose configuration
+  build                Build the production-style all-in-one image
+  up                   Build and start APInteract in the background
+  down                 Stop and remove the AIO container and network; preserve volumes
+  ps                   Show AIO container status
+  logs                 Follow backend, proxy, and supervisor output
+  init-admin           Interactively initialize the first administrator
+  reset-password USER  Interactively reset a user's password and sessions
+  verify               Run isolated build, restart, persistence, and failure checks
+  config               Print the resolved Compose configuration
 USAGE
 }
 
@@ -44,6 +45,17 @@ case "${command}" in
   init-admin)
     "${compose[@]}" exec --user 10001:10001 apinteract \
       node /opt/apinteract/backend/dist/cli.js admin init \
+      --config /run/apinteract/backend.yaml
+    ;;
+  reset-password)
+    username="${2:-}"
+    if [[ -z "${username}" || -n "${3:-}" ]]; then
+      usage
+      exit 2
+    fi
+    "${compose[@]}" exec --user 10001:10001 apinteract \
+      node /opt/apinteract/backend/dist/cli.js admin reset-password \
+      --user "${username}" \
       --config /run/apinteract/backend.yaml
     ;;
   verify)
