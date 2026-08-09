@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Settings } from "@lucide/vue";
+import { X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -8,6 +8,9 @@ import type {
   EnvironmentVariableWrite,
   EnvironmentView,
 } from "@/model/contracts/backend";
+import ActionMenu, {
+  type ActionMenuItem,
+} from "@/view/presentation/controls/ActionMenu.vue";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
@@ -56,6 +59,33 @@ const options = computed(() => [
     label: environment.name,
   })),
 ]);
+const environmentActions = computed<readonly ActionMenuItem[]>(() => {
+  const selected = props.environments.find(
+    (environment) => environment.environmentId === props.selectedEnvironmentId,
+  );
+  return [
+    ...(selected === undefined
+      ? []
+      : [
+          {
+            value: `edit:${selected.environmentId}`,
+            label: t("environment.editNamed", { name: selected.name }),
+          },
+        ]),
+    ...(props.canEdit
+      ? [{ value: "create", label: t("environment.createNew") }]
+      : []),
+    ...props.environments
+      .filter(
+        (environment) =>
+          environment.environmentId !== props.selectedEnvironmentId,
+      )
+      .map((environment) => ({
+        value: `edit:${environment.environmentId}`,
+        label: t("environment.editNamed", { name: environment.name }),
+      })),
+  ];
+});
 watch(
   () => props.environment,
   (environment) => {
@@ -82,10 +112,27 @@ function createEnvironment(): void {
 /** Opens and requests one redacted environment profile. */
 function editEnvironment(environmentId: string): void {
   editingId.value = environmentId;
-  name.value = "";
+  name.value =
+    props.environment?.environmentId === environmentId
+      ? props.environment.name
+      : "";
   variableEditorKey.value += 1;
   open.value = true;
   emit("load", environmentId);
+}
+
+/** Routes one toolbar menu action without changing the active environment. */
+function selectEnvironmentAction(action: string): void {
+  if (action === "create") {
+    createEnvironment();
+  } else if (action.startsWith("edit:")) {
+    editEnvironment(action.slice("edit:".length));
+  }
+}
+
+/** Requests closure through the shared controlled-dialog lifecycle. */
+function close(): void {
+  open.value = false;
 }
 
 /** Emits create or optimistic update from the current complete profile. */
@@ -136,17 +183,12 @@ function deleteEnvironment(): void {
       :disabled="busy || !canEdit"
       @update:model-value="emit('select', $event || null)"
     />
-    <IconButton
+    <ActionMenu
       :label="t('environment.manage')"
-      :disabled="busy"
-      @click="
-        selectedEnvironmentId
-          ? editEnvironment(selectedEnvironmentId)
-          : createEnvironment()
-      "
-    >
-      <Settings :size="17" aria-hidden="true" />
-    </IconButton>
+      :items="environmentActions"
+      :disabled="busy || environmentActions.length === 0"
+      @select="selectEnvironmentAction"
+    />
   </section>
 
   <DialogControl
@@ -156,12 +198,19 @@ function deleteEnvironment(): void {
     :busy="busy"
   >
     <div class="resource-dialog-surface">
+      <header class="resource-dialog-header">
+        <h2 id="environment-dialog-title">
+          {{ editingId ? t("environment.edit") : t("environment.create") }}
+        </h2>
+        <IconButton
+          :label="t('common.actions.close')"
+          :disabled="busy"
+          @click="close"
+        >
+          <X :size="18" aria-hidden="true" />
+        </IconButton>
+      </header>
       <form class="resource-dialog-form" @submit.prevent="save">
-        <header class="resource-dialog-header">
-          <h2 id="environment-dialog-title">
-            {{ editingId ? t("environment.edit") : t("environment.create") }}
-          </h2>
-        </header>
         <label class="field-label">
           {{ t("common.fields.name") }}
           <TextInput
@@ -192,7 +241,7 @@ function deleteEnvironment(): void {
             type="button"
             variant="secondary"
             :disabled="busy"
-            @click="open = false"
+            @click="close"
           >
             {{ t("common.actions.cancel") }}
           </ButtonControl>

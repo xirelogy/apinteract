@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createI18n } from "vue-i18n";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
@@ -59,6 +59,80 @@ afterEach(() => {
 });
 
 describe("EnvironmentManager", () => {
+  it("orders creation and inactive edits in the environment action menu", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const developmentId = "019fa8be-a510-76b9-b73b-69f4c7af7875";
+    const stagingId = "019fa8be-a510-76b9-b73b-69f4c7af7876";
+    const wrapper = mount(EnvironmentManager, {
+      attachTo: document.body,
+      props: {
+        environments: [
+          { environmentId: developmentId, name: "Development", revision: 1 },
+          { environmentId: stagingId, name: "Staging", revision: 1 },
+        ],
+        selectedEnvironmentId: developmentId,
+        environment: null,
+        canEdit: true,
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .get('button[aria-label="Manage environments"]')
+      .trigger("click");
+    await flushPromises();
+    let menuItems = [
+      ...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ];
+    expect(menuItems.map((item) => item.textContent)).toEqual([
+      "Edit Development",
+      "Create new environment",
+      "Edit Staging",
+    ]);
+
+    menuItems[1]?.click();
+    await flushPromises();
+    expect(wrapper.get("dialog").attributes()).toHaveProperty("open");
+    expect(wrapper.get("h2").text()).toBe("Create environment");
+    expect(wrapper.emitted("load")).toBeUndefined();
+
+    await wrapper.get('button[aria-label="Close"]').trigger("click");
+    expect(wrapper.get("dialog").attributes()).not.toHaveProperty("open");
+
+    await wrapper
+      .get('button[aria-label="Manage environments"]')
+      .trigger("click");
+    await flushPromises();
+    menuItems = [
+      ...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ];
+    menuItems[2]?.click();
+    await flushPromises();
+    expect(wrapper.emitted("load")).toEqual([[stagingId]]);
+    expect(wrapper.emitted("select")).toBeUndefined();
+
+    await wrapper.get('button[aria-label="Close"]').trigger("click");
+    await wrapper.setProps({ selectedEnvironmentId: null });
+    await wrapper
+      .get('button[aria-label="Manage environments"]')
+      .trigger("click");
+    await flushPromises();
+    menuItems = [
+      ...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ];
+    expect(menuItems.map((item) => item.textContent)).toEqual([
+      "Create new environment",
+      "Edit Development",
+      "Edit Staging",
+    ]);
+    wrapper.unmount();
+  });
+
   it("keeps the editor open until persistence and refresh are confirmed", async () => {
     const i18n = createI18n({
       legacy: false,
@@ -80,6 +154,11 @@ describe("EnvironmentManager", () => {
     await wrapper
       .get('button[aria-label="Manage environments"]')
       .trigger("click");
+    await flushPromises();
+    document.body
+      .querySelector<HTMLButtonElement>('[role="menuitem"]')
+      ?.click();
+    await flushPromises();
     await wrapper.get("form").trigger("submit");
     expect(wrapper.emitted("create")).toEqual([["", []]]);
     expect(wrapper.get("dialog").attributes()).toHaveProperty("open");
@@ -118,6 +197,11 @@ describe("EnvironmentManager", () => {
     await wrapper
       .get('button[aria-label="Manage environments"]')
       .trigger("click");
+    await flushPromises();
+    document.body
+      .querySelector<HTMLButtonElement>('[role="menuitem"]')
+      ?.click();
+    await flushPromises();
     expect(wrapper.emitted("load")).toEqual([[environmentId]]);
     await wrapper.setProps({
       environment: {

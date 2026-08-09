@@ -83,9 +83,11 @@ export const enUsMessages = {
     aliasTarget: "Alias target {index}",
     clearSecret: "Clear stored value",
     create: "Create environment",
+    createNew: "Create new environment",
     deleteConfirmation:
       "Delete {name}? Any session using it will switch to no environment.",
     edit: "Edit environment",
+    editNamed: "Edit {name}",
     kind: {
       alias: "Alias",
       secret: "Secret",
