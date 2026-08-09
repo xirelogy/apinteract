@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Plus, Trash2 } from "@lucide/vue";
+import { Asterisk, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -32,8 +32,8 @@ const emit = defineEmits<{
   countChange: [count: number];
 }>();
 const { t } = useI18n();
-const variables = ref<DraftVariable[]>(
-  props.profileVariables.map((variable) => ({
+const variables = ref<DraftVariable[]>([
+  ...props.profileVariables.map((variable) => ({
     variableId: variable.variableId,
     name: variable.name,
     kind: variable.kind,
@@ -43,7 +43,8 @@ const variables = ref<DraftVariable[]>(
     secretTouched: false,
     clearValue: false,
   })),
-);
+  ...(props.canEdit ? [createBlankVariable()] : []),
+]);
 const kindOptions = computed(() => [
   { value: "value", label: t("environment.kind.value") },
   { value: "secret", label: t("environment.kind.secret") },
@@ -51,9 +52,9 @@ const kindOptions = computed(() => [
   { value: "unset", label: t("environment.kind.unset") },
 ]);
 
-/** Adds one ordinary variable at the end of the scope's presentation order. */
-function addVariable(): void {
-  variables.value.push({
+/** Creates the presentation-only row used to begin a new variable. */
+function createBlankVariable(): DraftVariable {
+  return {
     name: "",
     kind: "value",
     value: "",
@@ -61,14 +62,49 @@ function addVariable(): void {
     hasValue: false,
     secretTouched: false,
     clearValue: false,
-  });
-  emit("countChange", variables.value.length);
+  };
+}
+
+/** Reports whether a variable row contains no user-authored profile content. */
+function isBlankVariable(variable: DraftVariable): boolean {
+  return (
+    variable.variableId === undefined &&
+    variable.name === "" &&
+    variable.kind === "value" &&
+    variable.value === "" &&
+    variable.target === "" &&
+    !variable.secretTouched &&
+    !variable.clearValue
+  );
+}
+
+/** Appends the next blank row after the current trailing row becomes meaningful. */
+function ensureTrailingBlankVariable(): void {
+  const last = variables.value[variables.value.length - 1];
+  if (props.canEdit && (last === undefined || !isBlankVariable(last))) {
+    variables.value.push(createBlankVariable());
+  }
+}
+
+/** Publishes the profile count without including presentation-only blank rows. */
+function publishCount(): void {
+  emit(
+    "countChange",
+    variables.value.filter((variable) => !isBlankVariable(variable)).length,
+  );
+}
+
+/** Handles text edits and materializes the next trailing blank variable. */
+function updateVariable(): void {
+  ensureTrailingBlankVariable();
+  publishCount();
 }
 
 /** Removes one variable and publishes the new editor-local row count. */
 function removeVariable(index: number): void {
   variables.value.splice(index, 1);
-  emit("countChange", variables.value.length);
+  ensureTrailingBlankVariable();
+  publishCount();
 }
 
 /** Changes kind only for a new variable because persisted kinds are immutable. */
@@ -80,6 +116,7 @@ function changeKind(variable: DraftVariable, kind: string): void {
   if (variable.kind === "secret") {
     variable.secretTouched = true;
   }
+  updateVariable();
 }
 
 /** Marks a secret field as an intentional replacement, including empty text. */
@@ -87,6 +124,7 @@ function updateSecret(variable: DraftVariable, value: string): void {
   variable.value = value;
   variable.secretTouched = true;
   variable.clearValue = false;
+  updateVariable();
 }
 
 /** Reports whether the redacted stored-value state remains authoritative. */
@@ -96,29 +134,31 @@ function showStoredSecret(variable: DraftVariable): boolean {
 
 /** Converts editor-local rows to write-only variable command values. */
 function writes(): VariableWrite[] {
-  return variables.value.map((variable) => {
-    const common = {
-      ...(variable.variableId === undefined
-        ? {}
-        : { variableId: variable.variableId }),
-      name: variable.name,
-    };
-    switch (variable.kind) {
-      case "value":
-        return { ...common, kind: "value", value: variable.value };
-      case "alias":
-        return { ...common, kind: "alias", target: variable.target };
-      case "unset":
-        return { ...common, kind: "unset" };
-      case "secret":
-        return {
-          ...common,
-          kind: "secret",
-          ...(variable.secretTouched ? { value: variable.value } : {}),
-          ...(variable.clearValue ? { clearValue: true } : {}),
-        };
-    }
-  });
+  return variables.value
+    .filter((variable) => !isBlankVariable(variable))
+    .map((variable) => {
+      const common = {
+        ...(variable.variableId === undefined
+          ? {}
+          : { variableId: variable.variableId }),
+        name: variable.name,
+      };
+      switch (variable.kind) {
+        case "value":
+          return { ...common, kind: "value", value: variable.value };
+        case "alias":
+          return { ...common, kind: "alias", target: variable.target };
+        case "unset":
+          return { ...common, kind: "unset" };
+        case "secret":
+          return {
+            ...common,
+            kind: "secret",
+            ...(variable.secretTouched ? { value: variable.value } : {}),
+            ...(variable.clearValue ? { clearValue: true } : {}),
+          };
+      }
+    });
 }
 
 defineExpose({ writes });
@@ -132,9 +172,6 @@ defineExpose({ writes });
       <span>{{ t("common.fields.valueOrTarget") }}</span>
       <span></span>
     </div>
-    <p v-if="variables.length === 0" class="variable-fields-empty">
-      {{ t("variables.noVariables") }}
-    </p>
     <div
       v-for="(variable, index) in variables"
       :key="variable.variableId ?? index"
@@ -146,10 +183,15 @@ defineExpose({ writes });
         density="compact"
         font="mono"
         :disabled="busy || !canEdit"
-        :placeholder="t('common.fields.name')"
+        :placeholder="
+          isBlankVariable(variable)
+            ? t('environment.addVariable')
+            : t('common.fields.name')
+        "
         :aria-label="t('environment.variableName', { index: index + 1 })"
         autocomplete="off"
         spellcheck="false"
+        @input="updateVariable"
       />
       <div
         class="variable-type-cell"
@@ -179,6 +221,7 @@ defineExpose({ writes });
         :aria-label="t('environment.variableValue', { index: index + 1 })"
         autocomplete="off"
         spellcheck="false"
+        @input="updateVariable"
       />
       <TextInput
         v-else-if="variable.kind === 'alias'"
@@ -191,6 +234,7 @@ defineExpose({ writes });
         :aria-label="t('environment.aliasTarget', { index: index + 1 })"
         autocomplete="off"
         spellcheck="false"
+        @input="updateVariable"
       />
       <div v-else-if="variable.kind === 'secret'" class="secret-editor">
         <span v-if="showStoredSecret(variable)" class="secret-stored-status">
@@ -230,7 +274,7 @@ defineExpose({ writes });
         —
       </span>
       <IconButton
-        v-if="canEdit"
+        v-if="canEdit && !isBlankVariable(variable)"
         class="compact-icon-button"
         size="compact"
         :label="t('environment.removeVariable', { index: index + 1 })"
@@ -240,21 +284,9 @@ defineExpose({ writes });
       >
         <Trash2 :size="16" aria-hidden="true" />
       </IconButton>
-      <span v-else aria-hidden="true"></span>
+      <span v-else class="new-row-marker" aria-hidden="true">
+        <Asterisk :size="16" />
+      </span>
     </div>
-    <ButtonControl
-      v-if="canEdit"
-      class="add-field-button"
-      type="button"
-      variant="ghost"
-      size="compact"
-      :disabled="busy"
-      @click="addVariable"
-    >
-      <template #leading>
-        <Plus :size="15" aria-hidden="true" />
-      </template>
-      {{ t("environment.addVariable") }}
-    </ButtonControl>
   </div>
 </template>

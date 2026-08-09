@@ -8,6 +8,67 @@ import { enUsMessages } from "../src/app/i18n/messages";
 import RequestEditor from "../src/view/presentation/features/RequestEditor.vue";
 
 describe("RequestEditor", () => {
+  it("keeps one trailing blank query and header row out of draft changes", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft: {
+          name: "Trailing rows",
+          method: "GET",
+          targetUrl: "https://example.test",
+          query: [],
+          headers: [],
+          body: "",
+        },
+        execution: null,
+        tabId: "019facab-1eee-765f-bd9f-ac2449151be9",
+        temporary: true,
+        inheritedHeaders: [],
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    const queryName = wrapper.get('input[aria-label="Query name 1"]');
+    expect(queryName.attributes("placeholder")).toBe("Add parameter");
+    expect(
+      wrapper.get(".request-field-row .new-row-marker").element.tagName,
+    ).toBe("SPAN");
+    await queryName.setValue("source");
+    expect(
+      wrapper.get('input[aria-label="Query name 2"]').attributes("placeholder"),
+    ).toBe("Add parameter");
+    expect(wrapper.findAll(".request-field-row .new-row-marker")).toHaveLength(
+      1,
+    );
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      query: [{ name: "source", value: "", enabled: true }],
+      headers: [],
+    });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Headers"))
+      ?.trigger("click");
+    const headerName = wrapper.get('input[aria-label="Header name 1"]');
+    expect(headerName.attributes("placeholder")).toBe("Add header");
+    await headerName.setValue("X-Source");
+    expect(
+      wrapper
+        .get('input[aria-label="Header name 2"]')
+        .attributes("placeholder"),
+    ).toBe("Add header");
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      query: [{ name: "source", value: "", enabled: true }],
+      headers: [{ name: "X-Source", value: "", enabled: true }],
+    });
+  });
+
   it("allows a target URL containing an environment placeholder", async () => {
     vi.useFakeTimers();
     const i18n = createI18n({
@@ -207,12 +268,15 @@ describe("RequestEditor", () => {
     expect(warning.text()).toContain(
       "Variables defined here take precedence over collection, environment, and workspace variables with the same name.",
     );
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text().includes("Add variable"))
-      ?.trigger("click");
+    const variableName = wrapper.get('input[aria-label="Variable name 1"]');
+    expect(variableName.attributes("placeholder")).toBe("Add variable");
+    await variableName.setValue("source");
     expect(variablesTab?.text()).toContain("1");
-    await wrapper.get('input[aria-label="Variable name 1"]').setValue("source");
+    expect(
+      wrapper
+        .get('input[aria-label="Variable name 2"]')
+        .attributes("placeholder"),
+    ).toBe("Add variable");
     await wrapper
       .get('input[aria-label="Variable value 1"]')
       .setValue("request");

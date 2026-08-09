@@ -100,6 +100,14 @@ describe("VariableProfileDialog", () => {
       ).value,
     ).toBe("");
     expect(wrapper.text()).not.toContain("stored-plaintext");
+    expect(
+      wrapper
+        .get('input[aria-label="Variable name 2"]')
+        .attributes("placeholder"),
+    ).toBe("Add variable");
+    expect(
+      wrapper.get(".variable-field-row .new-row-marker").element.tagName,
+    ).toBe("SPAN");
     await wrapper.get('button[type="submit"]').trigger("submit");
     expect(wrapper.emitted("save")).toEqual([
       [

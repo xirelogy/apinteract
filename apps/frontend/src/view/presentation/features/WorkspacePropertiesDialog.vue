@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Plus, Trash2, X } from "@lucide/vue";
+import { Asterisk, Trash2, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -9,6 +9,12 @@ import type {
   VariableWrite,
   WorkspaceView,
 } from "@/model/contracts/backend";
+import {
+  editableRequestFields,
+  ensureTrailingBlankRequestField,
+  isBlankRequestField,
+  meaningfulRequestFields,
+} from "@/model/domain/request-fields";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import FormField from "@/view/presentation/controls/FormField.vue";
@@ -43,29 +49,27 @@ const { t } = useI18n();
 const open = ref(true);
 const activeSection = ref<"headers" | "variables">("headers");
 const name = ref(props.workspace.name);
-const headers = ref<RequestField[]>(props.workspace.headers.map(cloneHeader));
+const headers = ref<RequestField[]>(
+  editableRequestFields(props.workspace.headers, props.canEdit),
+);
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 const canSave = computed(
   () =>
     name.value.trim() !== "" &&
-    headers.value.every(
+    meaningfulRequestFields(headers.value).every(
       (header) => !header.enabled || header.name.trim() !== "",
     ),
 );
 
-/** Copies one contract field into mutable dialog-local state. */
-function cloneHeader(header: RequestField): RequestField {
-  return { ...header };
-}
-
-/** Adds one enabled workspace header ready for keyboard entry. */
-function addHeader(): void {
-  headers.value.push({ name: "", value: "", enabled: true });
-}
-
 /** Removes one workspace header by its visible ordered position. */
 function removeHeader(index: number): void {
   headers.value.splice(index, 1);
+  ensureTrailingBlankRequestField(headers.value);
+}
+
+/** Materializes the next workspace-header row after the trailing row is edited. */
+function updateHeader(): void {
+  ensureTrailingBlankRequestField(headers.value);
 }
 
 /** Requests closure through the shared controlled dialog lifecycle. */
@@ -81,9 +85,7 @@ function save(): void {
   emit(
     "save",
     name.value.trim(),
-    headers.value
-      .filter((header) => header.name !== "" || header.value !== "")
-      .map(cloneHeader),
+    meaningfulRequestFields(headers.value),
     variableEditor.value?.writes() ?? [],
   );
 }
@@ -166,10 +168,16 @@ function save(): void {
                   class="field-cell-input"
                   density="compact"
                   font="mono"
+                  :placeholder="
+                    isBlankRequestField(header)
+                      ? t('collection.addHeader')
+                      : t('common.fields.name')
+                  "
                   :aria-label="t('request.headerName', { index: index + 1 })"
                   autocomplete="off"
                   spellcheck="false"
                   :disabled="busy || !canEdit"
+                  @input="updateHeader"
                 />
                 <TextInput
                   v-model="header.value"
@@ -180,9 +188,10 @@ function save(): void {
                   autocomplete="off"
                   spellcheck="false"
                   :disabled="busy || !canEdit"
+                  @input="updateHeader"
                 />
                 <IconButton
-                  v-if="canEdit"
+                  v-if="canEdit && !isBlankRequestField(header)"
                   size="compact"
                   :label="
                     t('request.removeField', {
@@ -195,21 +204,10 @@ function save(): void {
                 >
                   <Trash2 :size="15" aria-hidden="true" />
                 </IconButton>
+                <span v-else class="new-row-marker" aria-hidden="true">
+                  <Asterisk :size="15" />
+                </span>
               </div>
-              <ButtonControl
-                v-if="canEdit"
-                class="add-field-button"
-                type="button"
-                variant="ghost"
-                size="compact"
-                :disabled="busy"
-                @click="addHeader"
-              >
-                <template #leading>
-                  <Plus :size="15" aria-hidden="true" />
-                </template>
-                {{ t("collection.addHeader") }}
-              </ButtonControl>
             </div>
           </TabsPanel>
           <TabsPanel value="variables" class="collection-properties-section">

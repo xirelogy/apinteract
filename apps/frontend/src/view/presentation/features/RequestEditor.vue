@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Lock, Play, Plus, Save, Trash2 } from "@lucide/vue";
+import { Asterisk, Lock, Play, Save, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -13,6 +13,12 @@ import type {
   VariableWrite,
 } from "@/model/contracts/backend";
 import type { RequestDraftInput } from "@/model/domain/application";
+import {
+  editableRequestFields,
+  ensureTrailingBlankRequestField,
+  isBlankRequestField,
+  meaningfulRequestFields,
+} from "@/model/domain/request-fields";
 import { collectTemplateVariableNames } from "@/model/domain/template-variables";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import InlineWarning from "@/view/presentation/controls/InlineWarning.vue";
@@ -96,8 +102,8 @@ watch(
     name.value = draft?.name ?? "";
     method.value = draft?.method ?? "GET";
     targetUrl.value = draft?.targetUrl ?? "";
-    query.value = cloneFields(draft?.query ?? []);
-    headers.value = cloneFields(draft?.headers ?? []);
+    query.value = editableRequestFields(draft?.query ?? [], true);
+    headers.value = editableRequestFields(draft?.headers ?? [], true);
     body.value = draft?.body ?? "";
   },
   { immediate: true },
@@ -111,6 +117,12 @@ watch(
   { immediate: true },
 );
 const validTarget = computed(() => isValidTargetTemplate(targetUrl.value));
+const queryCount = computed(() => meaningfulRequestFields(query.value).length);
+const headerCount = computed(
+  () =>
+    meaningfulRequestFields(headers.value).length +
+    props.inheritedHeaders.length,
+);
 const referencedVariableNames = computed(() =>
   collectTemplateVariableNames([
     targetUrl.value,
@@ -185,27 +197,11 @@ const draftRevisionLabel = computed(() =>
     : t("request.draft", { revision: props.request?.draftRevision ?? 0 }),
 );
 
-/** Returns mutable field copies without sharing generated contract objects. */
-function cloneFields(fields: readonly RequestField[]): RequestField[] {
-  return fields.map((field) => ({ ...field }));
-}
-
-/** Appends one enabled empty field to the requested structured editor. */
-function addField(kind: "query" | "headers"): void {
-  const fields = kind === "query" ? query : headers;
-  fields.value.push({ name: "", value: "", enabled: true });
-  emitChange();
-}
-
-/** Appends a field to the currently visible structured editor. */
-function addActiveField(): void {
-  addField(activeTab.value === "headers" ? "headers" : "query");
-}
-
 /** Removes one structured field by its stable visible position. */
 function removeField(kind: "query" | "headers", index: number): void {
   const fields = kind === "query" ? query : headers;
   fields.value.splice(index, 1);
+  ensureTrailingBlankRequestField(fields.value);
   emitChange();
 }
 
@@ -214,14 +210,21 @@ function removeActiveField(index: number): void {
   removeField(activeTab.value === "headers" ? "headers" : "query", index);
 }
 
+/** Publishes a field edit and materializes the next trailing blank row. */
+function updateActiveField(): void {
+  const fields = activeTab.value === "headers" ? headers : query;
+  ensureTrailingBlankRequestField(fields.value);
+  emitChange();
+}
+
 /** Builds an immutable draft payload from the current editor controls. */
 function currentDraft(): RequestDraftInput {
   return {
     name: name.value,
     method: method.value,
     targetUrl: targetUrl.value,
-    query: meaningfulFields(query.value),
-    headers: meaningfulFields(headers.value),
+    query: meaningfulRequestFields(query.value),
+    headers: meaningfulRequestFields(headers.value),
     body: body.value,
   };
 }
@@ -232,17 +235,10 @@ function emitChange(): void {
     name: name.value,
     method: method.value,
     targetUrl: targetUrl.value,
-    query: cloneFields(query.value),
-    headers: cloneFields(headers.value),
+    query: meaningfulRequestFields(query.value),
+    headers: meaningfulRequestFields(headers.value),
     body: body.value,
   });
-}
-
-/** Omits untouched placeholder rows while preserving meaningful disabled fields. */
-function meaningfulFields(fields: readonly RequestField[]): RequestField[] {
-  return cloneFields(
-    fields.filter((field) => field.name !== "" || field.value !== ""),
-  );
 }
 
 /** Applies a method selected from the shared option menu. */
@@ -369,10 +365,10 @@ function saveVariables(): void {
             >
               {{ requestTabLabel(tab) }}
               <span v-if="tab === 'query'" class="tab-count">
-                {{ query.length }}
+                {{ queryCount }}
               </span>
               <span v-else-if="tab === 'headers'" class="tab-count">
-                {{ headers.length + inheritedHeaders.length }}
+                {{ headerCount }}
               </span>
               <span
                 v-else-if="tab === 'variables' && requestVariableCount !== null"
@@ -469,11 +465,17 @@ function saveVariables(): void {
                     { index: index + 1 },
                   )
                 "
-                :placeholder="t('common.fields.name')"
+                :placeholder="
+                  isBlankRequestField(field)
+                    ? activeTab === 'query'
+                      ? t('request.addParameter')
+                      : t('request.addHeader')
+                    : t('common.fields.name')
+                "
                 autocomplete="off"
                 spellcheck="false"
                 :disabled="busy"
-                @input="emitChange"
+                @input="updateActiveField"
               />
               <TemplateTextControl
                 v-model="field.value"
@@ -493,9 +495,10 @@ function saveVariables(): void {
                 autocomplete="off"
                 spellcheck="false"
                 :disabled="busy"
-                @input="emitChange"
+                @input="updateActiveField"
               />
               <IconButton
+                v-if="!isBlankRequestField(field)"
                 class="compact-icon-button"
                 size="compact"
                 :label="
@@ -514,23 +517,10 @@ function saveVariables(): void {
               >
                 <Trash2 :size="15" aria-hidden="true" />
               </IconButton>
+              <span v-else class="new-row-marker" aria-hidden="true">
+                <Asterisk :size="15" />
+              </span>
             </div>
-            <ButtonControl
-              class="add-field-button"
-              variant="ghost"
-              size="compact"
-              :disabled="busy"
-              @click="addActiveField"
-            >
-              <template #leading>
-                <Plus :size="15" aria-hidden="true" />
-              </template>
-              {{
-                activeTab === "query"
-                  ? t("request.addParameter")
-                  : t("request.addHeader")
-              }}
-            </ButtonControl>
           </TabsPanel>
 
           <TabsPanel

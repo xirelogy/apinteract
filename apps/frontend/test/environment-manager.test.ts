@@ -234,6 +234,11 @@ describe("EnvironmentManager", () => {
     expect(wrapper.get(".variable-field-heading").text()).toContain(
       "NameTypeValue / Target",
     );
+    expect(
+      wrapper
+        .get('input[aria-label="Variable name 2"]')
+        .attributes("placeholder"),
+    ).toBe("Add variable");
     expect(wrapper.text()).not.toContain("top-secret-token");
     await wrapper.get('button[type="submit"]').trigger("submit");
     expect(wrapper.emitted("save")?.[0]).toEqual([

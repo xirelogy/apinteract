@@ -97,7 +97,6 @@ export const enUsMessages = {
     label: "Environment",
     manage: "Manage environments",
     noValue: "No value",
-    noVariables: "No variables in this environment.",
     none: "No environment",
     preview: {
       aliasTarget: "Alias target: {target}",
@@ -123,7 +122,6 @@ export const enUsMessages = {
   variables: {
     description:
       "Values in this scope override lower-precedence variables with the same name.",
-    noVariables: "No variables in this scope.",
     requestUnavailable: "Save this request before adding request variables.",
     requestDescription:
       "Variables defined here take precedence over collection, environment, and workspace variables with the same name.",

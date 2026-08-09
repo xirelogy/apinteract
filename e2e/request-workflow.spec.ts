@@ -38,9 +38,6 @@ test("creates, restores, and sends the first workspace request", async ({
     workspaceName,
   );
   await workspaceProperties
-    .getByRole("button", { name: "Add common header" })
-    .click();
-  await workspaceProperties
     .getByLabel("Header name 1", { exact: true })
     .fill("X-Workspace");
   await workspaceProperties
@@ -60,23 +57,21 @@ test("creates, restores, and sends the first workspace request", async ({
   }
 
   await page.getByRole("button", { name: "Manage environments" }).click();
+  await page.getByRole("menuitem", { name: "Create new environment" }).click();
   const environmentDialog = page.getByRole("dialog", {
     name: "Create environment",
   });
   await environmentDialog
     .getByLabel("Name", { exact: true })
     .fill(environmentName);
-  await environmentDialog.getByRole("button", { name: "Add variable" }).click();
   await environmentDialog.getByLabel("Variable name 1").fill("base_url");
   await environmentDialog
     .getByLabel("Variable value 1")
     .fill("http://127.0.0.1:8090");
-  await environmentDialog.getByRole("button", { name: "Add variable" }).click();
   await environmentDialog.getByLabel("Variable name 2").fill("source");
   await environmentDialog
     .getByLabel("Variable value 2")
     .fill(`environment-${suffix}`);
-  await environmentDialog.getByRole("button", { name: "Add variable" }).click();
   await environmentDialog.getByLabel("Variable name 3").fill("token");
   await environmentDialog.getByLabel("Variable kind 3").click();
   await page
@@ -112,9 +107,6 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(propertiesDialog.getByLabel("Collection name")).toHaveValue(
     collectionName,
   );
-  await propertiesDialog
-    .getByRole("button", { name: "Add common header" })
-    .click();
   await propertiesDialog
     .getByLabel("Header name 1", { exact: true })
     .fill("X-Inherited");
@@ -177,11 +169,6 @@ test("creates, restores, and sends the first workspace request", async ({
     "http://127.0.0.1:8090",
   );
   await selectMenuOption(page, "HTTP method", "POST");
-  const addParameterButton = page.getByRole("button", {
-    name: "Add parameter",
-  });
-  await expect(addParameterButton).toHaveCSS("white-space", "nowrap");
-  await addParameterButton.click();
   await page.getByLabel("Query name 1").fill("source");
   await page.getByLabel("Query value 1").fill("<<source>>");
   await addRequestQuery(page, 2, "scope", "<<scope_chain>>");
@@ -196,9 +183,6 @@ test("creates, restores, and sends the first workspace request", async ({
     "X-Inherited",
   );
   await expect(page.getByLabel("Inherited header name 2")).toBeDisabled();
-  const addHeaderButton = page.getByRole("button", { name: "Add header" });
-  await expect(addHeaderButton).toHaveCSS("white-space", "nowrap");
-  await addHeaderButton.click();
   await page
     .getByLabel("Header name 1", { exact: true })
     .fill("X-Fixture-Request");
@@ -535,7 +519,6 @@ async function addValueVariable(
   name: string,
   value: string,
 ): Promise<void> {
-  await dialog.getByRole("button", { name: "Add variable" }).click();
   await dialog.getByLabel(`Variable name ${index}`).fill(name);
   await dialog.getByLabel(`Variable value ${index}`).fill(value);
 }
@@ -547,7 +530,6 @@ async function addRequestQuery(
   name: string,
   value: string,
 ): Promise<void> {
-  await page.getByRole("button", { name: "Add parameter" }).click();
   await page.getByLabel(`Query name ${index}`).fill(name);
   await page.getByLabel(`Query value ${index}`).fill(value);
 }

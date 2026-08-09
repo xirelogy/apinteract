@@ -96,8 +96,19 @@ describe("CollectionPropertiesDialog", () => {
     await wrapper
       .get('input[aria-label="Collection name"]')
       .setValue("Renamed examples");
-    await wrapper.get("button.add-field-button").trigger("click");
-    await wrapper.get('input[aria-label="Header name 1"]').setValue("X-Team");
+    const collectionHeader = wrapper.get('input[aria-label="Header name 1"]');
+    expect(collectionHeader.attributes("placeholder")).toBe(
+      "Add common header",
+    );
+    expect(
+      wrapper.get(".request-field-row .new-row-marker").element.tagName,
+    ).toBe("SPAN");
+    await collectionHeader.setValue("X-Team");
+    expect(
+      wrapper
+        .get('input[aria-label="Header name 2"]')
+        .attributes("placeholder"),
+    ).toBe("Add common header");
     await wrapper
       .get('input[aria-label="Header value 1"]')
       .setValue("platform");
@@ -119,13 +130,16 @@ describe("CollectionPropertiesDialog", () => {
         )
         ?.attributes("hidden"),
     ).toBeDefined();
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text().includes("Add variable"))
-      ?.trigger("click");
-    await wrapper
-      .get('input[aria-label="Variable name 1"]')
-      .setValue("base_url");
+    const collectionVariable = wrapper.get(
+      'input[aria-label="Variable name 1"]',
+    );
+    expect(collectionVariable.attributes("placeholder")).toBe("Add variable");
+    await collectionVariable.setValue("base_url");
+    expect(
+      wrapper
+        .get('input[aria-label="Variable name 2"]')
+        .attributes("placeholder"),
+    ).toBe("Add variable");
     await wrapper
       .get('input[aria-label="Variable value 1"]')
       .setValue("https://collection.test");
@@ -181,10 +195,9 @@ describe("WorkspacePropertiesDialog", () => {
     });
 
     expect(wrapper.find(".resource-dialog-context").exists()).toBe(false);
-    await wrapper.get("button.add-field-button").trigger("click");
-    await wrapper
-      .get('input[aria-label="Header name 1"]')
-      .setValue("X-Workspace");
+    const workspaceHeader = wrapper.get('input[aria-label="Header name 1"]');
+    expect(workspaceHeader.attributes("placeholder")).toBe("Add common header");
+    await workspaceHeader.setValue("X-Workspace");
     await wrapper
       .get('input[aria-label="Header value 1"]')
       .setValue("platform");
@@ -192,11 +205,11 @@ describe("WorkspacePropertiesDialog", () => {
       .findAll('[role="tab"]')
       .find((tab) => tab.text().includes("Variables"))
       ?.trigger("click");
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text().includes("Add variable"))
-      ?.trigger("click");
-    await wrapper.get('input[aria-label="Variable name 1"]').setValue("team");
+    const workspaceVariable = wrapper.get(
+      'input[aria-label="Variable name 1"]',
+    );
+    expect(workspaceVariable.attributes("placeholder")).toBe("Add variable");
+    await workspaceVariable.setValue("team");
     await wrapper
       .get('input[aria-label="Variable value 1"]')
       .setValue("platform");
