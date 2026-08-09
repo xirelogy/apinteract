@@ -79,6 +79,11 @@ const ordinaryDisplayValue = computed(() =>
     ? t("environment.preview.emptyValue")
     : (activePreview.value?.value ?? ""),
 );
+const activeDiagnostic = computed(() =>
+  activePreview.value === null
+    ? null
+    : localizedDiagnostic(activePreview.value),
+);
 const wrapperClass = computed(() =>
   typeof attrs.class === "string" ? attrs.class : undefined,
 );
@@ -256,6 +261,20 @@ function kindLabel(kind: VariablePreview["declaredKind"]): string {
 function scopeLabel(scope: VariableScope): string {
   return t(`variables.scope.${scope}`);
 }
+
+/** Converts backend resolution state into locale-owned presentation text. */
+function localizedDiagnostic(preview: VariablePreview): string | null {
+  switch (preview.status) {
+    case "resolved":
+      return null;
+    case "missing":
+      return t("environment.preview.missingVariable", { name: preview.name });
+    case "unset":
+      return t("environment.preview.unsetVariable", { name: preview.name });
+    case "error":
+      return t("environment.preview.resolutionError", { name: preview.name });
+  }
+}
 </script>
 
 <template>
@@ -367,12 +386,12 @@ function scopeLabel(scope: VariableScope): string {
           }}
         </span>
         <span
-          v-if="activePreview.diagnostic"
+          v-if="activeDiagnostic"
           :class="{
             'variable-preview-error': activePreview.status !== 'resolved',
           }"
         >
-          {{ activePreview.diagnostic }}
+          {{ activeDiagnostic }}
         </span>
       </template>
       <span v-else>{{ t("environment.preview.checking") }}</span>

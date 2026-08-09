@@ -5,6 +5,7 @@ import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
+import { officialTranslationPacks } from "../src/app/i18n/official-locales";
 import {
   collectTemplateVariableNames,
   parseTemplateSegments,
@@ -91,5 +92,44 @@ describe("template variable editing", () => {
       "Secret value stored · version 7",
     );
     expect(wrapper.html()).not.toContain("top-secret-token");
+  });
+
+  it("localizes backend variable diagnostics at the presentation boundary", async () => {
+    const zhHans = officialTranslationPacks.find(
+      (pack) => pack.locale === "zh-Hans",
+    );
+    expect(zhHans).toBeDefined();
+    const i18n = createI18n({
+      legacy: false,
+      locale: "zh-Hans",
+      messages: { "zh-Hans": zhHans?.messages ?? enUsMessages },
+    });
+    const wrapper = mount(TemplateTextControl, {
+      props: {
+        modelValue: "<<missing_token>>",
+        previews: [
+          {
+            name: "missing_token",
+            status: "missing",
+            declaredKind: null,
+            effectiveKind: null,
+            aliasTarget: null,
+            value: null,
+            secretVersion: null,
+            diagnostic: "Variable missing_token is missing",
+            source: null,
+          },
+        ],
+      },
+      global: { plugins: [i18n] },
+    });
+
+    const input = wrapper.get<HTMLInputElement>("input");
+    input.element.setSelectionRange(3, 3);
+    await input.trigger("focus");
+    await input.trigger("keyup");
+    const tooltip = wrapper.get('[role="tooltip"]');
+    expect(tooltip.text()).toContain("变量 missing_token 不存在");
+    expect(tooltip.text()).not.toContain("Variable missing_token is missing");
   });
 });
