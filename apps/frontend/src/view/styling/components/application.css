@@ -253,11 +253,9 @@
   width: min(52rem, calc(100vi - var(--space-6)));
 }
 
-.secret-editor {
-  display: flex;
+.secret-input-shell {
+  position: relative;
   min-width: 0;
-  align-items: center;
-  gap: var(--space-2);
 }
 
 .resource-dialog-section-title {
@@ -292,20 +290,39 @@
   width: 100%;
 }
 
-.secret-editor .text-input-control {
-  min-width: 0;
-  flex: 1 1 auto;
+.secret-input-shell .secret-input {
+  padding-inline-end: calc(var(--control-height-compact) + var(--space-1));
 }
 
-.secret-stored-status {
-  flex: 0 0 auto;
-  padding: 0 var(--space-2);
+.secret-input-shell[data-secret-state="stored"] .secret-input {
+  padding-inline-start: calc(var(--control-height-compact) + var(--space-1));
+}
+
+.secret-input-shell[data-secret-state="pending-clear"] .secret-input {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border-subtle));
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface-primary));
+}
+
+.secret-input-lock,
+.secret-input-action {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.secret-input-lock {
+  inset-inline-start: var(--space-2);
   color: var(--text-secondary);
-  font-size: var(--font-size-2xs);
-  line-height: var(--control-height-compact);
-  border-radius: var(--radius-small);
-  background: var(--surface-secondary);
-  white-space: nowrap;
+  pointer-events: none;
+}
+
+.secret-input-action {
+  inset-inline-end: 0;
+}
+
+.secret-input-shell[data-secret-state="pending-clear"] .secret-input-action {
+  color: var(--warning);
 }
 
 .variable-field-empty-value {
@@ -343,10 +360,6 @@
   .variable-field-row > :nth-child(4) {
     grid-row: 1;
     grid-column: 2;
-  }
-
-  .secret-editor {
-    flex-wrap: wrap;
   }
 }
 

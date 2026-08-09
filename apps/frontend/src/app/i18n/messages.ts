@@ -81,13 +81,16 @@ export const enUsMessages = {
   environment: {
     addVariable: "Add variable",
     aliasTarget: "Alias target {index}",
-    clearSecret: "Clear stored value",
+    clearStoredSecret: "Clear stored secret",
     create: "Create environment",
     createNew: "Create new environment",
     deleteConfirmation:
       "Delete {name}? Any session using it will switch to no environment.",
     edit: "Edit environment",
     editNamed: "Edit {name}",
+    discardSecretReplacement: "Discard replacement",
+    enterSecretValue: "Enter secret value",
+    keepStoredSecret: "Keep stored secret",
     kind: {
       alias: "Alias",
       secret: "Secret",
@@ -110,10 +113,19 @@ export const enUsMessages = {
     },
     removeVariable: "Remove variable {index}",
     removeVariableTitle: "Remove variable",
-    replaceSecret: "Enter a replacement value",
+    secretClearPendingPlaceholder: "Secret will be cleared on save",
+    secretState: {
+      empty: "No secret is stored. Enter a value to set one.",
+      "pending-clear":
+        "The stored secret will be cleared when you save. You can undo this action or enter a replacement.",
+      replacement:
+        "A replacement secret has been entered and will be stored when you save.",
+      stored:
+        "A secret is stored. Its value is hidden. Entering text will replace it when you save.",
+    },
+    secretStoredPlaceholder: "Secret stored — type to replace",
     secretValue: "Secret value {index}",
     select: "Select environment",
-    valueStored: "Value stored",
     variableKind: "Variable kind {index}",
     variableName: "Variable name {index}",
     variableValue: "Variable value {index}",

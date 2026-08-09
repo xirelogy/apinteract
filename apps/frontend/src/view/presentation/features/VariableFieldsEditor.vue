@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { Asterisk, Trash2 } from "@lucide/vue";
+import { computed, ref, useId } from "vue";
+import { Asterisk, CircleX, LockKeyhole, RotateCcw, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
   VariableProfileView,
   VariableWrite,
 } from "@/model/contracts/backend";
-import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
@@ -23,6 +22,8 @@ interface DraftVariable {
   clearValue: boolean;
 }
 
+type SecretInputState = "empty" | "stored" | "replacement" | "pending-clear";
+
 const props = defineProps<{
   profileVariables: VariableProfileView["variables"];
   canEdit: boolean;
@@ -32,6 +33,7 @@ const emit = defineEmits<{
   countChange: [count: number];
 }>();
 const { t } = useI18n();
+const secretDescriptionIdPrefix = useId();
 const variables = ref<DraftVariable[]>([
   ...props.profileVariables.map((variable) => ({
     variableId: variable.variableId,
@@ -113,23 +115,73 @@ function changeKind(variable: DraftVariable, kind: string): void {
     return;
   }
   variable.kind = kind as DraftVariable["kind"];
-  if (variable.kind === "secret") {
-    variable.secretTouched = true;
-  }
   updateVariable();
 }
 
-/** Marks a secret field as an intentional replacement, including empty text. */
+/** Marks non-empty secret text as a replacement and restores an empty stored secret. */
 function updateSecret(variable: DraftVariable, value: string): void {
   variable.value = value;
-  variable.secretTouched = true;
+  variable.secretTouched = value !== "";
   variable.clearValue = false;
   updateVariable();
 }
 
-/** Reports whether the redacted stored-value state remains authoritative. */
-function showStoredSecret(variable: DraftVariable): boolean {
-  return variable.hasValue && !variable.secretTouched && !variable.clearValue;
+/** Reports the visual and save-pending state of a secret field. */
+function secretState(variable: DraftVariable): SecretInputState {
+  if (variable.clearValue) {
+    return "pending-clear";
+  }
+  if (variable.secretTouched && variable.value !== "") {
+    return "replacement";
+  }
+  return variable.hasValue ? "stored" : "empty";
+}
+
+/** Returns input guidance appropriate to the current redacted secret state. */
+function secretPlaceholder(variable: DraftVariable): string {
+  switch (secretState(variable)) {
+    case "stored":
+      return t("environment.secretStoredPlaceholder");
+    case "pending-clear":
+      return t("environment.secretClearPendingPlaceholder");
+    case "empty":
+    case "replacement":
+      return t("environment.enterSecretValue");
+  }
+}
+
+/** Returns assistive text that states the secret lifecycle without relying on visuals. */
+function secretDescription(variable: DraftVariable): string {
+  return t(`environment.secretState.${secretState(variable)}`);
+}
+
+/** Creates a component-local description identifier for one secret row. */
+function secretDescriptionId(index: number): string {
+  return `${secretDescriptionIdPrefix}-secret-${index}`;
+}
+
+/** Marks the stored secret for removal when the profile is next saved. */
+function clearSecret(variable: DraftVariable): void {
+  variable.value = "";
+  variable.secretTouched = false;
+  variable.clearValue = true;
+  updateVariable();
+}
+
+/** Discards an entered replacement and returns to the prior stored-value state. */
+function discardSecretReplacement(variable: DraftVariable): void {
+  variable.value = "";
+  variable.secretTouched = false;
+  variable.clearValue = false;
+  updateVariable();
+}
+
+/** Cancels a pending clear while retaining the server-held secret. */
+function restoreStoredSecret(variable: DraftVariable): void {
+  variable.value = "";
+  variable.secretTouched = false;
+  variable.clearValue = false;
+  updateVariable();
 }
 
 /** Converts editor-local rows to write-only variable command values. */
@@ -236,35 +288,63 @@ defineExpose({ writes });
         spellcheck="false"
         @input="updateVariable"
       />
-      <div v-else-if="variable.kind === 'secret'" class="secret-editor">
-        <span v-if="showStoredSecret(variable)" class="secret-stored-status">
-          {{ t("environment.valueStored") }}
-        </span>
+      <div
+        v-else-if="variable.kind === 'secret'"
+        class="secret-input-shell"
+        :data-secret-state="secretState(variable)"
+      >
+        <LockKeyhole
+          v-if="secretState(variable) === 'stored'"
+          class="secret-input-lock"
+          :size="15"
+          aria-hidden="true"
+        />
         <TextInput
           :model-value="variable.value"
+          class="secret-input"
           density="compact"
           font="mono"
           type="password"
           :disabled="busy || !canEdit"
           autocomplete="new-password"
-          :placeholder="variable.hasValue ? t('environment.replaceSecret') : ''"
+          :placeholder="secretPlaceholder(variable)"
           :aria-label="t('environment.secretValue', { index: index + 1 })"
+          :aria-describedby="secretDescriptionId(index)"
           @update:model-value="updateSecret(variable, $event)"
         />
-        <ButtonControl
-          v-if="variable.hasValue && canEdit"
-          type="button"
-          variant="ghost"
+        <IconButton
+          v-if="secretState(variable) === 'stored' && canEdit"
+          class="secret-input-action"
           size="compact"
+          :label="t('environment.clearStoredSecret')"
           :disabled="busy"
-          @click="
-            variable.clearValue = true;
-            variable.secretTouched = false;
-            variable.value = '';
-          "
+          @click="clearSecret(variable)"
         >
-          {{ t("environment.clearSecret") }}
-        </ButtonControl>
+          <CircleX :size="16" aria-hidden="true" />
+        </IconButton>
+        <IconButton
+          v-else-if="secretState(variable) === 'replacement' && canEdit"
+          class="secret-input-action"
+          size="compact"
+          :label="t('environment.discardSecretReplacement')"
+          :disabled="busy"
+          @click="discardSecretReplacement(variable)"
+        >
+          <CircleX :size="16" aria-hidden="true" />
+        </IconButton>
+        <IconButton
+          v-else-if="secretState(variable) === 'pending-clear' && canEdit"
+          class="secret-input-action"
+          size="compact"
+          :label="t('environment.keepStoredSecret')"
+          :disabled="busy"
+          @click="restoreStoredSecret(variable)"
+        >
+          <RotateCcw :size="16" aria-hidden="true" />
+        </IconButton>
+        <span :id="secretDescriptionId(index)" class="visually-hidden">
+          {{ secretDescription(variable) }}
+        </span>
       </div>
       <span
         v-else

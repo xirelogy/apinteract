@@ -5,6 +5,7 @@ import { mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
+import VariableFieldsEditor from "../src/view/presentation/features/VariableFieldsEditor.vue";
 import VariableProfileDialog from "../src/view/presentation/features/VariableProfileDialog.vue";
 
 let showModalDescriptor: PropertyDescriptor | undefined;
@@ -59,7 +60,42 @@ afterEach(() => {
 });
 
 describe("VariableProfileDialog", () => {
-  it("preserves redacted secrets and prevents persisted kind changes", async () => {
+  it("presents a secret without a stored value as an empty protected field", () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(VariableFieldsEditor, {
+      attachTo: document.body,
+      props: {
+        profileVariables: [
+          {
+            variableId: "019facab-1eee-765f-bd9f-ac2449151be3",
+            name: "optional-token",
+            kind: "secret",
+            hasValue: false,
+            secretVersion: 0,
+          },
+        ],
+        canEdit: true,
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    const shell = wrapper.get('.secret-input-shell[data-secret-state="empty"]');
+    const secretInput = shell.get('input[aria-label="Secret value 1"]');
+    const descriptionId = secretInput.attributes("aria-describedby");
+    expect(secretInput.attributes("placeholder")).toBe("Enter secret value");
+    expect(shell.find("button").exists()).toBe(false);
+    expect(document.getElementById(descriptionId ?? "")?.textContent).toContain(
+      "No secret is stored.",
+    );
+    wrapper.unmount();
+  });
+
+  it("edits stored secrets without exposing their existing value", async () => {
     const i18n = createI18n({
       legacy: false,
       locale: "en-US",
@@ -93,12 +129,24 @@ describe("VariableProfileDialog", () => {
     expect(
       wrapper.get('button[aria-label="Variable kind 1"]').attributes(),
     ).toHaveProperty("disabled");
+    const secretInput = wrapper.get('input[aria-label="Secret value 1"]');
+    expect((secretInput.element as HTMLInputElement).value).toBe("");
+    expect(secretInput.attributes("type")).toBe("password");
+    expect(secretInput.attributes("placeholder")).toBe(
+      "Secret stored — type to replace",
+    );
+    expect(secretInput.attributes("aria-describedby")).toBeTruthy();
     expect(
-      (
-        wrapper.get('input[aria-label="Secret value 1"]')
-          .element as HTMLInputElement
-      ).value,
-    ).toBe("");
+      wrapper.get('.secret-input-shell[data-secret-state="stored"]').element,
+    ).toBeInstanceOf(HTMLElement);
+    expect(wrapper.get(".secret-input-lock").element).toBeInstanceOf(
+      SVGElement,
+    );
+    expect(
+      wrapper
+        .get('button[aria-label="Clear stored secret"]')
+        .element.closest(".secret-input-shell"),
+    ).not.toBeNull();
     expect(wrapper.text()).not.toContain("stored-plaintext");
     expect(
       wrapper
@@ -118,6 +166,79 @@ describe("VariableProfileDialog", () => {
             kind: "secret",
           },
         ],
+      ],
+    ]);
+
+    await wrapper
+      .get('button[aria-label="Clear stored secret"]')
+      .trigger("click");
+    expect(
+      wrapper.get('.secret-input-shell[data-secret-state="pending-clear"]')
+        .element,
+    ).toBeInstanceOf(HTMLElement);
+    expect(secretInput.attributes("placeholder")).toBe(
+      "Secret will be cleared on save",
+    );
+    expect(wrapper.text()).toContain(
+      "The stored secret will be cleared when you save.",
+    );
+    await wrapper.get('button[type="submit"]').trigger("submit");
+    expect(wrapper.emitted("save")?.at(-1)).toEqual([
+      [
+        {
+          variableId: "019facab-1eee-765f-bd9f-ac2449151be2",
+          name: "token",
+          kind: "secret",
+          clearValue: true,
+        },
+      ],
+    ]);
+
+    await wrapper
+      .get('button[aria-label="Keep stored secret"]')
+      .trigger("click");
+    expect(
+      wrapper.get('.secret-input-shell[data-secret-state="stored"]').element,
+    ).toBeInstanceOf(HTMLElement);
+
+    await secretInput.setValue("replacement-secret");
+    expect(
+      wrapper.get('.secret-input-shell[data-secret-state="replacement"]')
+        .element,
+    ).toBeInstanceOf(HTMLElement);
+    await wrapper.get('button[type="submit"]').trigger("submit");
+    expect(wrapper.emitted("save")?.at(-1)).toEqual([
+      [
+        {
+          variableId: "019facab-1eee-765f-bd9f-ac2449151be2",
+          name: "token",
+          kind: "secret",
+          value: "replacement-secret",
+        },
+      ],
+    ]);
+
+    await wrapper
+      .get('button[aria-label="Discard replacement"]')
+      .trigger("click");
+    expect((secretInput.element as HTMLInputElement).value).toBe("");
+    expect(
+      wrapper.get('.secret-input-shell[data-secret-state="stored"]').element,
+    ).toBeInstanceOf(HTMLElement);
+
+    await secretInput.setValue("another-replacement");
+    await secretInput.setValue("");
+    expect(
+      wrapper.get('.secret-input-shell[data-secret-state="stored"]').element,
+    ).toBeInstanceOf(HTMLElement);
+    await wrapper.get('button[type="submit"]').trigger("submit");
+    expect(wrapper.emitted("save")?.at(-1)).toEqual([
+      [
+        {
+          variableId: "019facab-1eee-765f-bd9f-ac2449151be2",
+          name: "token",
+          kind: "secret",
+        },
       ],
     ]);
     wrapper.unmount();
