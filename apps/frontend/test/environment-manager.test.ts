@@ -144,6 +144,12 @@ describe("EnvironmentManager", () => {
         .get('button[aria-label="Variable kind 1"]')
         .attributes("disabled"),
     ).toBeDefined();
+    expect(wrapper.get(".variable-type-cell[title]").attributes("title")).toBe(
+      "Variable type cannot be changed after saving to prevent secret disclosure.",
+    );
+    expect(wrapper.get(".variable-field-heading").text()).toContain(
+      "NameTypeValue / Target",
+    );
     expect(wrapper.text()).not.toContain("top-secret-token");
     await wrapper.get('button[type="submit"]').trigger("submit");
     expect(wrapper.emitted("save")?.[0]).toEqual([

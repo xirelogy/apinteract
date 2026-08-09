@@ -11,7 +11,10 @@ export const enUsMessages = {
     },
     fields: {
       name: "Name",
+      target: "Target",
+      type: "Type",
       value: "Value",
+      valueOrTarget: "Value / Target",
     },
     language: {
       label: "Language",
@@ -91,6 +94,7 @@ export const enUsMessages = {
     },
     label: "Environment",
     manage: "Manage environments",
+    noValue: "No value",
     noVariables: "No variables in this environment.",
     none: "No environment",
     preview: {
@@ -104,6 +108,7 @@ export const enUsMessages = {
       unknownKind: "Unknown variable",
     },
     removeVariable: "Remove variable {index}",
+    removeVariableTitle: "Remove variable",
     replaceSecret: "Enter a replacement value",
     secretValue: "Secret value {index}",
     select: "Select environment",
@@ -119,10 +124,13 @@ export const enUsMessages = {
     noVariables: "No variables in this scope.",
     requestUnavailable: "Save this request before adding request variables.",
     requestDescription:
-      "These persisted variables override collection, environment, and workspace variables for this request.",
+      "Variables defined here take precedence over collection, environment, and workspace variables with the same name.",
+    requestWarningTitle: "Request-level override",
     loading: "Loading request variables…",
     saveRequest: "Save request variables",
     title: "Variables for {name}",
+    typeLocked:
+      "Variable type cannot be changed after saving to prevent secret disclosure.",
     scope: {
       collection: "Collection",
       environment: "Environment",

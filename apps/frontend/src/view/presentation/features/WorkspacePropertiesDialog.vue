@@ -111,9 +111,6 @@ function save(): void {
         </IconButton>
       </header>
       <form class="resource-dialog-form" @submit.prevent="save">
-        <p class="resource-dialog-context">
-          {{ t("workspace.propertiesDescription") }}
-        </p>
         <FormField
           v-slot="{ controlId, describedBy, invalid }"
           :label="t('workspace.name')"
@@ -141,9 +138,6 @@ function save(): void {
             </TabsTrigger>
           </TabsList>
           <TabsPanel value="headers" class="collection-properties-section">
-            <p class="resource-dialog-context">
-              {{ t("workspace.headersDescription") }}
-            </p>
             <div class="collection-header-fields">
               <div class="request-field-heading" aria-hidden="true">
                 <span></span>

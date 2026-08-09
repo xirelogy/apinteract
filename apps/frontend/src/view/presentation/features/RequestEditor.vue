@@ -15,6 +15,7 @@ import type {
 import type { RequestDraftInput } from "@/model/domain/application";
 import { collectTemplateVariableNames } from "@/model/domain/template-variables";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
+import InlineWarning from "@/view/presentation/controls/InlineWarning.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
@@ -86,6 +87,7 @@ const headers = ref<RequestField[]>([]);
 const body = ref("");
 const activeTab = ref<"query" | "headers" | "body" | "variables">("query");
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
+const requestVariableCount = ref<number | null>(null);
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
 
 watch(
@@ -97,6 +99,14 @@ watch(
     query.value = cloneFields(draft?.query ?? []);
     headers.value = cloneFields(draft?.headers ?? []);
     body.value = draft?.body ?? "";
+  },
+  { immediate: true },
+);
+
+watch(
+  () => props.requestVariableProfile,
+  (profile) => {
+    requestVariableCount.value = profile?.variables.length ?? null;
   },
   { immediate: true },
 );
@@ -358,15 +368,17 @@ function saveVariables(): void {
               :value="tab"
             >
               {{ requestTabLabel(tab) }}
+              <span v-if="tab === 'query'" class="tab-count">
+                {{ query.length }}
+              </span>
+              <span v-else-if="tab === 'headers'" class="tab-count">
+                {{ headers.length + inheritedHeaders.length }}
+              </span>
               <span
-                v-if="tab === 'query' || tab === 'headers'"
+                v-else-if="tab === 'variables' && requestVariableCount !== null"
                 class="tab-count"
               >
-                {{
-                  tab === "query"
-                    ? query.length
-                    : headers.length + inheritedHeaders.length
-                }}
+                {{ requestVariableCount }}
               </span>
             </TabsTrigger>
           </TabsList>
@@ -556,15 +568,16 @@ function saveVariables(): void {
               {{ t("variables.loading") }}
             </p>
             <template v-else>
-              <p class="resource-dialog-context">
+              <InlineWarning :title="t('variables.requestWarningTitle')">
                 {{ t("variables.requestDescription") }}
-              </p>
+              </InlineWarning>
               <VariableFieldsEditor
                 :key="`${requestVariableProfile.scopeId}:${requestVariableProfile.revision}`"
                 ref="variableEditor"
                 :profile-variables="requestVariableProfile.variables"
                 :can-edit="canEdit"
                 :busy="busy"
+                @count-change="requestVariableCount = $event"
               />
               <div v-if="canEdit" class="request-variable-actions">
                 <ButtonControl

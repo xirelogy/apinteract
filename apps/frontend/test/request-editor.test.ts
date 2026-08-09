@@ -198,10 +198,20 @@ describe("RequestEditor", () => {
         variables: [],
       },
     });
+    const variablesTab = wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().includes("Variables"));
+    expect(variablesTab?.text()).toContain("0");
+    const warning = wrapper.get('.inline-warning[role="alert"]');
+    expect(warning.text()).toContain("Request-level override");
+    expect(warning.text()).toContain(
+      "Variables defined here take precedence over collection, environment, and workspace variables with the same name.",
+    );
     await wrapper
       .findAll("button")
       .find((button) => button.text().includes("Add variable"))
       ?.trigger("click");
+    expect(variablesTab?.text()).toContain("1");
     await wrapper.get('input[aria-label="Variable name 1"]').setValue("source");
     await wrapper
       .get('input[aria-label="Variable value 1"]')

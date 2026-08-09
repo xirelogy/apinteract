@@ -92,6 +92,7 @@ describe("CollectionPropertiesDialog", () => {
       global: { plugins: [i18n] },
     });
 
+    expect(wrapper.find(".resource-dialog-context").exists()).toBe(false);
     await wrapper
       .get('input[aria-label="Collection name"]')
       .setValue("Renamed examples");
@@ -179,6 +180,7 @@ describe("WorkspacePropertiesDialog", () => {
       global: { plugins: [i18n] },
     });
 
+    expect(wrapper.find(".resource-dialog-context").exists()).toBe(false);
     await wrapper.get("button.add-field-button").trigger("click");
     await wrapper
       .get('input[aria-label="Header name 1"]')

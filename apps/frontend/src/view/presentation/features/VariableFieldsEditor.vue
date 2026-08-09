@@ -28,6 +28,9 @@ const props = defineProps<{
   canEdit: boolean;
   busy: boolean;
 }>();
+const emit = defineEmits<{
+  countChange: [count: number];
+}>();
 const { t } = useI18n();
 const variables = ref<DraftVariable[]>(
   props.profileVariables.map((variable) => ({
@@ -59,6 +62,13 @@ function addVariable(): void {
     secretTouched: false,
     clearValue: false,
   });
+  emit("countChange", variables.value.length);
+}
+
+/** Removes one variable and publishes the new editor-local row count. */
+function removeVariable(index: number): void {
+  variables.value.splice(index, 1);
+  emit("countChange", variables.value.length);
 }
 
 /** Changes kind only for a new variable because persisted kinds are immutable. */
@@ -116,59 +126,80 @@ defineExpose({ writes });
 
 <template>
   <div class="variable-fields-editor">
-    <div class="environment-variable-heading">
-      <h3>{{ t("environment.variables") }}</h3>
-      <ButtonControl
-        v-if="canEdit"
-        type="button"
-        variant="secondary"
-        size="compact"
-        :disabled="busy"
-        @click="addVariable"
-      >
-        <Plus :size="15" aria-hidden="true" />
-        {{ t("environment.addVariable") }}
-      </ButtonControl>
+    <div class="variable-field-heading" aria-hidden="true">
+      <span>{{ t("common.fields.name") }}</span>
+      <span>{{ t("common.fields.type") }}</span>
+      <span>{{ t("common.fields.valueOrTarget") }}</span>
+      <span></span>
     </div>
-    <div v-if="variables.length === 0" class="empty-state">
+    <p v-if="variables.length === 0" class="variable-fields-empty">
       {{ t("variables.noVariables") }}
-    </div>
+    </p>
     <div
       v-for="(variable, index) in variables"
       :key="variable.variableId ?? index"
-      class="environment-variable-row"
+      class="variable-field-row"
     >
       <TextInput
         v-model="variable.name"
-        :disabled="busy || !canEdit"
-        :aria-label="t('environment.variableName', { index: index + 1 })"
-      />
-      <SelectMenu
-        :model-value="variable.kind"
-        :options="kindOptions"
-        :label="t('environment.variableKind', { index: index + 1 })"
+        class="field-cell-input"
         density="compact"
-        :disabled="busy || !canEdit || variable.variableId !== undefined"
-        @update:model-value="changeKind(variable, $event)"
+        font="mono"
+        :disabled="busy || !canEdit"
+        :placeholder="t('common.fields.name')"
+        :aria-label="t('environment.variableName', { index: index + 1 })"
+        autocomplete="off"
+        spellcheck="false"
       />
+      <div
+        class="variable-type-cell"
+        :title="
+          variable.variableId === undefined
+            ? undefined
+            : t('variables.typeLocked')
+        "
+      >
+        <SelectMenu
+          :model-value="variable.kind"
+          :options="kindOptions"
+          :label="t('environment.variableKind', { index: index + 1 })"
+          density="compact"
+          :disabled="busy || !canEdit || variable.variableId !== undefined"
+          @update:model-value="changeKind(variable, $event)"
+        />
+      </div>
       <TextInput
         v-if="variable.kind === 'value'"
         v-model="variable.value"
+        class="field-cell-input"
+        density="compact"
+        font="mono"
         :disabled="busy || !canEdit"
+        :placeholder="t('common.fields.value')"
         :aria-label="t('environment.variableValue', { index: index + 1 })"
+        autocomplete="off"
+        spellcheck="false"
       />
       <TextInput
         v-else-if="variable.kind === 'alias'"
         v-model="variable.target"
+        class="field-cell-input"
+        density="compact"
+        font="mono"
         :disabled="busy || !canEdit"
+        :placeholder="t('common.fields.target')"
         :aria-label="t('environment.aliasTarget', { index: index + 1 })"
+        autocomplete="off"
+        spellcheck="false"
       />
       <div v-else-if="variable.kind === 'secret'" class="secret-editor">
-        <span v-if="showStoredSecret(variable)">
+        <span v-if="showStoredSecret(variable)" class="secret-stored-status">
           {{ t("environment.valueStored") }}
         </span>
         <TextInput
           :model-value="variable.value"
+          density="compact"
+          font="mono"
           type="password"
           :disabled="busy || !canEdit"
           autocomplete="new-password"
@@ -193,17 +224,37 @@ defineExpose({ writes });
       </div>
       <span
         v-else
-        class="environment-variable-empty-value"
-        aria-hidden="true"
-      ></span>
+        class="variable-field-empty-value"
+        :aria-label="t('environment.noValue')"
+      >
+        —
+      </span>
       <IconButton
         v-if="canEdit"
+        class="compact-icon-button"
+        size="compact"
         :label="t('environment.removeVariable', { index: index + 1 })"
+        :title="t('environment.removeVariableTitle')"
         :disabled="busy"
-        @click="variables.splice(index, 1)"
+        @click="removeVariable(index)"
       >
         <Trash2 :size="16" aria-hidden="true" />
       </IconButton>
+      <span v-else aria-hidden="true"></span>
     </div>
+    <ButtonControl
+      v-if="canEdit"
+      class="add-field-button"
+      type="button"
+      variant="ghost"
+      size="compact"
+      :disabled="busy"
+      @click="addVariable"
+    >
+      <template #leading>
+        <Plus :size="15" aria-hidden="true" />
+      </template>
+      {{ t("environment.addVariable") }}
+    </ButtonControl>
   </div>
 </template>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Plus, Settings, Trash2 } from "@lucide/vue";
+import { Settings } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -13,16 +13,10 @@ import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
 import DialogControl from "@/view/presentation/controls/dialog/DialogControl.vue";
+import VariableFieldsEditor from "./VariableFieldsEditor.vue";
 
-interface DraftVariable {
-  readonly variableId?: string;
-  name: string;
-  kind: "value" | "secret" | "alias" | "unset";
-  value: string;
-  target: string;
-  hasValue: boolean;
-  secretTouched: boolean;
-  clearValue: boolean;
+interface VariableFieldsEditorApi {
+  writes(): EnvironmentVariableWrite[];
 }
 
 const props = defineProps<{
@@ -47,8 +41,14 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const open = ref(false);
 const name = ref("");
-const variables = ref<DraftVariable[]>([]);
 const editingId = ref<string | null>(null);
+const variableEditor = ref<VariableFieldsEditorApi | null>(null);
+const variableEditorKey = ref(0);
+const editorReady = computed(
+  () =>
+    editingId.value === null ||
+    props.environment?.environmentId === editingId.value,
+);
 const options = computed(() => [
   { value: "", label: t("environment.none") },
   ...props.environments.map((environment) => ({
@@ -56,13 +56,6 @@ const options = computed(() => [
     label: environment.name,
   })),
 ]);
-const kindOptions = computed(() => [
-  { value: "value", label: t("environment.kind.value") },
-  { value: "secret", label: t("environment.kind.secret") },
-  { value: "alias", label: t("environment.kind.alias") },
-  { value: "unset", label: t("environment.kind.unset") },
-]);
-
 watch(
   () => props.environment,
   (environment) => {
@@ -75,16 +68,6 @@ watch(
     }
     editingId.value = environment.environmentId;
     name.value = environment.name;
-    variables.value = environment.variables.map((variable) => ({
-      variableId: variable.variableId,
-      name: variable.name,
-      kind: variable.kind,
-      value: variable.kind === "value" ? variable.value : "",
-      target: variable.kind === "alias" ? variable.target : "",
-      hasValue: variable.kind === "secret" && variable.hasValue,
-      secretTouched: false,
-      clearValue: false,
-    }));
   },
 );
 
@@ -92,7 +75,7 @@ watch(
 function createEnvironment(): void {
   editingId.value = null;
   name.value = "";
-  variables.value = [];
+  variableEditorKey.value += 1;
   open.value = true;
 }
 
@@ -100,77 +83,14 @@ function createEnvironment(): void {
 function editEnvironment(environmentId: string): void {
   editingId.value = environmentId;
   name.value = "";
-  variables.value = [];
+  variableEditorKey.value += 1;
   open.value = true;
   emit("load", environmentId);
 }
 
-/** Adds one ordinary variable at the end of presentation order. */
-function addVariable(): void {
-  variables.value.push({
-    name: "",
-    kind: "value",
-    value: "",
-    target: "",
-    hasValue: false,
-    secretTouched: false,
-    clearValue: false,
-  });
-}
-
-/** Changes kind only for an unsaved variable and marks new secrets explicit. */
-function changeKind(variable: DraftVariable, kind: string): void {
-  if (variable.variableId !== undefined) {
-    return;
-  }
-  variable.kind = kind as DraftVariable["kind"];
-  if (variable.kind === "secret" && !variable.hasValue) {
-    variable.secretTouched = true;
-  }
-}
-
-/** Marks a secret input as an intentional replacement, including empty text. */
-function updateSecret(variable: DraftVariable, value: string): void {
-  variable.value = value;
-  variable.secretTouched = true;
-  variable.clearValue = false;
-}
-
-/** Reports whether a redacted stored-secret indicator remains authoritative. */
-function showStoredSecret(variable: DraftVariable): boolean {
-  return variable.hasValue && !variable.secretTouched && !variable.clearValue;
-}
-
-/** Converts local redacted rows into the write-only command union. */
-function variableWrites(): EnvironmentVariableWrite[] {
-  return variables.value.map((variable) => {
-    const common = {
-      ...(variable.variableId === undefined
-        ? {}
-        : { variableId: variable.variableId }),
-      name: variable.name,
-    };
-    switch (variable.kind) {
-      case "value":
-        return { ...common, kind: "value", value: variable.value };
-      case "alias":
-        return { ...common, kind: "alias", target: variable.target };
-      case "unset":
-        return { ...common, kind: "unset" };
-      case "secret":
-        return {
-          ...common,
-          kind: "secret",
-          ...(variable.secretTouched ? { value: variable.value } : {}),
-          ...(variable.clearValue ? { clearValue: true } : {}),
-        };
-    }
-  });
-}
-
 /** Emits create or optimistic update from the current complete profile. */
 function save(): void {
-  const writes = variableWrites();
+  const writes = variableEditor.value?.writes() ?? [];
   const environment = props.environment;
   if (editingId.value === null) {
     emit("create", name.value, writes);
@@ -251,97 +171,22 @@ function deleteEnvironment(): void {
             autocomplete="off"
           />
         </label>
-        <div class="environment-variable-heading">
-          <h3>{{ t("environment.variables") }}</h3>
-          <ButtonControl
-            v-if="canEdit"
-            type="button"
-            variant="secondary"
-            size="compact"
-            :disabled="busy"
-            @click="addVariable"
-          >
-            <Plus :size="15" aria-hidden="true" />
-            {{ t("environment.addVariable") }}
-          </ButtonControl>
-        </div>
-        <div v-if="variables.length === 0" class="empty-state">
-          {{ t("environment.noVariables") }}
-        </div>
-        <div
-          v-for="(variable, index) in variables"
-          :key="variable.variableId ?? index"
-          class="environment-variable-row"
-        >
-          <TextInput
-            v-model="variable.name"
-            :disabled="busy || !canEdit"
-            :aria-label="t('environment.variableName', { index: index + 1 })"
-          />
-          <SelectMenu
-            :model-value="variable.kind"
-            :options="kindOptions"
-            :label="t('environment.variableKind', { index: index + 1 })"
-            density="compact"
-            :disabled="busy || !canEdit || variable.variableId !== undefined"
-            @update:model-value="changeKind(variable, $event)"
-          />
-          <TextInput
-            v-if="variable.kind === 'value'"
-            v-model="variable.value"
-            :disabled="busy || !canEdit"
-            :aria-label="t('environment.variableValue', { index: index + 1 })"
-          />
-          <TextInput
-            v-else-if="variable.kind === 'alias'"
-            v-model="variable.target"
-            :disabled="busy || !canEdit"
-            :aria-label="t('environment.aliasTarget', { index: index + 1 })"
-          />
-          <div v-else-if="variable.kind === 'secret'" class="secret-editor">
-            <span v-if="showStoredSecret(variable)">
-              {{ t("environment.valueStored") }}
-            </span>
-            <TextInput
-              :model-value="variable.value"
-              type="password"
-              :disabled="busy || !canEdit"
-              autocomplete="new-password"
-              :placeholder="
-                variable.hasValue ? t('environment.replaceSecret') : ''
-              "
-              :aria-label="t('environment.secretValue', { index: index + 1 })"
-              @update:model-value="updateSecret(variable, $event)"
-            />
-            <ButtonControl
-              v-if="variable.hasValue && canEdit"
-              type="button"
-              variant="ghost"
-              size="compact"
-              :disabled="busy"
-              @click="
-                variable.clearValue = true;
-                variable.secretTouched = false;
-                variable.value = '';
-              "
-            >
-              {{ t("environment.clearSecret") }}
-            </ButtonControl>
-          </div>
-          <span
-            v-else
-            class="environment-variable-empty-value"
-            aria-hidden="true"
-          ></span>
-          <IconButton
-            v-if="canEdit"
-            :label="t('environment.removeVariable', { index: index + 1 })"
-            :disabled="busy"
-            @click="variables.splice(index, 1)"
-          >
-            <Trash2 :size="16" aria-hidden="true" />
-          </IconButton>
-        </div>
+        <h3 class="resource-dialog-section-title">
+          {{ t("environment.variables") }}
+        </h3>
+        <p v-if="!editorReady" class="resource-dialog-context" role="status">
+          {{ t("variables.loading") }}
+        </p>
+        <VariableFieldsEditor
+          v-else
+          :key="variableEditorKey"
+          ref="variableEditor"
+          :profile-variables="
+            editingId === null ? [] : (environment?.variables ?? [])
+          "
+          :can-edit="canEdit"
+          :busy="busy"
+        />
         <footer class="resource-dialog-actions">
           <ButtonControl
             type="button"

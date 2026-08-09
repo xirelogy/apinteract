@@ -189,6 +189,35 @@
   display: none;
 }
 
+.inline-warning {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: var(--radius-small);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.inline-warning-icon {
+  color: var(--warning);
+}
+
+.inline-warning-content {
+  min-width: 0;
+}
+
+.inline-warning-content strong {
+  display: block;
+  font-size: var(--font-size-sm);
+}
+
+.inline-warning-content p {
+  margin: var(--space-1) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
 .application-body {
   position: relative;
   display: grid;
@@ -224,29 +253,50 @@
   width: min(52rem, calc(100vi - var(--space-6)));
 }
 
-.environment-variable-heading,
-.environment-variable-row,
 .secret-editor {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: var(--space-2);
 }
 
-.environment-variable-heading {
-  justify-content: space-between;
+.resource-dialog-section-title {
+  font-size: var(--font-size-sm);
 }
 
-.environment-variable-row {
+.variable-field-heading,
+.variable-field-row {
   display: grid;
-  grid-template-columns: minmax(8rem, 1fr) 8rem minmax(10rem, 2fr) auto;
+  grid-template-columns:
+    minmax(8rem, 2fr) minmax(7rem, 0.9fr) minmax(10rem, 3fr)
+    var(--control-height-compact);
+  align-items: center;
+  gap: var(--space-1);
 }
 
-.environment-variable-row > * {
+.variable-field-heading {
+  padding: 0 var(--space-1) var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.variable-field-row + .variable-field-row {
+  margin-top: var(--space-1);
+}
+
+.variable-field-row > * {
   min-width: 0;
 }
 
-.secret-editor {
-  min-width: 0;
+.variable-type-cell > .select-menu {
+  width: 100%;
+}
+
+.variable-fields-empty {
+  margin: 0;
+  padding: var(--space-2) var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
 }
 
 .secret-editor .text-input-control {
@@ -254,23 +304,46 @@
   flex: 1 1 auto;
 }
 
+.secret-stored-status {
+  flex: 0 0 auto;
+  padding: 0 var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--font-size-2xs);
+  line-height: var(--control-height-compact);
+  border-radius: var(--radius-small);
+  background: var(--surface-secondary);
+  white-space: nowrap;
+}
+
+.variable-field-empty-value {
+  display: flex;
+  min-height: var(--control-height-compact);
+  align-items: center;
+  padding-inline: var(--space-2);
+  color: var(--text-secondary);
+}
+
 @media (width <= 47.5rem) {
-  .environment-variable-row {
+  .variable-field-heading {
+    display: none;
+  }
+
+  .variable-field-row {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .environment-variable-row > :nth-child(2),
-  .environment-variable-row > :nth-child(3) {
+  .variable-field-row > :nth-child(2),
+  .variable-field-row > :nth-child(3) {
     grid-column: 1 / -1;
   }
 
-  .environment-variable-row > :nth-child(4) {
+  .variable-field-row > :nth-child(4) {
     grid-row: 1;
     grid-column: 2;
   }
 
-  .environment-variable-empty-value {
-    display: none;
+  .secret-editor {
+    flex-wrap: wrap;
   }
 }
 

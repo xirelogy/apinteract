@@ -14,7 +14,10 @@ const zhHansMessages = {
     },
     fields: {
       name: "名称",
+      target: "目标",
+      type: "类型",
       value: "值",
+      valueOrTarget: "值 / 目标",
     },
     language: {
       label: "语言",
@@ -168,7 +171,10 @@ const zhHantMessages = {
     },
     fields: {
       name: "名稱",
+      target: "目標",
+      type: "類型",
       value: "值",
+      valueOrTarget: "值 / 目標",
     },
     language: {
       label: "語言",
