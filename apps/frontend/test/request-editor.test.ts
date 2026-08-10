@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 
 import { createI18n } from "vue-i18n";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
+import ScriptEditor from "../src/view/presentation/controls/ScriptEditor.vue";
 import RequestEditor from "../src/view/presentation/features/RequestEditor.vue";
+
+Object.defineProperty(Range.prototype, "getClientRects", {
+  configurable: true,
+  value: () => [],
+});
 
 describe("RequestEditor", () => {
   it("keeps one trailing blank query and header row out of draft changes", async () => {
@@ -335,15 +341,21 @@ describe("RequestEditor", () => {
       .findAll('[role="tab"]')
       .find((tab) => tab.text().startsWith("Pre-request"))
       ?.trigger("click");
-    const preRequest = wrapper.get<HTMLTextAreaElement>(
-      'textarea[aria-label="Pre-request script"]',
-    );
-    expect(preRequest.element.value).toContain("before");
-    expect(preRequest.attributes("placeholder")).toBeUndefined();
+    await flushPromises();
+    await vi.waitFor(() => {
+      expect(wrapper.find(".script-editor-control").exists()).toBe(true);
+    });
+    const preRequest = wrapper.getComponent(ScriptEditor);
+    expect(preRequest.props("modelValue")).toContain("before");
     expect(
-      wrapper.find('textarea[aria-label="Post-response script"]').exists(),
-    ).toBe(false);
-    await preRequest.setValue('asdk.request.setMethod("POST");');
+      preRequest.get('.cm-content[aria-label="Pre-request script"]').text(),
+    ).toContain("before");
+    expect(preRequest.findAll(".cm-line span").length).toBeGreaterThan(0);
+    expect(preRequest.find("[placeholder]").exists()).toBe(false);
+    expect(wrapper.findComponent(ScriptEditor).exists()).toBe(true);
+    preRequest.vm.$emit("update:modelValue", 'asdk.request.setMethod("POST");');
+    preRequest.vm.$emit("input");
+    await wrapper.vm.$nextTick();
     expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
       preRequestScript: 'asdk.request.setMethod("POST");',
       postResponseScript: 'asdk.test("ok", () => {});',
@@ -352,10 +364,15 @@ describe("RequestEditor", () => {
       .findAll('[role="tab"]')
       .find((tab) => tab.text().startsWith("Post-response"))
       ?.trigger("click");
-    const postResponse = wrapper.get<HTMLTextAreaElement>(
-      'textarea[aria-label="Post-response script"]',
-    );
-    expect(postResponse.element.value).toContain("ok");
-    expect(postResponse.attributes("placeholder")).toBeUndefined();
+    await flushPromises();
+    await vi.waitFor(() => {
+      expect(wrapper.find(".script-editor-control").exists()).toBe(true);
+    });
+    const postResponse = wrapper.getComponent(ScriptEditor);
+    expect(postResponse.props("modelValue")).toContain("ok");
+    expect(
+      postResponse.get('.cm-content[aria-label="Post-response script"]').text(),
+    ).toContain("ok");
+    expect(postResponse.find("[placeholder]").exists()).toBe(false);
   });
 });

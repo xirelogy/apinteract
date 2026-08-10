@@ -25,7 +25,9 @@ when you use APInteract from different frontends.
 
 Open a saved or temporary request and select **Pre-request script** or
 **Post-response script** in the request tabs. Each phase has its own editor. A
-blank editor disables that phase.
+blank editor disables that phase. The editor highlights JavaScript syntax and
+provides line numbers, indentation, bracket matching, and undo and redo without
+running the code in the browser.
 
 Select **Save** to persist scripts with a saved request, or select **Send** to
 save and run the current request. Temporary requests can run scripts without

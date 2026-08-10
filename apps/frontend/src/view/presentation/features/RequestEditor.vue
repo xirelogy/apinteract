@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  ref,
+  watch,
+} from "vue";
 import { Asterisk, Lock, Play, Save, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
@@ -26,7 +32,6 @@ import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TemplateTextControl from "@/view/presentation/controls/TemplateTextControl.vue";
-import TextArea from "@/view/presentation/controls/TextArea.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
 import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
 import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
@@ -38,6 +43,10 @@ import VariableFieldsEditor from "./VariableFieldsEditor.vue";
 interface VariableFieldsEditorApi {
   writes(): VariableWrite[];
 }
+
+const ScriptEditor = defineAsyncComponent(
+  () => import("@/view/presentation/controls/ScriptEditor.vue"),
+);
 
 const props = withDefaults(
   defineProps<{
@@ -573,19 +582,17 @@ function saveVariables(): void {
           >
             <div class="script-editor-section">
               <div class="script-editor-heading">
-                <label for="pre-request-script">
+                <span class="script-editor-title">
                   {{ t("scripting.preRequest") }}
-                </label>
+                </span>
                 <span>{{ t("scripting.preRequestDescription") }}</span>
               </div>
-              <TextArea
+              <ScriptEditor
                 id="pre-request-script"
                 v-model="preRequestScript"
                 class="script-source-input"
-                font="mono"
-                :aria-label="t('scripting.preRequest')"
+                :label="t('scripting.preRequest')"
                 :disabled="busy"
-                spellcheck="false"
                 @input="emitChange"
               />
             </div>
@@ -602,19 +609,17 @@ function saveVariables(): void {
           >
             <div class="script-editor-section">
               <div class="script-editor-heading">
-                <label for="post-response-script">
+                <span class="script-editor-title">
                   {{ t("scripting.postResponse") }}
-                </label>
+                </span>
                 <span>{{ t("scripting.postResponseDescription") }}</span>
               </div>
-              <TextArea
+              <ScriptEditor
                 id="post-response-script"
                 v-model="postResponseScript"
                 class="script-source-input"
-                font="mono"
-                :aria-label="t('scripting.postResponse')"
+                :label="t('scripting.postResponse')"
                 :disabled="busy"
-                spellcheck="false"
                 @input="emitChange"
               />
             </div>

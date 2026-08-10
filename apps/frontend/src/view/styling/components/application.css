@@ -926,7 +926,9 @@
   gap: var(--space-2);
 }
 
-.script-editor-heading label {
+.script-editor-heading .script-editor-title {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
 }
 
@@ -940,9 +942,14 @@
   width: 100%;
   min-height: 10rem;
   resize: vertical;
-  padding: var(--space-3);
-  line-height: var(--line-height-code);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
   background: var(--surface-code);
+}
+
+.script-source-input[data-disabled] {
+  opacity: 0.65;
 }
 
 .script-sdk-help {
