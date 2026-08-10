@@ -8,10 +8,13 @@ import type {
   VariableWrite,
 } from "@/model/contracts/backend";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
+import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
+import { useRowReorder } from "@/view/presentation/controls/row-reorder";
 
 interface DraftVariable {
+  readonly rowKey: symbol;
   readonly variableId?: string;
   name: string;
   kind: "value" | "secret" | "alias" | "unset";
@@ -36,6 +39,7 @@ const { t } = useI18n();
 const secretDescriptionIdPrefix = useId();
 const variables = ref<DraftVariable[]>([
   ...props.profileVariables.map((variable) => ({
+    rowKey: Symbol(variable.variableId),
     variableId: variable.variableId,
     name: variable.name,
     kind: variable.kind,
@@ -57,6 +61,7 @@ const kindOptions = computed(() => [
 /** Creates the presentation-only row used to begin a new variable. */
 function createBlankVariable(): DraftVariable {
   return {
+    rowKey: Symbol("variable-row"),
     name: "",
     kind: "value",
     value: "",
@@ -108,6 +113,22 @@ function removeVariable(index: number): void {
   ensureTrailingBlankVariable();
   publishCount();
 }
+
+/** Moves one variable while keeping the presentation-only blank row trailing. */
+function moveVariable(fromIndex: number, toIndex: number): void {
+  const [variable] = variables.value.splice(fromIndex, 1);
+  if (variable !== undefined) variables.value.splice(toIndex, 0, variable);
+  ensureTrailingBlankVariable();
+  publishCount();
+}
+
+const variableReorder = useRowReorder({
+  canMove: (index) =>
+    variables.value[index] !== undefined &&
+    !isBlankVariable(variables.value[index]),
+  move: moveVariable,
+  isDisabled: () => props.busy || !props.canEdit,
+});
 
 /** Changes kind only for a new variable because persisted kinds are immutable. */
 function changeKind(variable: DraftVariable, kind: string): void {
@@ -226,8 +247,11 @@ defineExpose({ writes });
     </div>
     <div
       v-for="(variable, index) in variables"
-      :key="variable.variableId ?? index"
+      :key="variable.rowKey"
       class="variable-field-row"
+      :class="variableReorder.classes(index)"
+      @dragover.stop="variableReorder.updateDropTarget($event, index)"
+      @drop.stop="variableReorder.finishDrop($event)"
     >
       <TextInput
         v-model="variable.name"
@@ -353,20 +377,35 @@ defineExpose({ writes });
       >
         —
       </span>
-      <IconButton
-        v-if="canEdit && !isBlankVariable(variable)"
-        class="compact-icon-button"
-        size="compact"
-        :label="t('environment.removeVariable', { index: index + 1 })"
-        :title="t('environment.removeVariableTitle')"
-        :disabled="busy"
-        @click="removeVariable(index)"
-      >
-        <Trash2 :size="16" aria-hidden="true" />
-      </IconButton>
-      <span v-else class="new-row-marker" aria-hidden="true">
-        <Asterisk :size="16" />
-      </span>
+      <div class="row-actions">
+        <RowReorderHandle
+          v-if="!isBlankVariable(variable)"
+          :label="
+            t('common.actions.reorderRow', {
+              item: t('environment.variables'),
+              index: index + 1,
+            })
+          "
+          :disabled="busy || !canEdit"
+          @drag-start="variableReorder.startDrag($event, index)"
+          @drag-end="variableReorder.cancelDrag"
+          @move="variableReorder.moveByKeyboard(index, $event)"
+        />
+        <IconButton
+          v-if="canEdit && !isBlankVariable(variable)"
+          class="compact-icon-button"
+          size="compact"
+          :label="t('environment.removeVariable', { index: index + 1 })"
+          :title="t('environment.removeVariableTitle')"
+          :disabled="busy"
+          @click="removeVariable(index)"
+        >
+          <Trash2 :size="16" aria-hidden="true" />
+        </IconButton>
+        <span v-else class="new-row-marker" aria-hidden="true">
+          <Asterisk :size="16" />
+        </span>
+      </div>
     </div>
   </div>
 </template>

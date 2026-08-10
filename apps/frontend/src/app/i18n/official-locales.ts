@@ -10,6 +10,7 @@ const zhHansMessages = {
       create: "创建",
       delete: "删除",
       discard: "放弃",
+      reorderRow: "重新排序第 {index} 个{item}",
       save: "保存",
     },
     fields: {
@@ -293,6 +294,7 @@ const zhHantMessages = {
       create: "建立",
       delete: "刪除",
       discard: "捨棄",
+      reorderRow: "重新排序第 {index} 個{item}",
       save: "儲存",
     },
     fields: {

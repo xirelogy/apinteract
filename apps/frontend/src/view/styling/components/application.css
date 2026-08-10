@@ -267,19 +267,19 @@
   display: grid;
   grid-template-columns:
     minmax(8rem, 2fr) minmax(7rem, 0.9fr) minmax(10rem, 3fr)
-    var(--control-height-compact);
+    calc(var(--control-height-compact) * 2 + var(--space-1));
   align-items: center;
   gap: var(--space-1);
 }
 
 .variable-field-heading {
-  padding: 0 var(--space-1) var(--space-1);
+  padding: 0 var(--space-1);
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
 }
 
-.variable-field-row + .variable-field-row {
-  margin-top: var(--space-1);
+.variable-field-row {
+  padding-top: var(--space-1);
 }
 
 .variable-field-row > * {
@@ -843,23 +843,63 @@
   display: grid;
   grid-template-columns:
     var(--control-height-compact) minmax(8rem, 2fr) minmax(10rem, 3fr)
-    var(--control-height-compact);
+    calc(var(--control-height-compact) * 2 + var(--space-1));
   align-items: center;
   gap: var(--space-1);
 }
 
 .request-field-heading {
-  padding: 0 var(--space-1) var(--space-1);
+  padding: 0 var(--space-1);
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
 }
 
-.request-field-row + .request-field-row {
-  margin-top: var(--space-1);
+.request-field-row {
+  padding-top: var(--space-1);
 }
 
 .request-field-row > .checkbox-control {
   justify-self: center;
+}
+
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+.row-reorder-handle {
+  cursor: grab;
+  color: var(--text-secondary);
+}
+
+.row-reorder-handle:active {
+  cursor: grabbing;
+}
+
+.request-field-row.is-row-dragging,
+.variable-field-row.is-row-dragging {
+  opacity: 0.5;
+}
+
+:where(.request-field-row, .variable-field-row) {
+  position: relative;
+}
+
+.request-field-row.is-row-drop-before::before,
+.variable-field-row.is-row-drop-before::before {
+  position: absolute;
+  z-index: 2;
+  top: calc(var(--space-1) / 2);
+  right: 0;
+  left: 0;
+  height: 0.125rem;
+  border-radius: 999px;
+  background: var(--accent-primary);
+  content: "";
+  pointer-events: none;
+  transform: translateY(-50%);
 }
 
 .inherited-header-row {
@@ -1245,13 +1285,13 @@
 
 .collection-properties-section {
   padding-top: var(--space-3);
+  gap: var(--space-2);
 }
 
 .collection-properties-section,
 .variable-fields-editor {
   min-width: 0;
   flex-direction: column;
-  gap: var(--space-2);
 }
 
 .collection-properties-section:not([hidden]),
@@ -1471,7 +1511,7 @@
   .request-field-row {
     grid-template-columns:
       var(--control-height-compact) minmax(6rem, 1fr) minmax(7rem, 1.35fr)
-      var(--control-height-compact);
+      calc(var(--control-height-compact) * 2 + var(--space-1));
   }
 
   .response-heading-row {

@@ -30,6 +30,7 @@ import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import InlineWarning from "@/view/presentation/controls/InlineWarning.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
+import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TemplateTextControl from "@/view/presentation/controls/TemplateTextControl.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
@@ -37,6 +38,7 @@ import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
 import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
 import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
 import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
+import { useRowReorder } from "@/view/presentation/controls/row-reorder";
 import ResponsePanel from "./ResponsePanel.vue";
 import VariableFieldsEditor from "./VariableFieldsEditor.vue";
 
@@ -230,6 +232,28 @@ function removeField(kind: "query" | "headers", index: number): void {
 function removeActiveField(index: number): void {
   removeField(activeTab.value === "headers" ? "headers" : "query", index);
 }
+
+/** Returns the editable field list currently shown by the active table tab. */
+function activeFields(): RequestField[] {
+  return activeTab.value === "headers" ? headers.value : query.value;
+}
+
+/** Moves one query/header row and preserves the trailing blank entry. */
+function moveActiveField(fromIndex: number, toIndex: number): void {
+  const fields = activeFields();
+  const [field] = fields.splice(fromIndex, 1);
+  if (field !== undefined) fields.splice(toIndex, 0, field);
+  ensureTrailingBlankRequestField(fields);
+  emitChange();
+}
+
+const fieldReorder = useRowReorder({
+  canMove: (index) =>
+    activeFields()[index] !== undefined &&
+    !isBlankRequestField(activeFields()[index]!),
+  move: moveActiveField,
+  isDisabled: () => props.busy,
+});
 
 /** Publishes a field edit and materializes the next trailing blank row. */
 function updateActiveField(): void {
@@ -472,6 +496,9 @@ function saveVariables(): void {
               v-for="(field, index) in activeTab === 'query' ? query : headers"
               :key="index"
               class="request-field-row"
+              :class="fieldReorder.classes(index)"
+              @dragover.stop="fieldReorder.updateDropTarget($event, index)"
+              @drop.stop="fieldReorder.finishDrop($event)"
             >
               <CheckboxControl
                 v-model="field.enabled"
@@ -530,29 +557,44 @@ function saveVariables(): void {
                 :disabled="busy"
                 @input="updateActiveField"
               />
-              <IconButton
-                v-if="!isBlankRequestField(field)"
-                class="compact-icon-button"
-                size="compact"
-                :label="
-                  t('request.removeField', {
-                    kind: activeFieldKind(),
-                    index: index + 1,
-                  })
-                "
-                :title="
-                  t('request.removeFieldTitle', {
-                    kind: activeFieldKind(),
-                  })
-                "
-                :disabled="busy"
-                @click="removeActiveField(index)"
-              >
-                <Trash2 :size="15" aria-hidden="true" />
-              </IconButton>
-              <span v-else class="new-row-marker" aria-hidden="true">
-                <Asterisk :size="15" />
-              </span>
+              <div class="row-actions">
+                <RowReorderHandle
+                  v-if="!isBlankRequestField(field)"
+                  :label="
+                    t('common.actions.reorderRow', {
+                      item: activeFieldKind(),
+                      index: index + 1,
+                    })
+                  "
+                  :disabled="busy"
+                  @drag-start="fieldReorder.startDrag($event, index)"
+                  @drag-end="fieldReorder.cancelDrag"
+                  @move="fieldReorder.moveByKeyboard(index, $event)"
+                />
+                <IconButton
+                  v-if="!isBlankRequestField(field)"
+                  class="compact-icon-button"
+                  size="compact"
+                  :label="
+                    t('request.removeField', {
+                      kind: activeFieldKind(),
+                      index: index + 1,
+                    })
+                  "
+                  :title="
+                    t('request.removeFieldTitle', {
+                      kind: activeFieldKind(),
+                    })
+                  "
+                  :disabled="busy"
+                  @click="removeActiveField(index)"
+                >
+                  <Trash2 :size="15" aria-hidden="true" />
+                </IconButton>
+                <span v-else class="new-row-marker" aria-hidden="true">
+                  <Asterisk :size="15" />
+                </span>
+              </div>
             </div>
           </TabsPanel>
 

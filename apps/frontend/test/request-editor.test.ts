@@ -58,6 +58,19 @@ describe("RequestEditor", () => {
       query: [{ name: "source", value: "", enabled: true }],
       headers: [],
     });
+    await wrapper.get('input[aria-label="Query name 2"]').setValue("target");
+    const queryHandles = wrapper.findAll(".row-reorder-handle");
+    expect(queryHandles).toHaveLength(2);
+    await queryHandles[0]?.trigger("keydown", {
+      key: "ArrowDown",
+      altKey: true,
+    });
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      query: [
+        { name: "target", value: "", enabled: true },
+        { name: "source", value: "", enabled: true },
+      ],
+    });
 
     await wrapper
       .findAll('[role="tab"]')
@@ -71,9 +84,22 @@ describe("RequestEditor", () => {
         .get('input[aria-label="Header name 2"]')
         .attributes("placeholder"),
     ).toBe("Add header");
+    await wrapper.get('input[aria-label="Header name 2"]').setValue("X-Target");
+    const headerHandles = wrapper.findAll(".row-reorder-handle");
+    expect(headerHandles).toHaveLength(2);
+    await headerHandles[0]?.trigger("keydown", {
+      key: "ArrowDown",
+      altKey: true,
+    });
     expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
-      query: [{ name: "source", value: "", enabled: true }],
-      headers: [{ name: "X-Source", value: "", enabled: true }],
+      query: [
+        { name: "target", value: "", enabled: true },
+        { name: "source", value: "", enabled: true },
+      ],
+      headers: [
+        { name: "X-Target", value: "", enabled: true },
+        { name: "X-Source", value: "", enabled: true },
+      ],
     });
   });
 

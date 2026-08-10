@@ -7,6 +7,7 @@ export const enUsMessages = {
       create: "Create",
       delete: "Delete",
       discard: "Discard",
+      reorderRow: "Reorder {item} {index}",
       save: "Save",
     },
     fields: {

@@ -19,6 +19,7 @@ import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import FormField from "@/view/presentation/controls/FormField.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
+import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
 import DialogControl from "@/view/presentation/controls/dialog/DialogControl.vue";
 import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
@@ -26,6 +27,7 @@ import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
 import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
 import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 import VariableFieldsEditor from "./VariableFieldsEditor.vue";
+import { useRowReorder } from "@/view/presentation/controls/row-reorder";
 
 interface VariableFieldsEditorApi {
   writes(): VariableWrite[];
@@ -71,6 +73,21 @@ function removeHeader(index: number): void {
 function updateHeader(): void {
   ensureTrailingBlankRequestField(headers.value);
 }
+
+/** Moves one workspace header while preserving the trailing blank entry. */
+function moveHeader(fromIndex: number, toIndex: number): void {
+  const [header] = headers.value.splice(fromIndex, 1);
+  if (header !== undefined) headers.value.splice(toIndex, 0, header);
+  ensureTrailingBlankRequestField(headers.value);
+}
+
+const headerReorder = useRowReorder({
+  canMove: (index) =>
+    headers.value[index] !== undefined &&
+    !isBlankRequestField(headers.value[index]),
+  move: moveHeader,
+  isDisabled: () => props.busy || !props.canEdit,
+});
 
 /** Requests closure through the shared controlled dialog lifecycle. */
 function close(): void {
@@ -151,6 +168,9 @@ function save(): void {
                 v-for="(header, index) in headers"
                 :key="index"
                 class="request-field-row"
+                :class="headerReorder.classes(index)"
+                @dragover.stop="headerReorder.updateDropTarget($event, index)"
+                @drop.stop="headerReorder.finishDrop($event)"
               >
                 <CheckboxControl
                   v-model="header.enabled"
@@ -190,23 +210,38 @@ function save(): void {
                   :disabled="busy || !canEdit"
                   @input="updateHeader"
                 />
-                <IconButton
-                  v-if="canEdit && !isBlankRequestField(header)"
-                  size="compact"
-                  :label="
-                    t('request.removeField', {
-                      kind: t('request.headerField'),
-                      index: index + 1,
-                    })
-                  "
-                  :disabled="busy"
-                  @click="removeHeader(index)"
-                >
-                  <Trash2 :size="15" aria-hidden="true" />
-                </IconButton>
-                <span v-else class="new-row-marker" aria-hidden="true">
-                  <Asterisk :size="15" />
-                </span>
+                <div class="row-actions">
+                  <RowReorderHandle
+                    v-if="!isBlankRequestField(header)"
+                    :label="
+                      t('common.actions.reorderRow', {
+                        item: t('request.headerField'),
+                        index: index + 1,
+                      })
+                    "
+                    :disabled="busy || !canEdit"
+                    @drag-start="headerReorder.startDrag($event, index)"
+                    @drag-end="headerReorder.cancelDrag"
+                    @move="headerReorder.moveByKeyboard(index, $event)"
+                  />
+                  <IconButton
+                    v-if="canEdit && !isBlankRequestField(header)"
+                    size="compact"
+                    :label="
+                      t('request.removeField', {
+                        kind: t('request.headerField'),
+                        index: index + 1,
+                      })
+                    "
+                    :disabled="busy"
+                    @click="removeHeader(index)"
+                  >
+                    <Trash2 :size="15" aria-hidden="true" />
+                  </IconButton>
+                  <span v-else class="new-row-marker" aria-hidden="true">
+                    <Asterisk :size="15" />
+                  </span>
+                </div>
               </div>
             </div>
           </TabsPanel>
