@@ -31,6 +31,12 @@ const emit = defineEmits<{
 }>();
 
 defineSlots<{
+  trigger?(props: {
+    open: boolean;
+    popupId: string;
+    toggle: () => void;
+    keydown: (event: KeyboardEvent) => void;
+  }): unknown;
   item?(props: { item: ActionMenuItem }): unknown;
 }>();
 
@@ -209,18 +215,26 @@ function closeFromViewportChange(): void {
 
 <template>
   <div ref="root" class="action-menu-control">
-    <IconButton
-      size="compact"
-      :label="label"
-      :disabled="disabled"
-      aria-haspopup="menu"
-      :aria-expanded="open"
-      :aria-controls="open ? popupId : undefined"
-      @click="toggleMenu"
-      @keydown="handleTriggerKeydown"
+    <slot
+      name="trigger"
+      :open="open"
+      :popup-id="popupId"
+      :toggle="toggleMenu"
+      :keydown="handleTriggerKeydown"
     >
-      <MoreHorizontal :size="16" aria-hidden="true" />
-    </IconButton>
+      <IconButton
+        size="compact"
+        :label="label"
+        :disabled="disabled"
+        aria-haspopup="menu"
+        :aria-expanded="open"
+        :aria-controls="open ? popupId : undefined"
+        @click="toggleMenu"
+        @keydown="handleTriggerKeydown"
+      >
+        <MoreHorizontal :size="16" aria-hidden="true" />
+      </IconButton>
+    </slot>
     <Teleport to="body">
       <div
         v-if="open"

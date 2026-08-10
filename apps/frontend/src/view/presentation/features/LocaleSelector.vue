@@ -6,6 +6,17 @@ import { useI18n } from "vue-i18n";
 import { useTranslationService } from "@/app/i18n/translation-service";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 
+withDefaults(
+  defineProps<{
+    inputId?: string;
+    mobilePresentation?: "fullscreen" | "popover";
+  }>(),
+  {
+    inputId: "",
+    mobilePresentation: "fullscreen",
+  },
+);
+
 const { t } = useI18n();
 const translation = useTranslationService();
 const localeOptions = computed(() => [
@@ -28,6 +39,8 @@ async function changeLocale(locale: string): Promise<void> {
     :model-value="translation.preference.value"
     :options="localeOptions"
     :label="t('common.language.label')"
+    :input-id="inputId"
+    :mobile-presentation="mobilePresentation"
     density="compact"
     @update:model-value="changeLocale"
   >

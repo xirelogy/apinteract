@@ -40,7 +40,6 @@ const environmentManager = ref<InstanceType<typeof EnvironmentManager> | null>(
 );
 const {
   session,
-  connection,
   workspaces,
   selectedWorkspaceId,
   selectedWorkspace,
@@ -378,8 +377,7 @@ function discardRequestTab(): void {
 <template>
   <div class="application-shell">
     <AppHeader
-      :display-name="session?.user.displayName ?? ''"
-      :connected="connection === 'authenticated'"
+      :username="session?.user.username ?? ''"
       :navigator-open="navigatorOpen"
       @logout="logout"
       @toggle-navigator="toggleNavigator"

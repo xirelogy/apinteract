@@ -96,7 +96,6 @@
 
 .brand-lockup,
 .header-actions,
-.connection-state,
 .request-title-row,
 .command-bar,
 .target-row,
@@ -128,7 +127,6 @@
 
 .header-actions {
   min-width: 0;
-  gap: var(--space-3);
 }
 
 .locale-selector {
@@ -143,39 +141,25 @@
   color: var(--text-secondary);
 }
 
-:where(.app-header) .locale-selector {
-  --select-trigger-max-width: 12rem;
-  --select-trigger-color: var(--text-inverse);
-  --select-trigger-background: var(--surface-inverse);
-  --select-trigger-border: var(--border-inverse);
-  --select-trigger-hover-color: var(--text-inverse);
-  --select-trigger-hover-background: var(--surface-inverse-hover);
-  --select-trigger-hover-border: var(--border-inverse-hover);
-
-  color: var(--text-inverse-subtle);
-}
-
-.header-actions .icon-button-control {
-  color: var(--text-inverse-muted);
-}
-
-.connection-state {
-  gap: var(--space-1);
-  color: var(--warning);
-  font-size: var(--font-size-xs);
-}
-
-.connection-state[data-connected="true"] {
-  color: var(--success);
-}
-
-.user-name {
+.account-menu-trigger {
+  display: block;
   max-width: 18ch;
+  min-height: var(--control-height-compact);
   overflow: hidden;
+  padding: 0 var(--space-2);
   color: var(--text-inverse-subtle);
   font-size: var(--font-size-sm);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.account-menu-trigger:is(:hover, [aria-expanded="true"]) {
+  color: var(--text-inverse);
+  background: var(--surface-inverse-hover);
 }
 
 .global-error {
@@ -1370,22 +1354,24 @@
   width: min(24rem, calc(100vi - var(--space-6)));
 }
 
-.discard-dialog-content {
+.discard-dialog-content,
+.logout-confirmation-content {
   padding: var(--space-4);
 }
 
-.discard-dialog-content .resource-dialog-actions {
+.discard-dialog-content .resource-dialog-actions,
+.logout-confirmation-content .resource-dialog-actions {
   margin-top: var(--space-4);
+}
+
+.account-options-dialog,
+.logout-confirmation-dialog {
+  width: min(24rem, calc(100vi - var(--space-6)));
 }
 
 @media (width <= 47.5rem) {
   :root {
     --header-height: 3rem;
-  }
-
-  .connection-state,
-  .user-name {
-    display: none;
   }
 
   .app-header {
@@ -1397,12 +1383,7 @@
   }
 
   .header-actions {
-    gap: var(--space-1);
-  }
-
-  :where(.app-header) .locale-selector {
-    --select-selected-icon-display: none;
-    --select-trigger-max-width: 7rem;
+    max-width: min(50vi, 18ch);
   }
 
   .navigator-toggle-button {

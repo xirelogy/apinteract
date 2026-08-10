@@ -30,11 +30,15 @@ export const enUsMessages = {
     username: "Username",
   },
   header: {
+    accountMenu: "Account menu for {name}",
     closeNavigator: "Close workspace navigator",
     connected: "Connected",
     logout: "Log out {name}",
+    logoutAction: "Log out",
+    logoutConfirmation: "Are you sure you want to log out?",
     offline: "Offline",
     openNavigator: "Open workspace navigator",
+    options: "Options",
   },
   workspace: {
     collections: "Collections",

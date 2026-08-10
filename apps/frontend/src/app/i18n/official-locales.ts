@@ -33,11 +33,15 @@ const zhHansMessages = {
     username: "用户名",
   },
   header: {
+    accountMenu: "{name} 的账户菜单",
     closeNavigator: "关闭工作区导航",
     connected: "已连接",
     logout: "退出 {name}",
+    logoutAction: "退出登录",
+    logoutConfirmation: "确定要退出登录吗？",
     offline: "离线",
     openNavigator: "打开工作区导航",
+    options: "选项",
   },
   workspace: {
     collections: "集合",
@@ -317,11 +321,15 @@ const zhHantMessages = {
     username: "使用者名稱",
   },
   header: {
+    accountMenu: "{name} 的帳戶選單",
     closeNavigator: "關閉工作區導覽",
     connected: "已連線",
     logout: "登出 {name}",
+    logoutAction: "登出",
+    logoutConfirmation: "確定要登出嗎？",
     offline: "離線",
     openNavigator: "開啟工作區導覽",
+    options: "選項",
   },
   workspace: {
     collections: "集合",
