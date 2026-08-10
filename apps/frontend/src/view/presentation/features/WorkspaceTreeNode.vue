@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, inject } from "vue";
 import {
   ChevronRight,
   FilePlus,
   Folder,
   FolderOpen,
   FolderPlus,
+  GripVertical,
   Settings2,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
@@ -14,6 +15,7 @@ import type { TreeNode } from "@/model/contracts/backend";
 import ActionMenu, {
   type ActionMenuItem,
 } from "@/view/presentation/controls/ActionMenu.vue";
+import { workspaceTreeReorderKey } from "./workspace-tree-reorder";
 
 const props = defineProps<{
   node: TreeNode;
@@ -27,6 +29,11 @@ const props = defineProps<{
   level: number;
 }>();
 const { t } = useI18n();
+const injectedTreeReorder = inject(workspaceTreeReorderKey);
+if (injectedTreeReorder === undefined) {
+  throw new Error("WorkspaceTreeNode requires a tree reorder context.");
+}
+const treeReorder = injectedTreeReorder;
 
 const emit = defineEmits<{
   createCollection: [parentCollectionId: string];
@@ -70,6 +77,45 @@ function selectCollectionAction(value: string): void {
     emit("editCollectionProperties", props.node.nodeId);
   }
 }
+
+/** Returns drag-state classes for this row's insertion indicator. */
+function reorderClasses(): Record<string, boolean> {
+  return {
+    "is-dragging": treeReorder.draggedNodeId.value === props.node.nodeId,
+    "is-drop-before":
+      treeReorder.dropTargetNodeId.value === props.node.nodeId &&
+      treeReorder.dropPlacement.value === "before",
+    "is-drop-after":
+      treeReorder.dropTargetNodeId.value === props.node.nodeId &&
+      treeReorder.dropPlacement.value === "after",
+    "is-drop-inside":
+      treeReorder.dropTargetNodeId.value === props.node.nodeId &&
+      treeReorder.dropPlacement.value === "inside",
+  };
+}
+
+/** Applies the keyboard reorder alternative without affecting tree navigation. */
+function handleTreeItemKeydown(event: KeyboardEvent): void {
+  if (
+    !event.altKey ||
+    !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)
+  ) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.key === "ArrowLeft") {
+    treeReorder.outdentByKeyboard(props.node.nodeId, props.parentNodeId);
+  } else if (event.key === "ArrowRight") {
+    treeReorder.indentByKeyboard(props.node.nodeId, props.parentNodeId);
+  } else {
+    treeReorder.moveByKeyboard(
+      props.node.nodeId,
+      props.parentNodeId,
+      event.key === "ArrowUp" ? -1 : 1,
+    );
+  }
+}
 </script>
 
 <template>
@@ -77,7 +123,21 @@ function selectCollectionAction(value: string): void {
     <div
       v-if="node.kind === 'collection'"
       class="workspace-tree-row collection-tree-row"
-      :class="{ 'is-selected': node.nodeId === selectedCollectionId }"
+      :class="[
+        { 'is-selected': node.nodeId === selectedCollectionId },
+        reorderClasses(),
+      ]"
+      @dragover.stop="
+        treeReorder.updateDropTarget(
+          $event,
+          node.nodeId,
+          parentNodeId,
+          node.kind,
+        )
+      "
+      @drop.stop="
+        treeReorder.finishDrop($event, node.nodeId, parentNodeId, node.kind)
+      "
     >
       <button
         class="tree-toggle-button"
@@ -115,9 +175,22 @@ function selectCollectionAction(value: string): void {
         :data-tree-node-id="node.nodeId"
         :data-tree-parent-id="parentNodeId ?? undefined"
         :data-tree-text="node.name"
+        :draggable="!busy"
         :disabled="busy"
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
+        :title="t('workspace.reorderHint')"
         @click="emit('selectCollection', node.nodeId)"
+        @keydown="handleTreeItemKeydown"
+        @dragstart="
+          treeReorder.startDrag($event, node.nodeId, parentNodeId, node.kind)
+        "
+        @dragend="treeReorder.cancelDrag"
       >
+        <GripVertical
+          class="tree-drag-indicator"
+          :size="14"
+          aria-hidden="true"
+        />
         <FolderOpen v-if="expanded" :size="16" aria-hidden="true" />
         <Folder v-else :size="16" aria-hidden="true" />
         <span>{{ node.name }}</span>
@@ -156,7 +229,10 @@ function selectCollectionAction(value: string): void {
     <button
       v-else
       class="workspace-tree-row request-tree-row"
-      :class="{ 'is-selected': node.nodeId === selectedRequestId }"
+      :class="[
+        { 'is-selected': node.nodeId === selectedRequestId },
+        reorderClasses(),
+      ]"
       type="button"
       role="treeitem"
       :aria-level="level"
@@ -165,11 +241,35 @@ function selectCollectionAction(value: string): void {
       :data-tree-node-id="node.nodeId"
       :data-tree-parent-id="parentNodeId ?? undefined"
       :data-tree-text="node.name"
+      :draggable="!busy"
       :disabled="busy"
+      aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
+      :title="t('workspace.reorderHint')"
       @click="emit('selectRequest', node.nodeId)"
+      @keydown="handleTreeItemKeydown"
+      @dragstart="
+        treeReorder.startDrag($event, node.nodeId, parentNodeId, node.kind)
+      "
+      @dragover.stop="
+        treeReorder.updateDropTarget(
+          $event,
+          node.nodeId,
+          parentNodeId,
+          node.kind,
+        )
+      "
+      @drop.stop="
+        treeReorder.finishDrop($event, node.nodeId, parentNodeId, node.kind)
+      "
+      @dragend="treeReorder.cancelDrag"
     >
       <span class="tree-toggle-spacer" aria-hidden="true"></span>
       <span class="request-tree-label">
+        <GripVertical
+          class="tree-drag-indicator"
+          :size="14"
+          aria-hidden="true"
+        />
         <span class="method-badge">{{ node.method ?? "GET" }}</span>
         <span class="tree-node-name">{{ node.name }}</span>
       </span>

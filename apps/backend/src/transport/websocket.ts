@@ -13,9 +13,12 @@ import { createEntityId } from "../foundation/id.js";
 import {
   CollectionProfileConflictError,
   DraftConflictError,
+  TreeMoveInvalidError,
+  TreeOrderConflictError,
   type HttpMethod,
   type RequestExecutionInput,
   type RequestField,
+  type TreeMovePlacement,
 } from "../requests/request-service.js";
 import type { SessionIdentity } from "../sessions/session-service.js";
 import {
@@ -185,6 +188,29 @@ async function dispatch(
           optionalString(command.payload.parentCollectionId),
         ),
       };
+    case "tree.reorder":
+      return application.requests.reorderChildren(
+        userId,
+        requireString(command.payload.workspaceId, "workspaceId"),
+        optionalString(command.payload.parentCollectionId),
+        requireInteger(
+          command.payload.expectedOrderRevision,
+          "expectedOrderRevision",
+        ),
+        requireNodeIds(command.payload.orderedNodeIds),
+      );
+    case "tree.move":
+      return application.requests.moveNode(
+        userId,
+        requireString(command.payload.workspaceId, "workspaceId"),
+        requireString(command.payload.nodeId, "nodeId"),
+        requireString(command.payload.targetNodeId, "targetNodeId"),
+        requireTreeMovePlacement(command.payload.placement),
+        requireInteger(
+          command.payload.expectedSourceOrderRevision,
+          "expectedSourceOrderRevision",
+        ),
+      );
     case "collection.create":
       return application.requests.createCollection(
         userId,
@@ -373,6 +399,12 @@ function mapCommandError(cause: unknown): CommandError {
   if (cause instanceof CollectionProfileConflictError) {
     return new CommandError("collection_profile_conflict", cause.message);
   }
+  if (cause instanceof TreeOrderConflictError) {
+    return new CommandError("tree_order_conflict", cause.message);
+  }
+  if (cause instanceof TreeMoveInvalidError) {
+    return new CommandError("tree_move_invalid", cause.message);
+  }
   if (cause instanceof WorkspaceConflictError) {
     return new CommandError("workspace_conflict", cause.message);
   }
@@ -502,6 +534,28 @@ function requireInteger(value: unknown, name: string): number {
     );
   }
   return value as number;
+}
+
+/** Validates a bounded complete sibling order supplied by the tree client. */
+function requireNodeIds(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 2000) {
+    throw new CommandError(
+      "validation_failed",
+      "orderedNodeIds must be a bounded array.",
+    );
+  }
+  return value.map((nodeId) => requireString(nodeId, "nodeId"));
+}
+
+/** Requires a supported relative destination for a cross-level tree move. */
+function requireTreeMovePlacement(value: unknown): TreeMovePlacement {
+  if (value !== "before" && value !== "inside" && value !== "after") {
+    throw new CommandError(
+      "validation_failed",
+      "placement must be before, inside, or after.",
+    );
+  }
+  return value;
 }
 
 /** Requires a method token supported by saved request drafts. */

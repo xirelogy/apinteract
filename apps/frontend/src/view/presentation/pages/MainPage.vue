@@ -407,6 +407,23 @@ function discardRequestTab(): void {
         "
         @select-collection="controller.selectCollection($event)"
         @toggle-collection="controller.toggleCollection($event)"
+        @reorder-tree="
+          (parentCollectionId, orderedNodeIds, expectedOrderRevision) =>
+            controller.reorderTreeNodes(
+              parentCollectionId,
+              orderedNodeIds,
+              expectedOrderRevision,
+            )
+        "
+        @move-tree="
+          (nodeId, targetNodeId, placement, expectedSourceOrderRevision) =>
+            controller.moveTreeNode(
+              nodeId,
+              targetNodeId,
+              placement,
+              expectedSourceOrderRevision,
+            )
+        "
         @create-request="createRequestInCollection"
         @edit-collection-properties="editCollectionProperties"
         @edit-workspace-properties="editWorkspaceProperties"

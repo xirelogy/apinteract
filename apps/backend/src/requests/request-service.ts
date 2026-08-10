@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { Kysely, Transaction } from "kysely";
+import { sql, type Kysely, type Transaction } from "kysely";
 
 import type { AuditService } from "../audit/audit-service.js";
 import {
@@ -32,6 +32,7 @@ export interface TreeNodeView {
   readonly kind: "collection" | "request";
   readonly name: string;
   readonly position: number;
+  readonly orderRevision: number;
   readonly method?: HttpMethod;
 }
 
@@ -43,6 +44,8 @@ export type HttpMethod =
   | "DELETE"
   | "HEAD"
   | "OPTIONS";
+
+export type TreeMovePlacement = "before" | "inside" | "after";
 
 export interface RequestField {
   readonly name: string;
@@ -144,6 +147,12 @@ export class DraftConflictError extends Error {}
 /** Raised when a collection profile update targets a stale revision. */
 export class CollectionProfileConflictError extends Error {}
 
+/** Raised when a sibling reorder targets a stale tree order. */
+export class TreeOrderConflictError extends Error {}
+
+/** Raised when a tree move would create an invalid collection hierarchy. */
+export class TreeMoveInvalidError extends Error {}
+
 /**
  * Owns the ordered collection/request tree and mutable request drafts.
  *
@@ -178,7 +187,14 @@ export class RequestService {
     const query = this.#database
       .selectFrom("workspace_tree_nodes")
       .leftJoin("request_drafts", "request_drafts.request_id", "id")
-      .select(["id", "kind", "name", "position", "request_drafts.method"])
+      .select([
+        "id",
+        "kind",
+        "name",
+        "position",
+        "order_revision",
+        "request_drafts.method",
+      ])
       .where("workspace_id", "=", idToBytes(workspaceId));
     const rows =
       parentCollectionId === null
@@ -195,8 +211,255 @@ export class RequestService {
       kind: row.kind,
       name: row.name,
       position: row.position,
+      orderRevision: row.order_revision,
       ...(row.method === null ? {} : { method: row.method }),
     }));
+  }
+
+  /** Reorders one complete authorized sibling list without changing parents. */
+  async reorderChildren(
+    userId: EntityId,
+    workspaceId: EntityId,
+    parentCollectionId: EntityId | null,
+    expectedOrderRevision: number,
+    orderedNodeIds: readonly EntityId[],
+  ): Promise<{ readonly orderRevision: number }> {
+    return this.#database.transaction().execute(async (transaction) => {
+      await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
+      await this.#validateParent(transaction, workspaceId, parentCollectionId);
+      let query = transaction
+        .selectFrom("workspace_tree_nodes")
+        .select(["id", "position", "order_revision"])
+        .where("workspace_id", "=", idToBytes(workspaceId));
+      query =
+        parentCollectionId === null
+          ? query.where("parent_collection_id", "is", null)
+          : query.where(
+              "parent_collection_id",
+              "=",
+              idToBytes(parentCollectionId),
+            );
+      const rows = await query.orderBy("position").execute();
+      const currentOrderRevision = rows.reduce(
+        (revision, row) => Math.max(revision, row.order_revision),
+        0,
+      );
+      const currentNodeIds = rows.map((row) => bytesToId(row.id));
+      const requestedNodeIds = new Set(orderedNodeIds);
+      if (
+        currentOrderRevision !== expectedOrderRevision ||
+        requestedNodeIds.size !== orderedNodeIds.length ||
+        orderedNodeIds.length !== currentNodeIds.length ||
+        orderedNodeIds.some((nodeId) => !currentNodeIds.includes(nodeId))
+      ) {
+        throw new TreeOrderConflictError("The tree order changed");
+      }
+      if (
+        orderedNodeIds.every(
+          (nodeId, position) => nodeId === currentNodeIds[position],
+        )
+      ) {
+        return { orderRevision: currentOrderRevision };
+      }
+
+      const temporaryOffset =
+        rows.reduce((highest, row) => Math.max(highest, row.position), -1) + 1;
+      let offsetQuery = transaction
+        .updateTable("workspace_tree_nodes")
+        .set({ position: sql<number>`position + ${temporaryOffset}` })
+        .where("workspace_id", "=", idToBytes(workspaceId));
+      offsetQuery =
+        parentCollectionId === null
+          ? offsetQuery.where("parent_collection_id", "is", null)
+          : offsetQuery.where(
+              "parent_collection_id",
+              "=",
+              idToBytes(parentCollectionId),
+            );
+      await offsetQuery.execute();
+
+      const orderRevision = currentOrderRevision + 1;
+      for (const [position, nodeId] of orderedNodeIds.entries()) {
+        await transaction
+          .updateTable("workspace_tree_nodes")
+          .set({ position, order_revision: orderRevision })
+          .where("id", "=", idToBytes(nodeId))
+          .executeTakeFirstOrThrow();
+      }
+      await this.#audit.record(transaction, {
+        type: "tree.reordered",
+        actorUserId: userId,
+        workspaceId,
+        data: {
+          parentCollectionId,
+          orderedNodeIds,
+          orderRevision,
+        },
+      });
+      return { orderRevision };
+    });
+  }
+
+  /** Moves one node relative to another node, including between tree levels. */
+  async moveNode(
+    userId: EntityId,
+    workspaceId: EntityId,
+    nodeId: EntityId,
+    targetNodeId: EntityId,
+    placement: TreeMovePlacement,
+    expectedSourceOrderRevision: number,
+  ): Promise<{
+    readonly sourceParentCollectionId: EntityId | null;
+    readonly targetParentCollectionId: EntityId | null;
+  }> {
+    return this.#database.transaction().execute(async (transaction) => {
+      await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
+      const [movingNode, targetNode] = await Promise.all([
+        transaction
+          .selectFrom("workspace_tree_nodes")
+          .select(["workspace_id", "parent_collection_id", "kind"])
+          .where("id", "=", idToBytes(nodeId))
+          .executeTakeFirst(),
+        transaction
+          .selectFrom("workspace_tree_nodes")
+          .select(["workspace_id", "parent_collection_id", "kind", "position"])
+          .where("id", "=", idToBytes(targetNodeId))
+          .executeTakeFirst(),
+      ]);
+      if (
+        movingNode === undefined ||
+        targetNode === undefined ||
+        bytesToId(movingNode.workspace_id) !== workspaceId ||
+        bytesToId(targetNode.workspace_id) !== workspaceId
+      ) {
+        throw new ResourceNotFoundError("Tree node not found");
+      }
+      if (nodeId === targetNodeId) {
+        throw new TreeMoveInvalidError("A node cannot be moved onto itself");
+      }
+      if (placement === "inside" && targetNode.kind !== "collection") {
+        throw new TreeMoveInvalidError(
+          "Only collections can contain tree nodes",
+        );
+      }
+
+      const sourceParentCollectionId =
+        movingNode.parent_collection_id === null
+          ? null
+          : bytesToId(movingNode.parent_collection_id);
+      const targetParentCollectionId =
+        placement === "inside"
+          ? targetNodeId
+          : targetNode.parent_collection_id === null
+            ? null
+            : bytesToId(targetNode.parent_collection_id);
+      if (sourceParentCollectionId === targetParentCollectionId) {
+        throw new TreeMoveInvalidError(
+          "Use sibling reordering when the parent does not change",
+        );
+      }
+      await this.#validateMoveHierarchy(
+        transaction,
+        workspaceId,
+        nodeId,
+        movingNode.kind,
+        targetParentCollectionId,
+      );
+
+      const sourceRows = await this.#listSiblingOrder(
+        transaction,
+        workspaceId,
+        sourceParentCollectionId,
+      );
+      const sourceOrderRevision = sourceRows.reduce(
+        (revision, row) => Math.max(revision, row.orderRevision),
+        0,
+      );
+      if (
+        sourceOrderRevision !== expectedSourceOrderRevision ||
+        !sourceRows.some((row) => row.nodeId === nodeId)
+      ) {
+        throw new TreeOrderConflictError("The tree order changed");
+      }
+      const targetRows = await this.#listSiblingOrder(
+        transaction,
+        workspaceId,
+        targetParentCollectionId,
+      );
+      const targetOrderRevision = targetRows.reduce(
+        (revision, row) => Math.max(revision, row.orderRevision),
+        0,
+      );
+      const targetSiblingIndex = targetRows.findIndex(
+        (row) => row.nodeId === targetNodeId,
+      );
+      if (placement !== "inside" && targetSiblingIndex < 0) {
+        throw new TreeOrderConflictError("The tree order changed");
+      }
+      const targetIndex =
+        placement === "inside"
+          ? targetRows.length
+          : targetSiblingIndex + (placement === "after" ? 1 : 0);
+
+      await this.#offsetSiblingPositions(
+        transaction,
+        workspaceId,
+        sourceParentCollectionId,
+      );
+      await this.#offsetSiblingPositions(
+        transaction,
+        workspaceId,
+        targetParentCollectionId,
+      );
+      const sourceNodeIds = sourceRows
+        .map((row) => row.nodeId)
+        .filter((candidate) => candidate !== nodeId);
+      const nextSourceOrderRevision = sourceOrderRevision + 1;
+      for (const [position, sourceNodeId] of sourceNodeIds.entries()) {
+        await transaction
+          .updateTable("workspace_tree_nodes")
+          .set({ position, order_revision: nextSourceOrderRevision })
+          .where("id", "=", idToBytes(sourceNodeId))
+          .executeTakeFirstOrThrow();
+      }
+
+      const targetNodeIds = targetRows.map((row) => row.nodeId);
+      targetNodeIds.splice(targetIndex, 0, nodeId);
+      const nextTargetOrderRevision = targetOrderRevision + 1;
+      for (const [position, destinationNodeId] of targetNodeIds.entries()) {
+        await transaction
+          .updateTable("workspace_tree_nodes")
+          .set({
+            position,
+            order_revision: nextTargetOrderRevision,
+            ...(destinationNodeId === nodeId
+              ? {
+                  parent_collection_id:
+                    targetParentCollectionId === null
+                      ? null
+                      : idToBytes(targetParentCollectionId),
+                }
+              : {}),
+          })
+          .where("id", "=", idToBytes(destinationNodeId))
+          .executeTakeFirstOrThrow();
+      }
+      await this.#audit.record(transaction, {
+        type: "tree.moved",
+        actorUserId: userId,
+        workspaceId,
+        data: {
+          nodeId,
+          targetNodeId,
+          placement,
+          sourceParentCollectionId,
+          targetParentCollectionId,
+          sourceOrderRevision: nextSourceOrderRevision,
+          targetOrderRevision: nextTargetOrderRevision,
+        },
+      });
+      return { sourceParentCollectionId, targetParentCollectionId };
+    });
   }
 
   /** Appends a collection to an authorized workspace parent. */
@@ -214,6 +477,11 @@ export class RequestService {
         workspaceId,
         parentCollectionId,
       );
+      const orderRevision = await this.#currentOrderRevision(
+        transaction,
+        workspaceId,
+        parentCollectionId,
+      );
       const nodeId = createEntityId();
       await transaction
         .insertInto("workspace_tree_nodes")
@@ -225,7 +493,7 @@ export class RequestService {
           kind: "collection",
           position,
           name: normalizeName(name),
-          order_revision: 0,
+          order_revision: orderRevision,
           created_at: Date.now(),
         })
         .execute();
@@ -240,6 +508,7 @@ export class RequestService {
         kind: "collection",
         name: normalizeName(name),
         position,
+        orderRevision,
       };
     });
   }
@@ -401,6 +670,11 @@ export class RequestService {
         workspaceId,
         parentCollectionId,
       );
+      const orderRevision = await this.#currentOrderRevision(
+        transaction,
+        workspaceId,
+        parentCollectionId,
+      );
       const requestId = createEntityId();
       const now = Date.now();
       await transaction
@@ -413,7 +687,7 @@ export class RequestService {
           kind: "request",
           position,
           name: normalizedName,
-          order_revision: 0,
+          order_revision: orderRevision,
           created_at: now,
         })
         .execute();
@@ -957,6 +1231,110 @@ export class RequestService {
     ]);
   }
 
+  /** Lists the stable identifiers and revisions for one sibling boundary. */
+  async #listSiblingOrder(
+    transaction: Transaction<DatabaseSchema>,
+    workspaceId: EntityId,
+    parentCollectionId: EntityId | null,
+  ): Promise<
+    readonly {
+      readonly nodeId: EntityId;
+      readonly position: number;
+      readonly orderRevision: number;
+    }[]
+  > {
+    let query = transaction
+      .selectFrom("workspace_tree_nodes")
+      .select(["id", "position", "order_revision"])
+      .where("workspace_id", "=", idToBytes(workspaceId));
+    query =
+      parentCollectionId === null
+        ? query.where("parent_collection_id", "is", null)
+        : query.where(
+            "parent_collection_id",
+            "=",
+            idToBytes(parentCollectionId),
+          );
+    const rows = await query.orderBy("position").execute();
+    return rows.map((row) => ({
+      nodeId: bytesToId(row.id),
+      position: row.position,
+      orderRevision: row.order_revision,
+    }));
+  }
+
+  /** Frees the final position range before rewriting one sibling order. */
+  async #offsetSiblingPositions(
+    transaction: Transaction<DatabaseSchema>,
+    workspaceId: EntityId,
+    parentCollectionId: EntityId | null,
+  ): Promise<void> {
+    const offset = await this.#nextPosition(
+      transaction,
+      workspaceId,
+      parentCollectionId,
+    );
+    if (offset === 0) return;
+    let query = transaction
+      .updateTable("workspace_tree_nodes")
+      .set({ position: sql<number>`position + ${offset}` })
+      .where("workspace_id", "=", idToBytes(workspaceId));
+    query =
+      parentCollectionId === null
+        ? query.where("parent_collection_id", "is", null)
+        : query.where(
+            "parent_collection_id",
+            "=",
+            idToBytes(parentCollectionId),
+          );
+    await query.execute();
+  }
+
+  /** Rejects collection moves into themselves, descendants, or corrupt trees. */
+  async #validateMoveHierarchy(
+    transaction: Transaction<DatabaseSchema>,
+    workspaceId: EntityId,
+    nodeId: EntityId,
+    nodeKind: "collection" | "request",
+    targetParentCollectionId: EntityId | null,
+  ): Promise<void> {
+    await this.#validateParent(
+      transaction,
+      workspaceId,
+      targetParentCollectionId,
+    );
+    if (nodeKind !== "collection") return;
+    let ancestorId = targetParentCollectionId;
+    const visited = new Set<EntityId>();
+    while (ancestorId !== null) {
+      if (ancestorId === nodeId) {
+        throw new TreeMoveInvalidError(
+          "A collection cannot be moved into its own descendants",
+        );
+      }
+      if (visited.has(ancestorId) || visited.size >= 64) {
+        throw new TreeMoveInvalidError(
+          "The collection hierarchy is cyclic or too deep",
+        );
+      }
+      visited.add(ancestorId);
+      const ancestor = await transaction
+        .selectFrom("workspace_tree_nodes")
+        .select("parent_collection_id")
+        .where("id", "=", idToBytes(ancestorId))
+        .where("workspace_id", "=", idToBytes(workspaceId))
+        .where("kind", "=", "collection")
+        .executeTakeFirst();
+      if (ancestor === undefined) {
+        throw new ResourceNotFoundError("Parent collection not found");
+      }
+      ancestorId =
+        ancestor.parent_collection_id === null
+          ? null
+          : bytesToId(ancestor.parent_collection_id);
+    }
+  }
+
   /** Requires a parent to be a collection in the same workspace. */
   async #validateParent(
     transaction: Transaction<DatabaseSchema>,
@@ -1000,6 +1378,28 @@ export class RequestService {
           );
     const row = await query.executeTakeFirstOrThrow();
     return row.position === null ? 0 : Number(row.position) + 1;
+  }
+
+  /** Returns the optimistic ordering revision shared by one sibling list. */
+  async #currentOrderRevision(
+    transaction: Transaction<DatabaseSchema>,
+    workspaceId: EntityId,
+    parentCollectionId: EntityId | null,
+  ): Promise<number> {
+    let query = transaction
+      .selectFrom("workspace_tree_nodes")
+      .select(({ fn }) => fn.max<number>("order_revision").as("order_revision"))
+      .where("workspace_id", "=", idToBytes(workspaceId));
+    query =
+      parentCollectionId === null
+        ? query.where("parent_collection_id", "is", null)
+        : query.where(
+            "parent_collection_id",
+            "=",
+            idToBytes(parentCollectionId),
+          );
+    const row = await query.executeTakeFirstOrThrow();
+    return row.order_revision === null ? 0 : Number(row.order_revision);
   }
 }
 

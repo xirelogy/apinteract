@@ -50,6 +50,10 @@ const zhHansMessages = {
     properties: "工作区属性",
     propertiesDescription: "重命名此工作区并管理所有请求继承的请求头和变量。",
     propertiesTitle: "工作区属性",
+    reorderHint:
+      "拖动以移动。使用键盘时，请按住 Alt 并使用方向键重新排序、缩进或减少缩进。",
+    reorderRequested: "已将{name}移动到第 {position} 位。",
+    moveRequested: "正在将{name}移动到新位置。",
     headersDescription:
       "启用的请求头将应用于此工作区中的所有请求，除非被更近的作用域覆盖。",
     select: "选择工作区",
@@ -274,6 +278,8 @@ const zhHansMessages = {
     operationFailed: "操作失败。",
     parentRequired: "请先选择所需的上级集合。",
     requestTabClosed: "此请求标签页已关闭。",
+    tree_move_invalid: "不允许此移动。集合不能包含自身或其任何上级集合。",
+    tree_order_conflict: "树的顺序已在其他位置更改。请重新移动该项目。",
     variable_resolution_failed: "请求包含无法解析的变量。",
   },
 } satisfies MessageSchema;
@@ -327,6 +333,10 @@ const zhHantMessages = {
     properties: "工作區屬性",
     propertiesDescription: "重新命名此工作區並管理所有請求繼承的標頭和變數。",
     propertiesTitle: "工作區屬性",
+    reorderHint:
+      "拖曳以移動。使用鍵盤時，請按住 Alt 並使用方向鍵重新排序、縮排或減少縮排。",
+    reorderRequested: "已將{name}移至第 {position} 位。",
+    moveRequested: "正在將{name}移至新位置。",
     headersDescription:
       "啟用的標頭會套用到此工作區中的所有請求，除非被較近的範圍覆寫。",
     select: "選擇工作區",
@@ -552,6 +562,8 @@ const zhHantMessages = {
     operationFailed: "操作失敗。",
     parentRequired: "請先選擇所需的上層集合。",
     requestTabClosed: "此請求分頁已關閉。",
+    tree_move_invalid: "不允許此移動。集合不能包含自身或其任何上層集合。",
+    tree_order_conflict: "樹狀結構的順序已在其他位置變更。請重新移動該項目。",
     variable_resolution_failed: "請求包含無法解析的變數。",
   },
 } satisfies MessageSchema;

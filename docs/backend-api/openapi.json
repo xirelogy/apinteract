@@ -570,6 +570,12 @@
             "$ref": "#/components/schemas/TreeListCommand"
           },
           {
+            "$ref": "#/components/schemas/TreeReorderCommand"
+          },
+          {
+            "$ref": "#/components/schemas/TreeMoveCommand"
+          },
+          {
             "$ref": "#/components/schemas/CollectionCreateCommand"
           },
           {
@@ -843,6 +849,103 @@
                         "type": "null"
                       }
                     ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "TreeReorderCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "tree.reorder"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "workspaceId",
+                  "parentCollectionId",
+                  "expectedOrderRevision",
+                  "orderedNodeIds"
+                ],
+                "properties": {
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/WorkspaceId"
+                  },
+                  "parentCollectionId": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/CollectionId"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "expectedOrderRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "orderedNodeIds": {
+                    "type": "array",
+                    "maxItems": 2000,
+                    "uniqueItems": true,
+                    "items": {
+                      "$ref": "#/components/schemas/UuidV7"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "TreeMoveCommand": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "tree.move"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "workspaceId",
+                  "nodeId",
+                  "targetNodeId",
+                  "placement",
+                  "expectedSourceOrderRevision"
+                ],
+                "properties": {
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/WorkspaceId"
+                  },
+                  "nodeId": {
+                    "$ref": "#/components/schemas/UuidV7"
+                  },
+                  "targetNodeId": {
+                    "$ref": "#/components/schemas/UuidV7"
+                  },
+                  "placement": {
+                    "type": "string",
+                    "enum": ["before", "inside", "after"]
+                  },
+                  "expectedSourceOrderRevision": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 }
               }
@@ -1666,7 +1769,7 @@
       "TreeNode": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["nodeId", "kind", "name", "position"],
+        "required": ["nodeId", "kind", "name", "position", "orderRevision"],
         "properties": {
           "nodeId": {
             "$ref": "#/components/schemas/UuidV7"
@@ -1681,6 +1784,11 @@
           "position": {
             "type": "integer",
             "minimum": 0
+          },
+          "orderRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optimistic concurrency revision shared by this sibling list."
           },
           "method": {
             "$ref": "#/components/schemas/HttpMethod"

@@ -205,6 +205,8 @@ export interface components {
       | components["schemas"]["WorkspaceGetCommand"]
       | components["schemas"]["WorkspaceUpdateCommand"]
       | components["schemas"]["TreeListCommand"]
+      | components["schemas"]["TreeReorderCommand"]
+      | components["schemas"]["TreeMoveCommand"]
       | components["schemas"]["CollectionCreateCommand"]
       | components["schemas"]["CollectionGetCommand"]
       | components["schemas"]["CollectionUpdateCommand"]
@@ -323,6 +325,40 @@ export interface components {
        * @enum {string}
        */
       type: "TreeListCommand";
+    };
+    TreeReorderCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "tree.reorder";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+        parentCollectionId: components["schemas"]["CollectionId"] | null;
+        expectedOrderRevision: number;
+        orderedNodeIds: components["schemas"]["UuidV7"][];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "TreeReorderCommand";
+    };
+    TreeMoveCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "tree.move";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+        nodeId: components["schemas"]["UuidV7"];
+        targetNodeId: components["schemas"]["UuidV7"];
+        /** @enum {string} */
+        placement: "before" | "inside" | "after";
+        expectedSourceOrderRevision: number;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "TreeMoveCommand";
     };
     CollectionCreateCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
@@ -672,6 +708,8 @@ export interface components {
       kind: "collection" | "request";
       name: string;
       position: number;
+      /** @description Optimistic concurrency revision shared by this sibling list. */
+      orderRevision: number;
       method?: components["schemas"]["HttpMethod"];
     };
     EnvironmentSummary: {

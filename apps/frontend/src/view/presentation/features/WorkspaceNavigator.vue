@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, provide, ref, watch } from "vue";
 import { FolderPlus, Plus, Settings2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
@@ -9,6 +9,11 @@ import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import { useTreeNavigation } from "@/view/presentation/controls/tree/useTreeNavigation";
 import CreateResourceDialog from "./CreateResourceDialog.vue";
 import WorkspaceTreeNode from "./WorkspaceTreeNode.vue";
+import {
+  workspaceTreeReorderKey,
+  type TreeDropPlacement,
+  type TreeNodeKind,
+} from "./workspace-tree-reorder";
 
 type CreationKind = "workspace" | "collection";
 
@@ -35,6 +40,17 @@ const emit = defineEmits<{
   editCollectionProperties: [collectionId: string];
   editWorkspaceProperties: [workspaceId: string];
   selectRequest: [requestId: string];
+  reorderTree: [
+    parentCollectionId: string | null,
+    orderedNodeIds: readonly string[],
+    expectedOrderRevision: number,
+  ];
+  moveTree: [
+    nodeId: string,
+    targetNodeId: string,
+    placement: TreeDropPlacement,
+    expectedSourceOrderRevision: number,
+  ];
   dismiss: [];
 }>();
 
@@ -66,6 +82,261 @@ const focusableNodeId = computed(
     null,
 );
 const treeNavigation = useTreeNavigation();
+const draggedNodeId = ref<string | null>(null);
+const draggedParentCollectionId = ref<string | null>(null);
+const draggedNodeKind = ref<TreeNodeKind | null>(null);
+const dragging = ref(false);
+const dropTargetNodeId = ref<string | null>(null);
+const dropPlacement = ref<TreeDropPlacement | null>(null);
+const reorderAnnouncement = ref("");
+
+/** Returns the currently loaded children for one reorder boundary. */
+function reorderSiblings(
+  parentCollectionId: string | null,
+): readonly TreeNode[] {
+  return parentCollectionId === null
+    ? props.rootNodes
+    : (props.collectionChildren[parentCollectionId] ?? []);
+}
+
+/** Returns the shared optimistic revision for a loaded sibling list. */
+function siblingOrderRevision(siblings: readonly TreeNode[]): number {
+  return siblings.reduce(
+    (revision, sibling) => Math.max(revision, sibling.orderRevision),
+    0,
+  );
+}
+
+/** Emits a complete sibling order and announces the requested move. */
+function emitReorder(
+  nodeId: string,
+  parentCollectionId: string | null,
+  orderedNodeIds: readonly string[],
+): void {
+  const siblings = reorderSiblings(parentCollectionId);
+  const node = siblings.find((candidate) => candidate.nodeId === nodeId);
+  if (node === undefined || siblings.length < 2) return;
+  const expectedOrderRevision = siblingOrderRevision(siblings);
+  reorderAnnouncement.value = t("workspace.reorderRequested", {
+    name: node.name,
+    position: orderedNodeIds.indexOf(nodeId) + 1,
+  });
+  emit(
+    "reorderTree",
+    parentCollectionId,
+    orderedNodeIds,
+    expectedOrderRevision,
+  );
+}
+
+/** Emits a cross-level move relative to a visible destination node. */
+function emitMove(
+  nodeId: string,
+  sourceParentCollectionId: string | null,
+  targetNodeId: string,
+  placement: TreeDropPlacement,
+): void {
+  const siblings = reorderSiblings(sourceParentCollectionId);
+  const node = siblings.find((candidate) => candidate.nodeId === nodeId);
+  if (node === undefined) return;
+  reorderAnnouncement.value = t("workspace.moveRequested", {
+    name: node.name,
+  });
+  emit(
+    "moveTree",
+    nodeId,
+    targetNodeId,
+    placement,
+    siblingOrderRevision(siblings),
+  );
+}
+
+/** Clears all transient native drag state. */
+function cancelDrag(): void {
+  draggedNodeId.value = null;
+  draggedParentCollectionId.value = null;
+  draggedNodeKind.value = null;
+  dragging.value = false;
+  dropTargetNodeId.value = null;
+  dropPlacement.value = null;
+}
+
+/** Starts a native drag operation for one tree row. */
+function startDrag(
+  event: DragEvent,
+  nodeId: string,
+  parentCollectionId: string | null,
+  nodeKind: TreeNodeKind,
+): void {
+  if (props.busy) {
+    event.preventDefault();
+    return;
+  }
+  dragging.value = true;
+  draggedNodeId.value = nodeId;
+  draggedParentCollectionId.value = parentCollectionId;
+  draggedNodeKind.value = nodeKind;
+  event.dataTransfer?.setData("text/plain", nodeId);
+  if (event.dataTransfer !== null) event.dataTransfer.effectAllowed = "move";
+}
+
+/** Returns whether a destination parent is within the dragged collection. */
+function wouldCreateLoadedCycle(
+  destinationParentCollectionId: string | null,
+): boolean {
+  const movingNodeId = draggedNodeId.value;
+  if (draggedNodeKind.value !== "collection" || movingNodeId === null) {
+    return false;
+  }
+  let ancestorId = destinationParentCollectionId;
+  const visited = new Set<string>();
+  while (ancestorId !== null && !visited.has(ancestorId)) {
+    if (ancestorId === movingNodeId) return true;
+    visited.add(ancestorId);
+    ancestorId = findLoadedParentCollectionId(ancestorId);
+  }
+  return false;
+}
+
+/** Tracks a before, inside, or after destination for the current drag. */
+function updateDropTarget(
+  event: DragEvent,
+  nodeId: string,
+  parentCollectionId: string | null,
+  nodeKind: TreeNodeKind,
+): void {
+  if (!dragging.value) {
+    return;
+  }
+  if (draggedNodeId.value === nodeId) {
+    dropTargetNodeId.value = null;
+    dropPlacement.value = null;
+    return;
+  }
+  const row = event.currentTarget;
+  if (!(row instanceof HTMLElement)) return;
+  const bounds = row.getBoundingClientRect();
+  const relativePosition =
+    bounds.height === 0 ? 0.5 : (event.clientY - bounds.top) / bounds.height;
+  const placement: TreeDropPlacement =
+    nodeKind === "collection" &&
+    relativePosition >= 0.4 &&
+    relativePosition <= 0.6
+      ? "inside"
+      : relativePosition < 0.5
+        ? "before"
+        : "after";
+  const destinationParentCollectionId =
+    placement === "inside" ? nodeId : parentCollectionId;
+  if (wouldCreateLoadedCycle(destinationParentCollectionId)) {
+    dropTargetNodeId.value = null;
+    dropPlacement.value = null;
+    return;
+  }
+  event.preventDefault();
+  if (event.dataTransfer !== null) event.dataTransfer.dropEffect = "move";
+  dropTargetNodeId.value = nodeId;
+  dropPlacement.value = placement;
+}
+
+/** Completes a valid drop as a sibling reorder or cross-level move. */
+function finishDrop(
+  event: DragEvent,
+  nodeId: string,
+  parentCollectionId: string | null,
+  nodeKind: TreeNodeKind,
+): void {
+  updateDropTarget(event, nodeId, parentCollectionId, nodeKind);
+  const movedNodeId = draggedNodeId.value;
+  const sourceParentCollectionId = draggedParentCollectionId.value;
+  const placement = dropPlacement.value;
+  if (movedNodeId === null || placement === null) {
+    cancelDrag();
+    return;
+  }
+  event.preventDefault();
+  const destinationParentCollectionId =
+    placement === "inside" ? nodeId : parentCollectionId;
+  if (sourceParentCollectionId !== destinationParentCollectionId) {
+    emitMove(movedNodeId, sourceParentCollectionId, nodeId, placement);
+    cancelDrag();
+    return;
+  }
+
+  const remaining = reorderSiblings(sourceParentCollectionId)
+    .map((node) => node.nodeId)
+    .filter((candidate) => candidate !== movedNodeId);
+  const targetPosition =
+    placement === "inside" ? remaining.length : remaining.indexOf(nodeId);
+  if (targetPosition < 0) {
+    cancelDrag();
+    return;
+  }
+  remaining.splice(
+    targetPosition + (placement === "after" ? 1 : 0),
+    0,
+    movedNodeId,
+  );
+  emitReorder(movedNodeId, sourceParentCollectionId, remaining);
+  cancelDrag();
+}
+
+/** Moves a focused row by one sibling for keyboard and mobile accessibility. */
+function moveByKeyboard(
+  nodeId: string,
+  parentCollectionId: string | null,
+  offset: -1 | 1,
+): void {
+  if (props.busy) return;
+  const orderedNodeIds = reorderSiblings(parentCollectionId).map(
+    (node) => node.nodeId,
+  );
+  const position = orderedNodeIds.indexOf(nodeId);
+  const destination = position + offset;
+  if (position < 0 || destination < 0 || destination >= orderedNodeIds.length) {
+    return;
+  }
+  [orderedNodeIds[position], orderedNodeIds[destination]] = [
+    orderedNodeIds[destination]!,
+    orderedNodeIds[position]!,
+  ];
+  emitReorder(nodeId, parentCollectionId, orderedNodeIds);
+}
+
+/** Indents a row into the preceding sibling collection. */
+function indentByKeyboard(
+  nodeId: string,
+  parentCollectionId: string | null,
+): void {
+  if (props.busy) return;
+  const siblings = reorderSiblings(parentCollectionId);
+  const position = siblings.findIndex((node) => node.nodeId === nodeId);
+  const precedingNode = siblings[position - 1];
+  if (precedingNode?.kind !== "collection") return;
+  emitMove(nodeId, parentCollectionId, precedingNode.nodeId, "inside");
+}
+
+/** Outdents a row to immediately after its current parent collection. */
+function outdentByKeyboard(
+  nodeId: string,
+  parentCollectionId: string | null,
+): void {
+  if (props.busy || parentCollectionId === null) return;
+  emitMove(nodeId, parentCollectionId, parentCollectionId, "after");
+}
+
+provide(workspaceTreeReorderKey, {
+  draggedNodeId,
+  dropTargetNodeId,
+  dropPlacement,
+  startDrag,
+  updateDropTarget,
+  finishDrop,
+  cancelDrag,
+  moveByKeyboard,
+  indentByKeyboard,
+  outdentByKeyboard,
+});
 
 watch(
   () => props.mobileOpen,
@@ -159,6 +430,19 @@ function findLoadedNodeName(nodeId: string): string | null {
   }
   return null;
 }
+
+/** Finds the parent boundary for a node already represented in the tree. */
+function findLoadedParentCollectionId(nodeId: string): string | null {
+  if (props.rootNodes.some((node) => node.nodeId === nodeId)) return null;
+  for (const [parentCollectionId, children] of Object.entries(
+    props.collectionChildren,
+  )) {
+    if (children.some((node) => node.nodeId === nodeId)) {
+      return parentCollectionId;
+    }
+  }
+  return null;
+}
 </script>
 
 <template>
@@ -221,6 +505,9 @@ function findLoadedNodeName(nodeId: string): string | null {
         </div>
       </div>
       <nav class="workspace-tree" :aria-label="t('workspace.tree')">
+        <p class="visually-hidden" aria-live="polite">
+          {{ reorderAnnouncement }}
+        </p>
         <ul
           v-if="rootNodes.length > 0"
           class="workspace-tree-root"

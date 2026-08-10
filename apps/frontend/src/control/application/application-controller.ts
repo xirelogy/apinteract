@@ -368,6 +368,58 @@ export class ApplicationController {
     });
   }
 
+  /** Persists and reloads one complete sibling order without moving parents. */
+  async reorderTreeNodes(
+    parentCollectionId: string | null,
+    orderedNodeIds: readonly string[],
+    expectedOrderRevision: number,
+  ): Promise<void> {
+    const store = useApplicationStore();
+    const workspaceId = requireSelection(store.selectedWorkspaceId);
+    await this.#run(async () => {
+      await this.#webSocket.command("tree.reorder", {
+        workspaceId,
+        parentCollectionId,
+        expectedOrderRevision,
+        orderedNodeIds,
+      });
+      await this.#reloadCollection(workspaceId, parentCollectionId);
+    });
+  }
+
+  /** Reparents one tree node relative to a visible destination node. */
+  async moveTreeNode(
+    nodeId: string,
+    targetNodeId: string,
+    placement: "before" | "inside" | "after",
+    expectedSourceOrderRevision: number,
+  ): Promise<void> {
+    const store = useApplicationStore();
+    const workspaceId = requireSelection(store.selectedWorkspaceId);
+    await this.#run(async () => {
+      const result = await this.#webSocket.command<{
+        sourceParentCollectionId: string | null;
+        targetParentCollectionId: string | null;
+      }>("tree.move", {
+        workspaceId,
+        nodeId,
+        targetNodeId,
+        placement,
+        expectedSourceOrderRevision,
+      });
+      await Promise.all([
+        this.#reloadCollection(workspaceId, result.sourceParentCollectionId),
+        this.#reloadCollection(workspaceId, result.targetParentCollectionId),
+      ]);
+      if (placement === "inside" && result.targetParentCollectionId !== null) {
+        store.expandedCollectionIds = includeOnce(
+          store.expandedCollectionIds,
+          result.targetParentCollectionId,
+        );
+      }
+    });
+  }
+
   /** Selects and expands a collection after loading its direct children. */
   async selectCollection(collectionId: string): Promise<void> {
     await this.#run(() => this.#selectCollection(collectionId));

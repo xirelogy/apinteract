@@ -48,6 +48,10 @@ export const enUsMessages = {
     propertiesDescription:
       "Rename this workspace and manage headers and variables inherited by every request.",
     propertiesTitle: "Workspace properties",
+    reorderHint:
+      "Drag to move. From the keyboard, use Alt with an arrow key to reorder, indent, or outdent.",
+    reorderRequested: "Moved {name} to position {position}.",
+    moveRequested: "Moving {name} to a new location.",
     headersDescription:
       "Enabled headers apply to every request in this workspace unless a nearer scope overrides them.",
     select: "Select a workspace",
@@ -283,6 +287,10 @@ export const enUsMessages = {
     operationFailed: "The operation failed.",
     parentRequired: "Select the required parent first.",
     requestTabClosed: "The request tab is no longer open.",
+    tree_move_invalid:
+      "That move is not allowed. A collection cannot contain itself or one of its ancestors.",
+    tree_order_conflict:
+      "The tree order changed elsewhere. Try moving the item again.",
     variable_resolution_failed:
       "The request contains a variable that could not be resolved.",
   },
