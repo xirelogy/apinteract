@@ -5,7 +5,7 @@ import {
   type ReadStream,
   type WriteStream,
 } from "node:fs";
-import { mkdir, rename, rm } from "node:fs/promises";
+import { mkdir, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { once } from "node:events";
 
@@ -139,5 +139,19 @@ export class LocalBlobStore {
   /** Opens an immutable blob as a filesystem read stream. */
   open(storageKey: string): ReadStream {
     return createReadStream(join(this.#rootPath, storageKey));
+  }
+
+  /** Reads an immutable blob only when trusted metadata is within a caller limit. */
+  async readWithinLimit(
+    storageKey: string,
+    byteLength: number,
+    maximumBytes: number,
+  ): Promise<Buffer | undefined> {
+    if (byteLength > maximumBytes) return undefined;
+    const bytes = await readFile(join(this.#rootPath, storageKey));
+    if (bytes.byteLength !== byteLength || bytes.byteLength > maximumBytes) {
+      throw new Error("Stored blob length does not match its metadata");
+    }
+    return bytes;
   }
 }

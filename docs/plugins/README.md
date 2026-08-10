@@ -176,9 +176,9 @@ than defining database-specific product rules.
 
 ### Script Runtimes
 
-Script runtimes compile and execute supported languages. APInteract retains
-control of the SDK, sandbox policy, resource limits, secret access, and
-execution phases.
+Script runtimes provide the engine that evaluates request scripts. The
+[scripting guide](../scripting/README.md) explains the helpers available to a
+script and the limits that protect a request and its data.
 
 ### Secret Stores
 

@@ -1339,6 +1339,14 @@
                   "body": {
                     "type": "string",
                     "maxLength": 786432
+                  },
+                  "preRequestScript": {
+                    "type": "string",
+                    "maxLength": 65536
+                  },
+                  "postResponseScript": {
+                    "type": "string",
+                    "maxLength": 65536
                   }
                 }
               }
@@ -1431,6 +1439,14 @@
                   "body": {
                     "type": "string",
                     "maxLength": 786432
+                  },
+                  "preRequestScript": {
+                    "type": "string",
+                    "maxLength": 65536
+                  },
+                  "postResponseScript": {
+                    "type": "string",
+                    "maxLength": 65536
                   }
                 }
               }
@@ -2030,6 +2046,8 @@
           "headers",
           "inheritedHeaders",
           "body",
+          "preRequestScript",
+          "postResponseScript",
           "draftRevision"
         ],
         "properties": {
@@ -2091,6 +2109,14 @@
             "type": "string",
             "maxLength": 786432
           },
+          "preRequestScript": {
+            "type": "string",
+            "maxLength": 65536
+          },
+          "postResponseScript": {
+            "type": "string",
+            "maxLength": 65536
+          },
           "draftRevision": {
             "type": "integer",
             "minimum": 0
@@ -2100,7 +2126,14 @@
       "ExecutionView": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["executionId", "state", "bodyComplete", "createdAt"],
+        "required": [
+          "executionId",
+          "state",
+          "bodyComplete",
+          "createdAt",
+          "scriptLogs",
+          "scriptTests"
+        ],
         "properties": {
           "executionId": {
             "$ref": "#/components/schemas/ExecutionId"
@@ -2149,6 +2182,17 @@
           },
           "error": {
             "$ref": "#/components/schemas/WebSocketError"
+          },
+          "scriptLogs": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ScriptLogEntry" }
+          },
+          "scriptTests": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ScriptTestResult" }
+          },
+          "scriptError": {
+            "$ref": "#/components/schemas/ScriptPhaseError"
           }
         }
       },
@@ -2193,7 +2237,91 @@
           "body": {
             "type": "string",
             "maxLength": 786432
+          },
+          "preRequestScript": {
+            "type": "string",
+            "maxLength": 65536
+          },
+          "postResponseScript": {
+            "type": "string",
+            "maxLength": 65536
           }
+        }
+      },
+      "ScriptLogEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "phase", "level", "message"],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "One-based production order across script logs and tests for this execution."
+          },
+          "phase": {
+            "type": "string",
+            "enum": ["pre-request", "post-response"]
+          },
+          "level": {
+            "type": "string",
+            "enum": ["debug", "info", "warn", "error"]
+          },
+          "message": { "type": "string" },
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "oneOf": [
+                { "type": "string" },
+                { "type": "number" },
+                { "type": "boolean" },
+                { "type": "null" }
+              ]
+            }
+          }
+        }
+      },
+      "ScriptTestResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "name", "status"],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "One-based production order across script logs and tests for this execution."
+          },
+          "name": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["passed", "failed", "errored"]
+          },
+          "message": { "type": "string" },
+          "messageCode": {
+            "type": "string",
+            "description": "Stable localization key for an SDK-generated test message. Omitted for script-authored messages.",
+            "enum": [
+              "assertion_expected_truthy",
+              "assertion_values_not_equal",
+              "assertion_values_not_deeply_equal",
+              "assertion_value_does_not_match",
+              "test_threw_non_error"
+            ]
+          }
+        }
+      },
+      "ScriptPhaseError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phase", "code", "message"],
+        "properties": {
+          "phase": {
+            "type": "string",
+            "enum": ["pre-request", "post-response"]
+          },
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 },
+          "column": { "type": "integer", "minimum": 1 }
         }
       },
       "HttpMethod": {

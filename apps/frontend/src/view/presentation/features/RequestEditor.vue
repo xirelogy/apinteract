@@ -26,6 +26,7 @@ import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TemplateTextControl from "@/view/presentation/controls/TemplateTextControl.vue";
+import TextArea from "@/view/presentation/controls/TextArea.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
 import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
 import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
@@ -84,14 +85,23 @@ const methodOptions = methods.map((option) => ({
   value: option,
   label: option,
 }));
-const requestTabs = ["query", "headers", "body", "variables"] as const;
+const requestTabs = [
+  "query",
+  "headers",
+  "body",
+  "preRequest",
+  "postResponse",
+  "variables",
+] as const;
 const name = ref("");
 const method = ref<HttpMethod>("GET");
 const targetUrl = ref("");
 const query = ref<RequestField[]>([]);
 const headers = ref<RequestField[]>([]);
 const body = ref("");
-const activeTab = ref<"query" | "headers" | "body" | "variables">("query");
+const preRequestScript = ref("");
+const postResponseScript = ref("");
+const activeTab = ref<(typeof requestTabs)[number]>("query");
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 const requestVariableCount = ref<number | null>(null);
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
@@ -105,6 +115,8 @@ watch(
     query.value = editableRequestFields(draft?.query ?? [], true);
     headers.value = editableRequestFields(draft?.headers ?? [], true);
     body.value = draft?.body ?? "";
+    preRequestScript.value = draft?.preRequestScript ?? "";
+    postResponseScript.value = draft?.postResponseScript ?? "";
   },
   { immediate: true },
 );
@@ -226,6 +238,8 @@ function currentDraft(): RequestDraftInput {
     query: meaningfulRequestFields(query.value),
     headers: meaningfulRequestFields(headers.value),
     body: body.value,
+    preRequestScript: preRequestScript.value,
+    postResponseScript: postResponseScript.value,
   };
 }
 
@@ -238,6 +252,8 @@ function emitChange(): void {
     query: meaningfulRequestFields(query.value),
     headers: meaningfulRequestFields(headers.value),
     body: body.value,
+    preRequestScript: preRequestScript.value,
+    postResponseScript: postResponseScript.value,
   });
 }
 
@@ -255,7 +271,15 @@ function requestTabLabel(tab: (typeof requestTabs)[number]): string {
   if (tab === "headers") {
     return t("request.headers");
   }
-  return tab === "body" ? t("request.body") : t("environment.variables");
+  if (tab === "body") {
+    return t("request.body");
+  }
+  if (tab === "preRequest") {
+    return t("scripting.preRequest");
+  }
+  return tab === "postResponse"
+    ? t("scripting.postResponse")
+    : t("environment.variables");
 }
 
 /** Returns the translated singular label for the active structured field. */
@@ -540,6 +564,64 @@ function saveVariables(): void {
               :disabled="busy"
               @input="emitChange"
             />
+          </TabsPanel>
+
+          <TabsPanel
+            v-if="activeTab === 'preRequest'"
+            value="preRequest"
+            class="request-script-editor"
+          >
+            <div class="script-editor-section">
+              <div class="script-editor-heading">
+                <label for="pre-request-script">
+                  {{ t("scripting.preRequest") }}
+                </label>
+                <span>{{ t("scripting.preRequestDescription") }}</span>
+              </div>
+              <TextArea
+                id="pre-request-script"
+                v-model="preRequestScript"
+                class="script-source-input"
+                font="mono"
+                :aria-label="t('scripting.preRequest')"
+                :disabled="busy"
+                spellcheck="false"
+                @input="emitChange"
+              />
+            </div>
+            <p class="script-sdk-help">
+              {{ t("scripting.sdkHelp") }}
+              <code>asdk</code>.
+            </p>
+          </TabsPanel>
+
+          <TabsPanel
+            v-if="activeTab === 'postResponse'"
+            value="postResponse"
+            class="request-script-editor"
+          >
+            <div class="script-editor-section">
+              <div class="script-editor-heading">
+                <label for="post-response-script">
+                  {{ t("scripting.postResponse") }}
+                </label>
+                <span>{{ t("scripting.postResponseDescription") }}</span>
+              </div>
+              <TextArea
+                id="post-response-script"
+                v-model="postResponseScript"
+                class="script-source-input"
+                font="mono"
+                :aria-label="t('scripting.postResponse')"
+                :disabled="busy"
+                spellcheck="false"
+                @input="emitChange"
+              />
+            </div>
+            <p class="script-sdk-help">
+              {{ t("scripting.sdkHelp") }}
+              <code>asdk</code>.
+            </p>
           </TabsPanel>
 
           <TabsPanel

@@ -14,6 +14,7 @@ const COLLECTION_PROFILES_MIGRATION = "0004_collection_profiles";
 const ENVIRONMENTS_MIGRATION = "0005_environments";
 const VARIABLE_SCOPES_MIGRATION = "0006_variable_scopes";
 const WORKSPACE_HEADERS_MIGRATION = "0007_workspace_headers";
+const REQUEST_SCRIPTS_MIGRATION = "0008_request_scripts";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -309,6 +310,13 @@ export class SqliteDatabase {
     if (workspaceHeadersApplied === undefined) {
       this.#migrateWorkspaceHeaders();
     }
+
+    const requestScriptsApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(REQUEST_SCRIPTS_MIGRATION);
+    if (requestScriptsApplied === undefined) {
+      this.#migrateRequestScripts();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -343,6 +351,7 @@ export class SqliteDatabase {
       ENVIRONMENTS_MIGRATION,
       VARIABLE_SCOPES_MIGRATION,
       WORKSPACE_HEADERS_MIGRATION,
+      REQUEST_SCRIPTS_MIGRATION,
     ].some((identifier) => !identifiers.has(identifier));
   }
 
@@ -643,6 +652,21 @@ export class SqliteDatabase {
           ADD COLUMN headers_json TEXT NOT NULL DEFAULT '[]';
       `);
       this.#recordMigration(WORKSPACE_HEADERS_MIGRATION);
+    })();
+  }
+
+  /** Adds request-phase JavaScript sources and persisted execution results. */
+  #migrateRequestScripts(): void {
+    this.#driver.transaction(() => {
+      this.#driver.exec(`
+        ALTER TABLE request_drafts
+          ADD COLUMN pre_request_script TEXT NOT NULL DEFAULT '';
+        ALTER TABLE request_drafts
+          ADD COLUMN post_response_script TEXT NOT NULL DEFAULT '';
+        ALTER TABLE executions
+          ADD COLUMN script_result_json TEXT;
+      `);
+      this.#recordMigration(REQUEST_SCRIPTS_MIGRATION);
     })();
   }
 

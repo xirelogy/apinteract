@@ -21,6 +21,8 @@ describe("ResponsePanel body transfer", () => {
       bodyBlobId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
       createdAt: "2026-07-28T00:00:00.000Z",
       completedAt: "2026-07-28T00:00:01.000Z",
+      scriptLogs: [],
+      scriptTests: [],
     };
     const i18n = createI18n({
       legacy: false,
@@ -53,6 +55,8 @@ describe("ResponsePanel body transfer", () => {
         message: "The proxy is unavailable.",
         errors: [],
       },
+      scriptLogs: [],
+      scriptTests: [],
     };
     const i18n = createI18n({
       legacy: false,
@@ -67,5 +71,87 @@ describe("ResponsePanel body transfer", () => {
     const alert = wrapper.get('[role="alert"]');
     expect(alert.text()).toContain("execution_failed");
     expect(alert.text()).toContain("The proxy is unavailable.");
+  });
+
+  it("shows script logs, tests, and post-response errors", async () => {
+    const execution: ExecutionView = {
+      executionId: "019fa8be-a510-76b9-b73b-69f4c7af7877",
+      state: "completed",
+      status: 200,
+      bodyComplete: true,
+      bodyBytes: 2,
+      createdAt: "2026-07-28T00:00:00.000Z",
+      completedAt: "2026-07-28T00:00:01.000Z",
+      scriptLogs: [
+        {
+          sequence: 1,
+          phase: "pre-request",
+          level: "info",
+          message: "prepared",
+        },
+      ],
+      scriptTests: [
+        {
+          sequence: 2,
+          name: "status is OK",
+          status: "failed",
+          message: "Unlocalized backend fallback",
+          messageCode: "assertion_expected_truthy",
+        },
+      ],
+      scriptError: {
+        phase: "post-response",
+        code: "runtime_error",
+        message: "Example failure",
+        line: 3,
+        column: 2,
+      },
+    };
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(ResponsePanel, {
+      props: { execution },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Scripts"))
+      ?.trigger("click");
+    expect(wrapper.get(".script-results").text()).toContain("prepared");
+    expect(wrapper.get(".script-results").text()).toContain("status is OK");
+    expect(wrapper.get(".script-results").text()).toContain(
+      "Expected a truthy value",
+    );
+    expect(wrapper.get(".script-results").text()).not.toContain(
+      "Unlocalized backend fallback",
+    );
+    expect(wrapper.get(".script-results").text()).toContain("Example failure");
+    expect(wrapper.get(".script-results").text()).toContain(
+      "Script failed while running",
+    );
+    expect(wrapper.get(".script-results").text()).toContain("runtime_error");
+    expect(wrapper.get(".script-results").text()).toContain("Line 3, column 2");
+    expect(
+      wrapper
+        .findAll(".script-result-card")
+        .map((card) => card.attributes("data-kind")),
+    ).toEqual(["log", "test", "error"]);
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Raw"))
+      ?.trigger("click");
+    expect(wrapper.get<HTMLElement>(".script-results").element.hidden).toBe(
+      true,
+    );
+    expect(
+      wrapper
+        .get(".body-preview")
+        .element.closest<HTMLElement>('[role="tabpanel"]')?.hidden,
+    ).toBe(false);
   });
 });

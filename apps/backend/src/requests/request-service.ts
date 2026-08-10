@@ -14,7 +14,13 @@ import {
   type EntityId,
 } from "../foundation/id.js";
 import type { DatabaseSchema } from "../persistence/schema.js";
+import type { ScriptRequest } from "../scripting/script-types.js";
 import type { VariableService } from "../variables/variable-service.js";
+import type {
+  VariablePreviewSource,
+  VariableProfileEvidence,
+} from "../variables/variable-service.js";
+import type { ResolvedVariable } from "../variables/variable-profile-store.js";
 import type { WorkspaceService } from "../workspaces/workspace-service.js";
 import {
   normalizeName,
@@ -69,6 +75,8 @@ export interface RequestView {
   /** Contains effective collection headers before request-local overrides. */
   readonly inheritedHeaders: readonly RequestField[];
   readonly body: string;
+  readonly preRequestScript: string;
+  readonly postResponseScript: string;
   readonly draftRevision: number;
 }
 
@@ -78,17 +86,27 @@ export interface RequestExecutionInput {
   readonly query: readonly RequestField[];
   readonly headers: readonly RequestField[];
   readonly body: string;
+  readonly preRequestScript?: string;
+  readonly postResponseScript?: string;
 }
 
 export interface ExecutionRequestSnapshot extends RequestExecutionInput {
   readonly workspaceId: EntityId;
   readonly requestId?: EntityId;
+  readonly bodyBytes?: Uint8Array;
+  readonly preRequestScript: string;
+  readonly postResponseScript: string;
 }
 
 export interface PreparedExecution {
   readonly executionId: EntityId;
   readonly revisionId?: EntityId;
   readonly request: ExecutionRequestSnapshot;
+  readonly variables: readonly ResolvedVariable[];
+  readonly variableSources: ReadonlyMap<string, VariablePreviewSource>;
+  readonly variableEvidence: readonly VariableProfileEvidence[];
+  readonly postScriptRequest?: ScriptRequest;
+  readonly materialized: boolean;
   readonly createdAt: number;
 }
 
@@ -105,6 +123,8 @@ interface RequestRow {
   readonly query_json: string;
   readonly headers_json: string;
   readonly body_text: string;
+  readonly pre_request_script: string;
+  readonly post_response_script: string;
   readonly draft_revision: number;
 }
 
@@ -360,6 +380,8 @@ export class RequestService {
     query: readonly RequestField[],
     headers: readonly RequestField[],
     body: string,
+    preRequestScript = "",
+    postResponseScript = "",
   ): Promise<RequestView> {
     const content = normalizeExecutionInput({
       method,
@@ -367,6 +389,8 @@ export class RequestService {
       query,
       headers,
       body,
+      preRequestScript,
+      postResponseScript,
     });
     const normalizedName = normalizeName(name);
     return this.#database.transaction().execute(async (transaction) => {
@@ -405,6 +429,8 @@ export class RequestService {
           query_json: JSON.stringify(content.query),
           headers_json: JSON.stringify(content.headers),
           body_text: content.body,
+          pre_request_script: content.preRequestScript,
+          post_response_script: content.postResponseScript,
           updated_by: idToBytes(userId),
           updated_at: now,
         })
@@ -434,6 +460,8 @@ export class RequestService {
         headers: content.headers,
         inheritedHeaders,
         body: content.body,
+        preRequestScript: content.preRequestScript,
+        postResponseScript: content.postResponseScript,
         draftRevision: 0,
       };
     });
@@ -461,6 +489,8 @@ export class RequestService {
     query: readonly RequestField[],
     headers: readonly RequestField[],
     body: string,
+    preRequestScript = "",
+    postResponseScript = "",
   ): Promise<RequestView> {
     const normalizedName = normalizeName(name);
     const content = normalizeExecutionInput({
@@ -469,6 +499,8 @@ export class RequestService {
       query,
       headers,
       body,
+      preRequestScript,
+      postResponseScript,
     });
     const queryJson = JSON.stringify(content.query);
     const headersJson = JSON.stringify(content.headers);
@@ -485,7 +517,9 @@ export class RequestService {
         row.target_url === content.targetUrl &&
         row.query_json === queryJson &&
         row.headers_json === headersJson &&
-        row.body_text === content.body
+        row.body_text === content.body &&
+        row.pre_request_script === content.preRequestScript &&
+        row.post_response_script === content.postResponseScript
       ) {
         return this.#requestView(transaction, row);
       }
@@ -502,6 +536,8 @@ export class RequestService {
           query_json: queryJson,
           headers_json: headersJson,
           body_text: content.body,
+          pre_request_script: content.preRequestScript,
+          post_response_script: content.postResponseScript,
           draft_revision: expectedDraftRevision + 1,
           updated_by: idToBytes(userId),
           updated_at: Date.now(),
@@ -522,6 +558,8 @@ export class RequestService {
         query: content.query,
         headers: content.headers,
         body: content.body,
+        preRequestScript: content.preRequestScript,
+        postResponseScript: content.postResponseScript,
         draftRevision: expectedDraftRevision + 1,
       };
     });
@@ -554,11 +592,14 @@ export class RequestService {
         request.parentCollectionId,
         requestId,
       );
-      const composed = composeWithVariables(
-        { ...request, headers: resolvedHeaders },
-        new VariableResolver(variableProfile.variables),
-      );
-      const resolvedRequest = composed.request;
+      const executionRequest = { ...request, headers: resolvedHeaders };
+      const eagerlyComposed =
+        request.preRequestScript === "" && request.postResponseScript === ""
+          ? composeWithVariables(
+              executionRequest,
+              new VariableResolver(variableProfile.variables),
+            )
+          : undefined;
       const content = JSON.stringify({
         method: request.method,
         targetMode: request.targetMode,
@@ -567,6 +608,8 @@ export class RequestService {
         query: request.query,
         headers: resolvedHeaders,
         body: request.body,
+        preRequestScript: request.preRequestScript,
+        postResponseScript: request.postResponseScript,
       });
       const fingerprint = createHash("sha256").update(content).digest("hex");
       const latest = await transaction
@@ -601,11 +644,11 @@ export class RequestService {
           created_by: idToBytes(userId),
           state: "created",
           snapshot_json: JSON.stringify({
-            ...composed.persisted,
+            ...(eagerlyComposed?.persisted ?? executionRequest),
             targetMode: "absolute",
             queryMode: "structured",
             variableProfiles: variableProfile.evidence,
-            secretReferences: composed.secretReferences,
+            secretReferences: eagerlyComposed?.secretReferences ?? [],
           }),
           response_status: null,
           response_headers_json: null,
@@ -614,6 +657,7 @@ export class RequestService {
           body_bytes: null,
           body_sha256: null,
           error_json: null,
+          script_result_json: null,
           created_at: createdAt,
           completed_at: null,
         })
@@ -626,10 +670,21 @@ export class RequestService {
           executionId,
           requestId,
           revisionId,
-          secretBearing: composed.secretReferences.length > 0,
+          secretBearing: variableProfile.variables.some(
+            (variable) => variable.kind === "secret",
+          ),
         },
       });
-      return { executionId, revisionId, request: resolvedRequest, createdAt };
+      return {
+        executionId,
+        revisionId,
+        request: eagerlyComposed?.request ?? executionRequest,
+        variables: variableProfile.variables,
+        variableSources: variableProfile.sources,
+        variableEvidence: variableProfile.evidence,
+        materialized: eagerlyComposed !== undefined,
+        createdAt,
+      };
     });
   }
 
@@ -661,19 +716,23 @@ export class RequestService {
         parentCollectionId,
         null,
       );
-      const composed = composeWithVariables(
-        { ...localRequest, headers: resolvedHeaders },
-        new VariableResolver(variableProfile.variables),
-      );
-      const request = composed.request;
+      const executionRequest = { ...localRequest, headers: resolvedHeaders };
+      const eagerlyComposed =
+        localRequest.preRequestScript === "" &&
+        localRequest.postResponseScript === ""
+          ? composeWithVariables(
+              executionRequest,
+              new VariableResolver(variableProfile.variables),
+            )
+          : undefined;
       const executionId = createEntityId();
       const createdAt = Date.now();
       const snapshot = JSON.stringify({
-        ...composed.persisted,
+        ...(eagerlyComposed?.persisted ?? executionRequest),
         targetMode: "absolute",
         queryMode: "structured",
         variableProfiles: variableProfile.evidence,
-        secretReferences: composed.secretReferences,
+        secretReferences: eagerlyComposed?.secretReferences ?? [],
       });
       await transaction
         .insertInto("executions")
@@ -692,6 +751,7 @@ export class RequestService {
           body_bytes: null,
           body_sha256: null,
           error_json: null,
+          script_result_json: null,
           created_at: createdAt,
           completed_at: null,
         })
@@ -704,10 +764,20 @@ export class RequestService {
           executionId,
           requestId: null,
           revisionId: null,
-          secretBearing: composed.secretReferences.length > 0,
+          secretBearing: variableProfile.variables.some(
+            (variable) => variable.kind === "secret",
+          ),
         },
       });
-      return { executionId, request, createdAt };
+      return {
+        executionId,
+        request: eagerlyComposed?.request ?? executionRequest,
+        variables: variableProfile.variables,
+        variableSources: variableProfile.sources,
+        variableEvidence: variableProfile.evidence,
+        materialized: eagerlyComposed !== undefined,
+        createdAt,
+      };
     });
   }
 
@@ -756,6 +826,8 @@ export class RequestService {
         "draft.query_json",
         "draft.headers_json",
         "draft.body_text",
+        "draft.pre_request_script",
+        "draft.post_response_script",
         "node.workspace_id",
         "node.parent_collection_id",
         "node.name",
@@ -1048,21 +1120,34 @@ function validateBody(value: string): string {
   return value;
 }
 
+/** Bounds one request script before it is persisted or sent to a worker. */
+function validateScript(value: string): string {
+  if (Buffer.byteLength(value, "utf8") > 65_536) {
+    throw new Error("Request script is too large");
+  }
+  return value;
+}
+
 /** Normalizes and validates content shared by saved and temporary executions. */
 function normalizeExecutionInput(
   input: RequestExecutionInput,
-): RequestExecutionInput {
+): RequestExecutionInput & {
+  readonly preRequestScript: string;
+  readonly postResponseScript: string;
+} {
   return {
     method: validateMethod(input.method),
     targetUrl: validateTargetTemplate(input.targetUrl),
     query: validateQuery(input.query),
     headers: validateHeaders(input.headers),
     body: validateBody(input.body),
+    preRequestScript: validateScript(input.preRequestScript ?? ""),
+    postResponseScript: validateScript(input.postResponseScript ?? ""),
   };
 }
 
 /** Materializes variable-bearing request fields and builds a secret-safe view. */
-function composeWithVariables(
+export function composeWithVariables(
   request: ExecutionRequestSnapshot,
   resolver: VariableResolver,
 ): {
@@ -1101,14 +1186,15 @@ function composeWithVariables(
       persisted: { ...field, value: value.secret ? "[secret]" : value.value },
     };
   });
-  const body = resolver.interpolate(request.body);
-  retain(body.secretReferences);
+  const body =
+    request.bodyBytes === undefined ? resolver.interpolate(request.body) : null;
+  if (body !== null) retain(body.secretReferences);
   const materialized: ExecutionRequestSnapshot = {
     ...request,
     targetUrl: validateTargetUrl(target.value),
     query: validateQuery(query.map((field) => field.materialized)),
     headers: validateHeaders(headers.map((field) => field.materialized)),
-    body: validateBody(body.value),
+    body: body === null ? "" : validateBody(body.value),
   };
   return {
     request: materialized,
@@ -1117,7 +1203,14 @@ function composeWithVariables(
       targetUrl: target.secret ? "[secret]" : materialized.targetUrl,
       query: query.map((field) => field.persisted),
       headers: headers.map((field) => field.persisted),
-      body: body.secret ? "[secret]" : body.value,
+      body:
+        request.bodyBytes === undefined
+          ? body?.secret
+            ? "[secret]"
+            : (body?.value ?? "")
+          : `[binary:${Buffer.from(request.bodyBytes).toString("base64")}]`,
+      preRequestScript: materialized.preRequestScript,
+      postResponseScript: materialized.postResponseScript,
     },
     secretReferences: [...references.values()],
   };
@@ -1136,6 +1229,8 @@ function mapRequest(row: {
   readonly query_json: string;
   readonly headers_json: string;
   readonly body_text: string;
+  readonly pre_request_script: string;
+  readonly post_response_script: string;
   readonly draft_revision: number;
 }): Omit<RequestView, "inheritedHeaders"> {
   return {
@@ -1153,6 +1248,8 @@ function mapRequest(row: {
     query: JSON.parse(row.query_json) as RequestField[],
     headers: JSON.parse(row.headers_json) as RequestField[],
     body: row.body_text,
+    preRequestScript: row.pre_request_script,
+    postResponseScript: row.post_response_script,
     draftRevision: row.draft_revision,
   };
 }

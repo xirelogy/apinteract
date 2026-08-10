@@ -6,6 +6,7 @@ import { EnvironmentService } from "../environments/environment-service.js";
 import { IdentityService } from "../identity/identity-service.js";
 import { SqliteDatabase } from "../persistence/sqlite-database.js";
 import { ProxyClient } from "../proxy/proxy-client.js";
+import { ScriptService } from "../scripting/script-service.js";
 import { RequestService } from "../requests/request-service.js";
 import { SessionService } from "../sessions/session-service.js";
 import { VariableService } from "../variables/variable-service.js";
@@ -23,6 +24,7 @@ export interface Application {
   readonly requests: RequestService;
   readonly executions: ExecutionService;
   readonly proxy: ProxyClient;
+  readonly scripts: ScriptService;
   close(): Promise<void>;
 }
 
@@ -67,6 +69,7 @@ export async function createApplication(
     configuration.proxy.endpoint,
     configuration.proxy.bearerToken,
   );
+  const scripts = new ScriptService();
   const executions = new ExecutionService(
     database.db,
     requests,
@@ -74,6 +77,7 @@ export async function createApplication(
     proxy,
     blobs,
     audit,
+    scripts,
   );
 
   return {
@@ -88,8 +92,10 @@ export async function createApplication(
     requests,
     executions,
     proxy,
+    scripts,
     close: async () => {
       await executions.close();
+      await scripts.close();
       await audit.publishPending();
       await database.close();
     },

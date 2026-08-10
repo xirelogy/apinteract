@@ -541,6 +541,8 @@ export interface components {
         query: components["schemas"]["RequestField"][];
         headers: components["schemas"]["RequestField"][];
         body: string;
+        preRequestScript?: string;
+        postResponseScript?: string;
       };
     } & {
       /**
@@ -575,6 +577,8 @@ export interface components {
         query: components["schemas"]["RequestField"][];
         headers: components["schemas"]["RequestField"][];
         body: string;
+        preRequestScript?: string;
+        postResponseScript?: string;
       };
     } & {
       /**
@@ -816,6 +820,8 @@ export interface components {
       /** @description Effective enabled headers inherited from the request's collection ancestry before request-local overrides. */
       inheritedHeaders: components["schemas"]["RequestField"][];
       body: string;
+      preRequestScript: string;
+      postResponseScript: string;
       draftRevision: number;
     };
     ExecutionView: {
@@ -833,6 +839,9 @@ export interface components {
       createdAt: components["schemas"]["UtcDateTime"];
       completedAt?: components["schemas"]["UtcDateTime"];
       error?: components["schemas"]["WebSocketError"];
+      scriptLogs: components["schemas"]["ScriptLogEntry"][];
+      scriptTests: components["schemas"]["ScriptTestResult"][];
+      scriptError?: components["schemas"]["ScriptPhaseError"];
     };
     HeaderField: {
       name: string;
@@ -845,6 +854,46 @@ export interface components {
       query: components["schemas"]["RequestField"][];
       headers: components["schemas"]["RequestField"][];
       body: string;
+      preRequestScript?: string;
+      postResponseScript?: string;
+    };
+    ScriptLogEntry: {
+      /** @description One-based production order across script logs and tests for this execution. */
+      sequence: number;
+      /** @enum {string} */
+      phase: "pre-request" | "post-response";
+      /** @enum {string} */
+      level: "debug" | "info" | "warn" | "error";
+      message: string;
+      fields?: {
+        [key: string]: string | number | boolean | null;
+      };
+    };
+    ScriptTestResult: {
+      /** @description One-based production order across script logs and tests for this execution. */
+      sequence: number;
+      name: string;
+      /** @enum {string} */
+      status: "passed" | "failed" | "errored";
+      message?: string;
+      /**
+       * @description Stable localization key for an SDK-generated test message. Omitted for script-authored messages.
+       * @enum {string}
+       */
+      messageCode?:
+        | "assertion_expected_truthy"
+        | "assertion_values_not_equal"
+        | "assertion_values_not_deeply_equal"
+        | "assertion_value_does_not_match"
+        | "test_threw_non_error";
+    };
+    ScriptPhaseError: {
+      /** @enum {string} */
+      phase: "pre-request" | "post-response";
+      code: string;
+      message: string;
+      line?: number;
+      column?: number;
     };
     /** @enum {string} */
     HttpMethod:

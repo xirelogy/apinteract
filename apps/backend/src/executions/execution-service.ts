@@ -9,6 +9,7 @@ import {
   type StoredBlob,
 } from "../blobs/local-blob-store.js";
 import { bytesToId, idToBytes, type EntityId } from "../foundation/id.js";
+import { VariableResolver } from "../environments/variable-resolver.js";
 import type { DatabaseSchema } from "../persistence/schema.js";
 import type { ProxyClient } from "../proxy/proxy-client.js";
 import { ProxyExecutionError } from "../proxy/proxy-client.js";
@@ -17,8 +18,25 @@ import type {
   RequestService,
   PreparedExecution,
 } from "../requests/request-service.js";
+import { composeWithVariables } from "../requests/request-service.js";
+import { ScriptService } from "../scripting/script-service.js";
+import {
+  ScriptExecutionError,
+  type ScriptTestResult,
+} from "../scripting/script-types.js";
 import type { WorkspaceService } from "../workspaces/workspace-service.js";
 import { ResourceNotFoundError } from "../workspaces/workspace-service.js";
+import {
+  executionRequestFromScript,
+  postResponseScriptView,
+  preRequestScriptView,
+  scriptExecutionContext,
+  scriptPhaseError,
+  scriptVariables,
+  type PhasedScriptLog,
+  type ScriptPhaseError,
+  type ScriptSummary,
+} from "./script-execution-adapter.js";
 
 type ResponseHead = ProxyComponents["schemas"]["ResponseHead"];
 type ResponseComplete = ProxyComponents["schemas"]["ResponseComplete"];
@@ -54,6 +72,9 @@ export interface ExecutionView {
     readonly message: string;
     readonly errors: readonly [];
   };
+  readonly scriptLogs: readonly PhasedScriptLog[];
+  readonly scriptTests: readonly ScriptTestResult[];
+  readonly scriptError?: ScriptPhaseError;
 }
 
 export interface ExecutionBody {
@@ -76,6 +97,7 @@ export class ExecutionService {
   readonly #proxy: ProxyClient;
   readonly #blobs: LocalBlobStore;
   readonly #audit: AuditService;
+  readonly #scripts: ScriptService;
   readonly #starting = new Set<Promise<ExecutionView>>();
   readonly #active = new Set<Promise<void>>();
   #accepting = true;
@@ -87,6 +109,7 @@ export class ExecutionService {
     proxy: ProxyClient,
     blobs: LocalBlobStore,
     audit: AuditService,
+    scripts = new ScriptService(),
   ) {
     this.#database = database;
     this.#requests = requests;
@@ -94,6 +117,7 @@ export class ExecutionService {
     this.#proxy = proxy;
     this.#blobs = blobs;
     this.#audit = audit;
+    this.#scripts = scripts;
   }
 
   /** Starts asynchronous proxy execution and returns its initial running view. */
@@ -180,6 +204,8 @@ export class ExecutionService {
       state: "running",
       bodyComplete: false,
       createdAt: new Date(prepared.createdAt).toISOString(),
+      scriptLogs: [],
+      scriptTests: [],
     };
   }
 
@@ -237,20 +263,73 @@ export class ExecutionService {
   ): Promise<void> {
     const writer = this.#blobs.createWriter();
     let head: ResponseHead | undefined;
+    let working = prepared;
+    let local: Readonly<Record<string, string>> = {};
+    let scripts: ScriptSummary = { logs: [], tests: [] };
     try {
+      const resolver = new VariableResolver(prepared.variables);
+      if (prepared.request.preRequestScript.trim() !== "") {
+        const result = await this.#scripts.runPreRequest(
+          prepared.request.preRequestScript,
+          {
+            execution: scriptExecutionContext(prepared),
+            request: preRequestScriptView(prepared.request, resolver),
+            variables: scriptVariables(prepared, resolver),
+          },
+        );
+        local = result.local;
+        scripts = {
+          logs: result.logs.map((entry) => ({
+            ...entry,
+            phase: "pre-request" as const,
+          })),
+          tests: [],
+        };
+        working = {
+          ...prepared,
+          request: executionRequestFromScript(prepared.request, result.request),
+        };
+      }
+      if (!working.materialized) {
+        const templateRequest = working.request;
+        const composed = composeWithVariables(templateRequest, resolver);
+        working = {
+          ...working,
+          request: composed.request,
+          postScriptRequest: postResponseScriptView(
+            templateRequest,
+            composed.request,
+            resolver,
+          ),
+          materialized: true,
+        };
+        await this.#database
+          .updateTable("executions")
+          .set({
+            snapshot_json: JSON.stringify({
+              ...composed.persisted,
+              targetMode: "absolute",
+              queryMode: "structured",
+              variableProfiles: prepared.variableEvidence,
+              secretReferences: composed.secretReferences,
+            }),
+            script_result_json: JSON.stringify(scripts),
+          })
+          .where("id", "=", idToBytes(prepared.executionId))
+          .execute();
+      }
       // Sink callbacks are awaited by ProxyClient, so filesystem writes apply
       // backpressure to the proxy response stream.
       await this.#proxy.execute(
-        prepared.executionId,
-        prepared.request.method,
-        materializeTargetUrl(
-          prepared.request.targetUrl,
-          prepared.request.query,
-        ),
-        prepared.request.headers
+        working.executionId,
+        working.request.method,
+        materializeTargetUrl(working.request.targetUrl, working.request.query),
+        working.request.headers
           .filter((header) => header.enabled)
           .map(({ name, value }) => ({ name, value })),
-        Buffer.from(prepared.request.body, "utf8"),
+        working.request.bodyBytes === undefined
+          ? Buffer.from(working.request.body, "utf8")
+          : Buffer.from(working.request.bodyBytes),
         {
           responseHead: async (value) => {
             head = value;
@@ -278,18 +357,22 @@ export class ExecutionService {
           },
           complete: async (value) => {
             await this.#complete(
-              prepared,
+              working,
               userId,
               writer,
               head,
               value,
+              local,
+              scripts,
               publish,
             );
           },
         },
       );
     } catch (cause) {
-      await this.#fail(prepared, userId, writer, head, cause, publish);
+      const error = scriptPhaseError(cause, "pre-request");
+      if (error !== undefined) scripts = { ...scripts, error };
+      await this.#fail(working, userId, writer, head, cause, scripts, publish);
     }
   }
 
@@ -300,6 +383,8 @@ export class ExecutionService {
     writer: LocalBlobWriter,
     head: ResponseHead | undefined,
     complete: ResponseComplete,
+    local: Readonly<Record<string, string>>,
+    scripts: ScriptSummary,
     publish: (event: ExecutionEvent) => void,
   ): Promise<void> {
     if (head === undefined) {
@@ -316,6 +401,91 @@ export class ExecutionService {
         "Stored response body does not match proxy completion metadata",
       );
     }
+    if (prepared.request.postResponseScript.trim() !== "") {
+      try {
+        let body: Buffer | undefined;
+        try {
+          body = await this.#blobs.readWithinLimit(
+            blob.storageKey,
+            blob.byteLength,
+            1_048_576,
+          );
+        } catch (cause) {
+          throw scriptHostError(
+            "response_body_unavailable",
+            "The stored response body could not be read for the post-response script",
+            cause,
+          );
+        }
+        let requestForScript;
+        try {
+          requestForScript =
+            prepared.postScriptRequest ??
+            postResponseScriptView(
+              prepared.request,
+              prepared.request,
+              new VariableResolver(prepared.variables),
+            );
+        } catch (cause) {
+          throw scriptHostError(
+            "runtime_error",
+            "The backend could not prepare the request context for the post-response script",
+            cause,
+          );
+        }
+        const result = await this.#scripts.runPostResponse(
+          prepared.request.postResponseScript,
+          {
+            execution: scriptExecutionContext(prepared),
+            request: requestForScript,
+            response: {
+              status: head.status,
+              headers: head.headers.map((header) => ({
+                ...header,
+                readable: true,
+                sensitive: false,
+              })),
+              body: {
+                size: blob.byteLength,
+                sha256: blob.sha256,
+                available: body !== undefined,
+                ...(body === undefined
+                  ? { unavailableReason: "too_large" as const }
+                  : { bytes: body }),
+              },
+            },
+            variables: scriptVariables(
+              prepared,
+              new VariableResolver(prepared.variables),
+            ),
+            local,
+          },
+        );
+        const sequenceOffset = scripts.logs.reduce(
+          (latest, entry) => Math.max(latest, entry.sequence),
+          0,
+        );
+        scripts = {
+          logs: [
+            ...scripts.logs,
+            ...result.logs.map((entry) => ({
+              ...entry,
+              sequence: entry.sequence + sequenceOffset,
+              phase: "post-response" as const,
+            })),
+          ],
+          tests: result.tests.map((test) => ({
+            ...test,
+            sequence: test.sequence + sequenceOffset,
+          })),
+        };
+      } catch (cause) {
+        scripts = {
+          ...scripts,
+          error: scriptPhaseError(cause, "post-response"),
+        };
+      }
+    }
     const view = await this.#persistTerminal(
       prepared,
       userId,
@@ -323,6 +493,7 @@ export class ExecutionService {
       head,
       true,
       null,
+      scripts,
     );
     publish({
       type: "execution.completed",
@@ -338,6 +509,7 @@ export class ExecutionService {
     writer: LocalBlobWriter,
     head: ResponseHead | undefined,
     cause: unknown,
+    scripts: ScriptSummary,
     publish: (event: ExecutionEvent) => void,
   ): Promise<void> {
     let blob: StoredBlob | undefined;
@@ -356,6 +528,7 @@ export class ExecutionService {
       head,
       false,
       error,
+      scripts,
     );
     publish({
       type: "execution.failed",
@@ -372,6 +545,7 @@ export class ExecutionService {
     head: ResponseHead | undefined,
     bodyComplete: boolean,
     error: { readonly code: string; readonly message: string } | null,
+    scripts: ScriptSummary,
   ): Promise<ExecutionView> {
     const completedAt = Date.now();
     // The file is committed before this transaction. Blob metadata, its
@@ -415,6 +589,7 @@ export class ExecutionService {
           body_bytes: blob?.byteLength ?? 0,
           body_sha256: blob?.sha256 ?? null,
           error_json: error === null ? null : JSON.stringify(error),
+          script_result_json: JSON.stringify(scripts),
           completed_at: completedAt,
         })
         .where("id", "=", idToBytes(prepared.executionId))
@@ -455,8 +630,29 @@ export class ExecutionService {
       createdAt: new Date(prepared.createdAt).toISOString(),
       completedAt: new Date(completedAt).toISOString(),
       ...(error === null ? {} : { error: { ...error, errors: [] as const } }),
+      scriptLogs: scripts.logs,
+      scriptTests: scripts.tests,
+      ...(scripts.error === undefined ? {} : { scriptError: scripts.error }),
     };
   }
+}
+
+/** Attaches private host diagnostics to a user-safe script execution error. */
+function scriptHostError(
+  code: "runtime_error" | "response_body_unavailable",
+  message: string,
+  cause: unknown,
+): ScriptExecutionError {
+  const error = new ScriptExecutionError(code, message);
+  if (cause instanceof Error) {
+    Object.defineProperty(error, "cause", {
+      configurable: false,
+      enumerable: false,
+      value: cause,
+      writable: false,
+    });
+  }
+  return error;
 }
 
 /** Materializes enabled structured query fields into the final target URL. */
@@ -480,6 +676,9 @@ function toExecutionError(cause: unknown): {
 } {
   if (cause instanceof ProxyExecutionError) {
     return { code: cause.detail.code, message: cause.detail.message };
+  }
+  if (cause instanceof ScriptExecutionError) {
+    return { code: `script_${cause.code}`, message: cause.message };
   }
   return {
     code: "execution_failed",

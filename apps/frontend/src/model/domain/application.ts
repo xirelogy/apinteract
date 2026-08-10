@@ -28,6 +28,8 @@ export interface RequestDraftInput {
   readonly query: readonly RequestField[];
   readonly headers: readonly RequestField[];
   readonly body: string;
+  readonly preRequestScript: string;
+  readonly postResponseScript: string;
 }
 
 export interface RequestTab {

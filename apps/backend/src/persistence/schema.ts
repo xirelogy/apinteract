@@ -136,6 +136,8 @@ export interface RequestDraftTable {
   query_json: string;
   headers_json: string;
   body_text: string;
+  pre_request_script: string;
+  post_response_script: string;
   updated_by: BinaryId;
   updated_at: number;
 }
@@ -166,6 +168,7 @@ export interface ExecutionTable {
   body_bytes: number | null;
   body_sha256: string | null;
   error_json: string | null;
+  script_result_json: string | null;
   created_at: number;
   completed_at: number | null;
 }

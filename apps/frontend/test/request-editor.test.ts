@@ -24,6 +24,8 @@ describe("RequestEditor", () => {
           query: [],
           headers: [],
           body: "",
+          preRequestScript: "",
+          postResponseScript: "",
         },
         execution: null,
         tabId: "019facab-1eee-765f-bd9f-ac2449151be9",
@@ -86,6 +88,8 @@ describe("RequestEditor", () => {
           query: [],
           headers: [],
           body: "",
+          preRequestScript: "",
+          postResponseScript: "",
         },
         execution: null,
         tabId: "019facab-1eee-765f-bd9f-ac2449151be0",
@@ -126,6 +130,8 @@ describe("RequestEditor", () => {
           query: [],
           headers: [],
           body: "",
+          preRequestScript: "",
+          postResponseScript: "",
         },
         execution: null,
         tabId: "019facab-1eee-765f-bd9f-ac2449151be1",
@@ -150,6 +156,8 @@ describe("RequestEditor", () => {
           query: [],
           headers: [],
           body: "",
+          preRequestScript: "",
+          postResponseScript: "",
         },
       ],
     ]);
@@ -171,6 +179,8 @@ describe("RequestEditor", () => {
           query: [],
           headers: [{ name: "X-Local", value: "local", enabled: true }],
           body: "",
+          preRequestScript: "",
+          postResponseScript: "",
         },
         execution: null,
         tabId: "019facab-1eee-765f-bd9f-ac2449151be2",
@@ -224,6 +234,8 @@ describe("RequestEditor", () => {
           headers: [],
           inheritedHeaders: [],
           body: "",
+          preRequestScript: "",
+          postResponseScript: "",
           draftRevision: 0,
         },
         draft: {
@@ -233,6 +245,8 @@ describe("RequestEditor", () => {
           query: [],
           headers: [],
           body: "",
+          preRequestScript: "",
+          postResponseScript: "",
         },
         execution: null,
         tabId: "019facab-1eee-765f-bd9f-ac2449151be5",
@@ -287,5 +301,61 @@ describe("RequestEditor", () => {
     expect(wrapper.emitted("saveVariables")).toEqual([
       [[{ name: "source", kind: "value", value: "request" }]],
     ]);
+  });
+
+  it("edits both script phases from the request settings", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft: {
+          name: "Scripted request",
+          method: "GET",
+          targetUrl: "https://example.test",
+          query: [],
+          headers: [],
+          body: "",
+          preRequestScript: 'asdk.log.info("before");',
+          postResponseScript: 'asdk.test("ok", () => {});',
+        },
+        execution: null,
+        tabId: "019facab-1eee-765f-bd9f-ac2449151be6",
+        temporary: true,
+        inheritedHeaders: [],
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Pre-request"))
+      ?.trigger("click");
+    const preRequest = wrapper.get<HTMLTextAreaElement>(
+      'textarea[aria-label="Pre-request script"]',
+    );
+    expect(preRequest.element.value).toContain("before");
+    expect(preRequest.attributes("placeholder")).toBeUndefined();
+    expect(
+      wrapper.find('textarea[aria-label="Post-response script"]').exists(),
+    ).toBe(false);
+    await preRequest.setValue('asdk.request.setMethod("POST");');
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      preRequestScript: 'asdk.request.setMethod("POST");',
+      postResponseScript: 'asdk.test("ok", () => {});',
+    });
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Post-response"))
+      ?.trigger("click");
+    const postResponse = wrapper.get<HTMLTextAreaElement>(
+      'textarea[aria-label="Post-response script"]',
+    );
+    expect(postResponse.element.value).toContain("ok");
+    expect(postResponse.attributes("placeholder")).toBeUndefined();
   });
 });

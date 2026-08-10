@@ -799,6 +799,8 @@ function emptyDraft(): RequestDraftInput {
     query: [],
     headers: [],
     body: "",
+    preRequestScript: "",
+    postResponseScript: "",
   };
 }
 
@@ -811,6 +813,8 @@ function requestToDraft(request: RequestView): RequestDraftInput {
     query: request.query.map((field) => ({ ...field })),
     headers: request.headers.map((field) => ({ ...field })),
     body: request.body,
+    preRequestScript: request.preRequestScript,
+    postResponseScript: request.postResponseScript,
   };
 }
 
@@ -831,6 +835,8 @@ function executableDraft(draft: RequestDraftInput) {
     query: draft.query,
     headers: draft.headers,
     body: draft.body,
+    preRequestScript: draft.preRequestScript,
+    postResponseScript: draft.postResponseScript,
   };
 }
 

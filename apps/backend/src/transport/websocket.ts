@@ -292,6 +292,11 @@ async function dispatch(
         requireRequestFields(command.payload.query, "query"),
         requireRequestFields(command.payload.headers, "headers"),
         requireBody(command.payload.body),
+        optionalScript(command.payload.preRequestScript, "preRequestScript"),
+        optionalScript(
+          command.payload.postResponseScript,
+          "postResponseScript",
+        ),
       );
     case "request.get":
       return application.requests.get(
@@ -312,6 +317,11 @@ async function dispatch(
         requireRequestFields(command.payload.query, "query"),
         requireRequestFields(command.payload.headers, "headers"),
         requireBody(command.payload.body),
+        optionalScript(command.payload.preRequestScript, "preRequestScript"),
+        optionalScript(
+          command.payload.postResponseScript,
+          "postResponseScript",
+        ),
       );
     case "execution.start":
       return application.executions.start(
@@ -647,6 +657,22 @@ function requireBody(value: unknown): string {
   return value;
 }
 
+/** Requires a bounded JavaScript source string, including a disabled blank. */
+function requireScript(value: unknown, name: string): string {
+  if (typeof value !== "string") {
+    throw new CommandError("validation_failed", `${name} must be a string.`);
+  }
+  if (Buffer.byteLength(value, "utf8") > 65_536) {
+    throw new CommandError("validation_failed", `${name} is too large.`);
+  }
+  return value;
+}
+
+/** Treats omitted script fields from older protocol clients as disabled. */
+function optionalScript(value: unknown, name: string): string {
+  return value === undefined ? "" : requireScript(value, name);
+}
+
 /** Validates a complete executable request snapshot from a command payload. */
 function requireExecutionInput(value: unknown): RequestExecutionInput {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -659,6 +685,14 @@ function requireExecutionInput(value: unknown): RequestExecutionInput {
     query: requireRequestFields(request.query, "query"),
     headers: requireRequestFields(request.headers, "headers"),
     body: requireBody(request.body),
+    preRequestScript: optionalScript(
+      request.preRequestScript,
+      "preRequestScript",
+    ),
+    postResponseScript: optionalScript(
+      request.postResponseScript,
+      "postResponseScript",
+    ),
   };
 }
 

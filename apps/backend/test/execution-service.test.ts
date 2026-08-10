@@ -16,6 +16,7 @@ import { createEntityId, idToBytes } from "../src/foundation/id.js";
 import { SqliteDatabase } from "../src/persistence/sqlite-database.js";
 import type { ProxyClient } from "../src/proxy/proxy-client.js";
 import { RequestService } from "../src/requests/request-service.js";
+import { ScriptService } from "../src/scripting/script-service.js";
 import { WorkspaceService } from "../src/workspaces/workspace-service.js";
 import { VariableService } from "../src/variables/variable-service.js";
 
@@ -147,6 +148,179 @@ describe("ExecutionService shutdown", () => {
       ).rejects.toThrow(/unavailable during shutdown/u);
     } finally {
       releaseProxy();
+      await database.close();
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
+
+  it("runs persisted pre-request and post-response scripts around proxy work", async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), "apinteract-scripting-"));
+    const database = await SqliteDatabase.open(
+      join(rootPath, "database.sqlite"),
+    );
+    const scripts = new ScriptService();
+    try {
+      const userId = createEntityId();
+      await database.db
+        .insertInto("users")
+        .values({
+          id: idToBytes(userId),
+          status: "active",
+          username: "scripting-integration-test",
+          display_name: "Scripting Integration Test",
+          is_instance_admin: 0,
+          created_at: Date.now(),
+          deleted_at: null,
+        })
+        .execute();
+      const audit = new AuditService(database.db, join(rootPath, "audit"));
+      const blobs = new LocalBlobStore(
+        join(rootPath, "blobs"),
+        join(rootPath, "blob-staging"),
+      );
+      await blobs.initialize();
+      const workspaces = new WorkspaceService(database.db, audit);
+      const environments = new EnvironmentService(
+        database.db,
+        workspaces,
+        audit,
+      );
+      const requests = new RequestService(
+        database.db,
+        workspaces,
+        new VariableService(database.db, workspaces, environments, audit),
+        audit,
+      );
+      const workspace = await workspaces.create(userId, "Workspace");
+      const request = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        null,
+        "Scripted request",
+        "GET",
+        "https://example.test/scripted",
+        [],
+        [],
+        "",
+        `
+          asdk.request.setMethod("POST");
+          asdk.request.headers.set("X-Scripted", "yes");
+          asdk.local.set("prepared", "yes");
+          asdk.log.info("prepared request");
+        `,
+        `
+          asdk.test("response body", () => {
+            asdk.assert.equal(asdk.response.status, 201);
+            asdk.assert.match(asdk.response.body.text(), /created/);
+            asdk.assert.equal(asdk.local.get("prepared"), "yes");
+          });
+          asdk.log.info("checked response");
+        `,
+      );
+      const responseBody = Buffer.from('{"created":true}');
+      let sentMethod = "";
+      let sentHeaders: readonly {
+        readonly name: string;
+        readonly value: string;
+      }[] = [];
+      const proxy = {
+        execute: async (
+          _idempotencyKey: string,
+          method: string,
+          _url: string,
+          headers: readonly { readonly name: string; readonly value: string }[],
+          _body: Buffer,
+          sink: {
+            responseHead(value: unknown): Promise<void>;
+            body(value: Buffer): Promise<void>;
+            complete(value: unknown): Promise<void>;
+          },
+        ) => {
+          sentMethod = method;
+          sentHeaders = headers;
+          await sink.responseHead({
+            type: "response_head",
+            status: 201,
+            headers: [{ name: "content-type", value: "application/json" }],
+            httpVersion: "HTTP/1.1",
+          });
+          await sink.body(responseBody);
+          await sink.complete({
+            type: "complete",
+            bodyBytes: responseBody.byteLength,
+            bodySha256: createHash("sha256").update(responseBody).digest("hex"),
+          });
+        },
+      } as unknown as ProxyClient;
+      const executions = new ExecutionService(
+        database.db,
+        requests,
+        workspaces,
+        proxy,
+        blobs,
+        audit,
+        scripts,
+      );
+      const events: ExecutionEvent[] = [];
+
+      await executions.start(
+        userId,
+        createEntityId(),
+        request.requestId,
+        (event) => events.push(event),
+      );
+      const failingRequest = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        null,
+        "Failing post script",
+        "GET",
+        "https://example.test/failing-script",
+        [],
+        [],
+        "",
+        "",
+        'throw new Error("Visible post-response failure");',
+      );
+      const failingEvents: ExecutionEvent[] = [];
+      await executions.start(
+        userId,
+        createEntityId(),
+        failingRequest.requestId,
+        (event) => failingEvents.push(event),
+      );
+      await executions.close();
+
+      expect(sentMethod).toBe("POST");
+      expect(sentHeaders).toContainEqual({ name: "X-Scripted", value: "yes" });
+      const terminal = events.at(-1);
+      expect(terminal?.type).toBe("execution.completed");
+      expect(terminal?.payload).toMatchObject({
+        scriptLogs: [
+          {
+            sequence: 1,
+            phase: "pre-request",
+            message: "prepared request",
+          },
+          {
+            sequence: 3,
+            phase: "post-response",
+            message: "checked response",
+          },
+        ],
+        scriptTests: [{ sequence: 2, name: "response body", status: "passed" }],
+      });
+      expect(failingEvents.at(-1)?.payload).toMatchObject({
+        state: "completed",
+        scriptError: {
+          phase: "post-response",
+          code: "runtime_error",
+          message: "Visible post-response failure",
+          line: 1,
+        },
+      });
+    } finally {
+      await scripts.close();
       await database.close();
       await rm(rootPath, { recursive: true, force: true });
     }

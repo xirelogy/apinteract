@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { Download, LoaderCircle } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
@@ -10,7 +10,7 @@ import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
 import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
 import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 
-defineProps<{
+const props = defineProps<{
   execution: ExecutionView | null;
 }>();
 const emit = defineEmits<{
@@ -18,11 +18,112 @@ const emit = defineEmits<{
 }>();
 const { t } = useI18n();
 
-const activeTab = ref<"headers" | "raw">("raw");
+const activeTab = ref<"headers" | "raw" | "scripts">("raw");
+
+type ScriptLog = ExecutionView["scriptLogs"][number];
+type ScriptTest = ExecutionView["scriptTests"][number];
+type ScriptError = NonNullable<ExecutionView["scriptError"]>;
+const scriptFailureCodes = new Set([
+  "syntax_error",
+  "runtime_error",
+  "sdk_invalid_argument",
+  "sdk_permission_denied",
+  "sensitive_value_unavailable",
+  "response_body_unavailable",
+  "cpu_limit_exceeded",
+  "memory_limit_exceeded",
+  "time_limit_exceeded",
+  "output_limit_exceeded",
+  "cancelled",
+]);
+const scriptTestMessageCodes = new Set([
+  "assertion_expected_truthy",
+  "assertion_values_not_equal",
+  "assertion_values_not_deeply_equal",
+  "assertion_value_does_not_match",
+  "test_threw_non_error",
+]);
+type ScriptResultCard =
+  | {
+      readonly type: "log";
+      readonly sequence: number;
+      readonly phase: ScriptLog["phase"];
+      readonly log: ScriptLog;
+    }
+  | {
+      readonly type: "test";
+      readonly sequence: number;
+      readonly phase: "post-response";
+      readonly test: ScriptTest;
+    }
+  | {
+      readonly type: "error";
+      readonly sequence: number;
+      readonly phase: ScriptError["phase"];
+      readonly error: ScriptError;
+    };
+
+/** Merges script output into the order in which the SDK produced it. */
+const scriptResultCards = computed<readonly ScriptResultCard[]>(() => {
+  const execution = props.execution;
+  if (execution === null) return [];
+  const cards: ScriptResultCard[] = [
+    ...execution.scriptLogs.map((log) => ({
+      type: "log" as const,
+      sequence: log.sequence,
+      phase: log.phase,
+      log,
+    })),
+    ...execution.scriptTests.map((test) => ({
+      type: "test" as const,
+      sequence: test.sequence,
+      phase: "post-response" as const,
+      test,
+    })),
+  ].sort((left, right) => left.sequence - right.sequence);
+  if (execution.scriptError !== undefined) {
+    cards.push({
+      type: "error",
+      sequence: (cards.at(-1)?.sequence ?? 0) + 1,
+      phase: execution.scriptError.phase,
+      error: execution.scriptError,
+    });
+  }
+  return cards;
+});
 
 /** Formats a byte count with locale-aware plural selection. */
 function formatBytes(count: number): string {
   return t("response.bytes", { count }, count);
+}
+
+/** Localizes stable script failure codes while preserving unknown diagnostics. */
+function localizeScriptCode(code: string): string {
+  const failureCode = code.startsWith("script_")
+    ? code.slice("script_".length)
+    : code;
+  return scriptFailureCodes.has(failureCode)
+    ? t(`scripting.failure.${failureCode}`)
+    : code;
+}
+
+/** Localizes SDK-generated test details without rewriting script-authored text. */
+function formatTestMessage(test: ScriptTest): string {
+  return test.messageCode !== undefined &&
+    scriptTestMessageCodes.has(test.messageCode)
+    ? t(`scripting.testMessage.${test.messageCode}`)
+    : (test.message ?? "");
+}
+
+/** Formats only source coordinates actually reported by the script engine. */
+function formatScriptLocation(error: ScriptError): string {
+  if (error.line === undefined) return "";
+  return error.column === undefined
+    ? t("scripting.line", { line: error.line })
+    : t("scripting.location", {
+        line: error.line,
+        column: error.column,
+      });
 }
 </script>
 
@@ -64,10 +165,15 @@ function formatBytes(count: number): string {
       {{ t("response.empty") }}
     </div>
     <div v-else-if="execution.error" class="execution-error" role="alert">
-      <strong>{{ execution.error.code }}</strong>
+      <strong>{{ localizeScriptCode(execution.error.code) }}</strong>
+      <code>{{ execution.error.code }}</code>
       <span>{{ execution.error.message }}</span>
     </div>
-    <TabsRoot v-else v-model="activeTab" activation-mode="manual">
+    <TabsRoot
+      v-if="execution !== null"
+      v-model="activeTab"
+      activation-mode="manual"
+    >
       <TabsList class="response-tabs" :label="t('response.details')">
         <TabsTrigger class="tab-button" value="raw">
           {{ t("response.raw") }}
@@ -75,6 +181,10 @@ function formatBytes(count: number): string {
         <TabsTrigger class="tab-button" value="headers">
           {{ t("response.headers") }}
           <span class="tab-count">{{ execution.headers?.length ?? 0 }}</span>
+        </TabsTrigger>
+        <TabsTrigger class="tab-button" value="scripts">
+          {{ t("scripting.results") }}
+          <span class="tab-count">{{ scriptResultCards.length }}</span>
         </TabsTrigger>
       </TabsList>
       <TabsPanel value="headers" class="response-content">
@@ -103,6 +213,64 @@ function formatBytes(count: number): string {
             ? t("response.waitingBody")
             : t("response.binaryBody"))
         }}</pre>
+      </TabsPanel>
+      <TabsPanel value="scripts" class="response-content script-results">
+        <div
+          v-for="card in scriptResultCards"
+          :key="`${card.type}-${card.sequence}`"
+          class="script-result-card"
+          :data-kind="card.type"
+          :data-status="
+            card.type === 'test'
+              ? card.test.status
+              : card.type === 'log'
+                ? card.log.level
+                : 'error'
+          "
+          :role="card.type === 'error' ? 'alert' : undefined"
+        >
+          <div class="script-result-card-header">
+            <span class="script-result-kind">
+              {{ t(`scripting.eventType.${card.type}`) }}
+            </span>
+            <span>{{ t(`scripting.phase.${card.phase}`) }}</span>
+            <strong v-if="card.type === 'log'">
+              {{ t(`scripting.logLevel.${card.log.level}`) }}
+            </strong>
+            <strong v-else-if="card.type === 'test'">
+              {{ t(`scripting.testStatus.${card.test.status}`) }}
+            </strong>
+            <strong v-else>{{ localizeScriptCode(card.error.code) }}</strong>
+            <code v-if="card.type === 'error'" class="script-result-code">
+              {{ card.error.code }}
+            </code>
+          </div>
+          <template v-if="card.type === 'log'">
+            <code class="script-result-message">{{ card.log.message }}</code>
+            <pre v-if="card.log.fields">{{
+              JSON.stringify(card.log.fields, null, 2)
+            }}</pre>
+          </template>
+          <template v-else-if="card.type === 'test'">
+            <strong class="script-result-message">{{ card.test.name }}</strong>
+            <small v-if="card.test.message || card.test.messageCode">
+              {{ formatTestMessage(card.test) }}
+            </small>
+          </template>
+          <template v-else>
+            <span class="script-result-message">{{ card.error.message }}</span>
+            <small v-if="card.error.line">
+              {{ formatScriptLocation(card.error) }}
+            </small>
+          </template>
+        </div>
+        <div v-if="!scriptResultCards.length" class="response-detail-empty">
+          {{
+            execution.state === "running"
+              ? t("scripting.waitingResults")
+              : t("scripting.noResults")
+          }}
+        </div>
       </TabsPanel>
     </TabsRoot>
   </section>

@@ -71,7 +71,8 @@ An API request follows this flow:
 2. The backend authenticates and authorizes the application user.
 3. The backend loads the selected request version and applies inherited
    headers.
-4. The backend resolves variables and secrets and runs the pre-request script.
+4. The backend prepares the variable context, runs the pre-request script, and
+   resolves the resulting variable and secret templates.
 5. The backend selects a proxy and creates an idempotent execution using the
    final URL, headers, behavior, and body metadata.
 6. The backend streams request bytes to the proxy when a body is present.
@@ -81,6 +82,13 @@ An API request follows this flow:
    sends response events to the frontend.
 9. The backend releases the terminal proxy execution after persisting or
    discarding its result.
+
+Workspace scripts run in a backend-managed, isolated script runner rather than
+in the frontend, proxy, or main backend JavaScript context. The
+[scripting guide](../scripting/README.md) explains the two execution phases,
+available request and response helpers, secret boundaries, and limits. The
+backend validates and materializes every script-produced request before
+contacting the proxy.
 
 Target HTTP statuses, including `4xx` and `5xx`, are valid target responses.
 Proxy, network, and malformed HTTP response failures are separate execution
