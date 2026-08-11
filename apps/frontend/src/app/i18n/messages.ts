@@ -189,8 +189,20 @@ export const enUsMessages = {
     body: "Body",
     close: "Close request",
     closeNamed: "Close {name}",
+    copySuffix: " copy",
     current: "Current request: {name}",
+    deleteAction: "Delete request",
+    deleteHistoryRetained: "Past execution records are retained.",
+    deleteMessage:
+      'Delete "{name}" and its request variables? This cannot be undone.',
+    deleteTitle: "Delete request?",
+    deleteUnsavedChanges:
+      "Unsaved changes will also be lost. Past execution records are retained.",
     draft: "Draft {revision}",
+    duplicateAction: "Duplicate request",
+    duplicateUnsavedMessage:
+      '"{name}" has unsaved changes. The copy will contain only the last saved version.',
+    duplicateUnsavedTitle: "Duplicate the saved version?",
     enableField: "Enable {kind} field {index}",
     headerField: "header",
     headerName: "Header name {index}",
@@ -202,6 +214,7 @@ export const enUsMessages = {
     inheritedHeaderName: "Inherited header name {index}",
     inheritedHeaderValue: "Inherited header value {index}",
     name: "Request name",
+    moreActions: "More actions for {name}",
     newTemporary: "New temporary request",
     noOpenRequests: "No open requests",
     openRequests: "Open requests",

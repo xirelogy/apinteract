@@ -79,6 +79,15 @@ interface VariableLayer {
   readonly variables: readonly ResolvedVariable[];
 }
 
+/** Describes an authorized request-profile clone owned by a larger transaction. */
+interface RequestProfileCloneOptions {
+  readonly userId: EntityId;
+  readonly workspaceId: EntityId;
+  readonly sourceRequestId: EntityId;
+  readonly targetRequestId: EntityId;
+  readonly targetRequestName: string;
+}
+
 /** Owns persisted workspace, collection, and request variable profiles. */
 export class VariableService {
   readonly #database: Kysely<DatabaseSchema>;
@@ -185,6 +194,45 @@ export class VariableService {
       );
       return this.#view(transaction, identity);
     });
+  }
+
+  /** Clones a request profile inside an already authorized caller transaction. */
+  async cloneRequestProfile(
+    transaction: Transaction<DatabaseSchema>,
+    options: RequestProfileCloneOptions,
+  ): Promise<void> {
+    const mutations = await this.#profiles.clone(transaction, {
+      workspaceId: options.workspaceId,
+      scopeKind: "request",
+      sourceScopeId: options.sourceRequestId,
+      targetScopeId: options.targetRequestId,
+      userId: options.userId,
+    });
+    if (mutations === null) return;
+    const identity: ScopeIdentity = {
+      workspaceId: options.workspaceId,
+      scopeKind: "request",
+      scopeId: options.targetRequestId,
+      scopeName: options.targetRequestName,
+      parentCollectionId: null,
+    };
+    await this.#audit.record(transaction, {
+      type: "variable_profile.duplicated",
+      actorUserId: options.userId,
+      workspaceId: options.workspaceId,
+      data: {
+        scopeKind: "request",
+        sourceScopeId: options.sourceRequestId,
+        scopeId: options.targetRequestId,
+        revision: 1,
+      },
+    });
+    await this.#recordSecretMutations(
+      transaction,
+      options.userId,
+      identity,
+      mutations,
+    );
   }
 
   /** Resolves requested names across every applicable persisted scope. */

@@ -341,6 +341,12 @@ async function dispatch(
         userId,
         requireString(command.payload.requestId, "requestId"),
       );
+    case "request.duplicate":
+      return application.requests.duplicate(
+        userId,
+        requireString(command.payload.requestId, "requestId"),
+        requireString(command.payload.name, "name"),
+      );
     case "request.update":
       return application.requests.update(
         userId,

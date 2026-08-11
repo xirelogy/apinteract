@@ -832,6 +832,109 @@ export class RequestService {
     return this.#requestView(this.#database, row);
   }
 
+  /** Duplicates a saved request beside its source without copying history. */
+  async duplicate(
+    userId: EntityId,
+    requestId: EntityId,
+    name: string,
+  ): Promise<RequestView> {
+    const normalizedName = normalizeName(name);
+    return this.#database.transaction().execute(async (transaction) => {
+      const source = await this.#requestRow(transaction, requestId);
+      const workspaceId = bytesToId(source.workspace_id);
+      await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
+      const parentCollectionId =
+        source.parent_collection_id === null
+          ? null
+          : bytesToId(source.parent_collection_id);
+      const siblings = await this.#listSiblingOrder(
+        transaction,
+        workspaceId,
+        parentCollectionId,
+      );
+      const sourceIndex = siblings.findIndex(
+        (sibling) => sibling.nodeId === requestId,
+      );
+      if (sourceIndex < 0) {
+        throw new ResourceNotFoundError("Request not found");
+      }
+      await this.#offsetSiblingPositions(
+        transaction,
+        workspaceId,
+        parentCollectionId,
+      );
+      const orderRevision =
+        siblings.reduce(
+          (revision, sibling) => Math.max(revision, sibling.orderRevision),
+          0,
+        ) + 1;
+      const duplicateId = createEntityId();
+      const now = Date.now();
+      await transaction
+        .insertInto("workspace_tree_nodes")
+        .values({
+          id: idToBytes(duplicateId),
+          workspace_id: source.workspace_id,
+          parent_collection_id: source.parent_collection_id,
+          kind: "request",
+          position: sourceIndex + 1,
+          name: normalizedName,
+          order_revision: orderRevision,
+          created_at: now,
+        })
+        .execute();
+      await transaction
+        .insertInto("request_drafts")
+        .values({
+          request_id: idToBytes(duplicateId),
+          draft_revision: 0,
+          method: source.method,
+          target_mode: source.target_mode,
+          target_url: source.target_url,
+          query_mode: source.query_mode,
+          query_json: source.query_json,
+          headers_json: source.headers_json,
+          body_text: source.body_text,
+          pre_request_script: source.pre_request_script,
+          post_response_script: source.post_response_script,
+          updated_by: idToBytes(userId),
+          updated_at: now,
+        })
+        .execute();
+      const orderedNodeIds = siblings.map((sibling) => sibling.nodeId);
+      orderedNodeIds.splice(sourceIndex + 1, 0, duplicateId);
+      for (const [position, nodeId] of orderedNodeIds.entries()) {
+        await transaction
+          .updateTable("workspace_tree_nodes")
+          .set({ position, order_revision: orderRevision })
+          .where("id", "=", idToBytes(nodeId))
+          .executeTakeFirstOrThrow();
+      }
+      await this.#variables.cloneRequestProfile(transaction, {
+        userId,
+        workspaceId,
+        sourceRequestId: requestId,
+        targetRequestId: duplicateId,
+        targetRequestName: normalizedName,
+      });
+      await this.#audit.record(transaction, {
+        type: "request.duplicated",
+        actorUserId: userId,
+        workspaceId,
+        data: {
+          requestId: duplicateId,
+          sourceRequestId: requestId,
+          parentCollectionId,
+          orderRevision,
+        },
+      });
+      return this.#requestView(
+        transaction,
+        await this.#requestRow(transaction, duplicateId),
+      );
+    });
+  }
+
   /** Updates a request draft only when its expected revision is current. */
   async update(
     userId: EntityId,

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createI18n } from "vue-i18n";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
@@ -36,6 +36,7 @@ function mountNavigator(options?: {
   collectionChildren?: Readonly<Record<string, readonly TreeNode[]>>;
   expandedCollectionIds?: readonly string[];
   busy?: boolean;
+  canEdit?: boolean;
 }) {
   const i18n = createI18n({
     legacy: false,
@@ -57,6 +58,7 @@ function mountNavigator(options?: {
       expandedCollectionIds: options?.expandedCollectionIds ?? [],
       selectedRequestId: null,
       busy: options?.busy ?? false,
+      canEdit: options?.canEdit ?? true,
       mobileOpen: false,
     },
     global: { plugins: [i18n] },
@@ -68,6 +70,57 @@ afterEach(() => {
 });
 
 describe("WorkspaceNavigator tree reordering", () => {
+  it("offers duplicate and delete actions for requests without selecting them", async () => {
+    const wrapper = mountNavigator({
+      rootNodes: [requestNode(firstNodeId, "First", 0)],
+    });
+    const trigger = wrapper.get<HTMLButtonElement>(
+      'button[aria-label="More actions for First"]',
+    );
+
+    await trigger.trigger("click");
+    await flushPromises();
+    const duplicate = [
+      ...document.body.querySelectorAll("[role=menuitem]"),
+    ].find((item) => item.textContent?.includes("Duplicate request"));
+    duplicate?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+    expect(wrapper.emitted("duplicateRequest")).toEqual([
+      [firstNodeId, "First"],
+    ]);
+    expect(wrapper.emitted("selectRequest")).toBeUndefined();
+
+    await trigger.trigger("click");
+    await flushPromises();
+    const remove = [...document.body.querySelectorAll("[role=menuitem]")].find(
+      (item) => item.textContent?.includes("Delete request"),
+    );
+    remove?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+    expect(wrapper.emitted("deleteRequest")).toEqual([[firstNodeId]]);
+    expect(wrapper.emitted("selectRequest")).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it("keeps requests selectable while disabling mutations for viewers", () => {
+    const wrapper = mountNavigator({
+      rootNodes: [requestNode(firstNodeId, "First", 0)],
+      canEdit: false,
+    });
+
+    expect(
+      wrapper
+        .get<HTMLButtonElement>(`[data-tree-node-id="${firstNodeId}"]`)
+        .attributes("disabled"),
+    ).toBeUndefined();
+    expect(
+      wrapper
+        .get<HTMLButtonElement>('button[aria-label="More actions for First"]')
+        .attributes("disabled"),
+    ).toBeDefined();
+    wrapper.unmount();
+  });
+
   it("moves a sibling with Alt+Arrow and emits the complete current order", async () => {
     const wrapper = mountNavigator();
 

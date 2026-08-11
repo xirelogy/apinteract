@@ -225,6 +225,7 @@ export interface components {
       | components["schemas"]["VariablePreviewCommand"]
       | components["schemas"]["RequestCreateCommand"]
       | components["schemas"]["RequestGetCommand"]
+      | components["schemas"]["RequestDuplicateCommand"]
       | components["schemas"]["RequestUpdateCommand"]
       | components["schemas"]["RequestDeleteCommand"]
       | components["schemas"]["ExecutionStartCommand"]
@@ -632,6 +633,21 @@ export interface components {
        * @enum {string}
        */
       type: "RequestGetCommand";
+    };
+    /** @description Creates an adjacent request with a fresh draft and cloned request-scoped variables, excluding execution and revision history. */
+    RequestDuplicateCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "request.duplicate";
+      payload?: {
+        requestId: components["schemas"]["RequestId"];
+        name: string;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "RequestDuplicateCommand";
     };
     RequestUpdateCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */

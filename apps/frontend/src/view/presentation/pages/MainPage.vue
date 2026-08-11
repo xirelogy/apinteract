@@ -9,6 +9,7 @@ import { useApplicationStore } from "@/control/state/application-store";
 import type {
   EnvironmentVariableWrite,
   RequestField,
+  RequestView,
   VariableWrite,
 } from "@/model/contracts/backend";
 import {
@@ -20,8 +21,10 @@ import AppHeader from "@/view/presentation/layout/AppHeader.vue";
 import DiscardChangesDialog from "@/view/presentation/features/DiscardChangesDialog.vue";
 import CollectionPropertiesDialog from "@/view/presentation/features/CollectionPropertiesDialog.vue";
 import EnvironmentManager from "@/view/presentation/features/EnvironmentManager.vue";
+import RequestDuplicateDialog from "@/view/presentation/features/RequestDuplicateDialog.vue";
 import RequestEditor from "@/view/presentation/features/RequestEditor.vue";
 import RequestTabs from "@/view/presentation/features/RequestTabs.vue";
+import ResourceDeleteDialog from "@/view/presentation/features/ResourceDeleteDialog.vue";
 import SaveRequestDialog from "@/view/presentation/features/SaveRequestDialog.vue";
 import WorkspaceNavigator from "@/view/presentation/features/WorkspaceNavigator.vue";
 import WorkspacePropertiesDialog from "@/view/presentation/features/WorkspacePropertiesDialog.vue";
@@ -35,6 +38,14 @@ const saveDialogTab = ref<RequestTab | null>(null);
 const discardDialogTab = ref<RequestTab | null>(null);
 const collectionPropertiesOpen = ref(false);
 const workspacePropertiesOpen = ref(false);
+const requestDuplicateTarget = ref<{
+  readonly requestId: string;
+  readonly name: string;
+} | null>(null);
+const requestDeleteTarget = ref<{
+  readonly request: RequestView;
+  readonly hasUnsavedChanges: boolean;
+} | null>(null);
 const applicationBody = ref<HTMLElement | null>(null);
 const navigatorWidth = ref(
   Math.min(304, Math.max(256, window.innerWidth * 0.2)),
@@ -259,6 +270,80 @@ async function createRequestInCollection(collectionId: string): Promise<void> {
 async function selectRequest(requestId: string): Promise<void> {
   await controller.selectRequest(requestId);
   closeNavigator();
+}
+
+/** Returns the open tab for one saved request when it is already loaded. */
+function requestTabFor(requestId: string): RequestTab | undefined {
+  return requestTabs.value.find((tab) => tab.request?.requestId === requestId);
+}
+
+/** Duplicates immediately unless unsaved edits require an explicit warning. */
+async function duplicateRequest(
+  requestId: string,
+  name: string,
+): Promise<void> {
+  closeNavigator();
+  const tab = requestTabFor(requestId);
+  const target = { requestId, name };
+  if (tab !== undefined && isRequestTabDirty(tab)) {
+    requestDuplicateTarget.value = target;
+    return;
+  }
+  await performRequestDuplication(target);
+}
+
+/** Creates and opens the localized saved copy selected by the user. */
+async function performRequestDuplication(target: {
+  readonly requestId: string;
+  readonly name: string;
+}): Promise<void> {
+  await controller.duplicateRequest(
+    target.requestId,
+    localizedRequestCopyName(target.name),
+  );
+  requestDuplicateTarget.value = null;
+}
+
+/** Builds a localized copy name within the persisted 200-character limit. */
+function localizedRequestCopyName(name: string): string {
+  const suffix = t("request.copySuffix");
+  const prefixLimit = 200 - suffix.length;
+  let prefix = "";
+  for (const character of name) {
+    if (prefix.length + character.length > prefixLimit) break;
+    prefix += character;
+  }
+  return `${prefix}${suffix}`;
+}
+
+/** Continues a saved-version duplication after its unsaved-edit warning. */
+async function confirmRequestDuplication(): Promise<void> {
+  const target = requestDuplicateTarget.value;
+  if (target !== null) await performRequestDuplication(target);
+}
+
+/** Loads immutable deletion metadata before displaying styled confirmation. */
+async function requestRequestDeletion(requestId: string): Promise<void> {
+  closeNavigator();
+  const tab = requestTabFor(requestId);
+  const request = tab?.request ?? (await controller.loadRequest(requestId));
+  requestDeleteTarget.value = {
+    request,
+    hasUnsavedChanges: tab !== undefined && isRequestTabDirty(tab),
+  };
+}
+
+/** Deletes the confirmed request and closes the confirmation after success. */
+async function confirmRequestDeletion(): Promise<void> {
+  const target = requestDeleteTarget.value;
+  if (target === null) return;
+  await controller.deleteRequest(target.request);
+  requestDeleteTarget.value = null;
+}
+
+/** Releases a request deletion target when its controlled dialog closes. */
+function setRequestDeleteDialogOpen(open: boolean): void {
+  if (!open) requestDeleteTarget.value = null;
 }
 
 /** Loads a collection and its redacted variables before opening properties. */
@@ -506,6 +591,7 @@ function discardRequestTab(): void {
         :expanded-collection-ids="expandedCollectionIds"
         :selected-request-id="activeTab?.request?.requestId ?? null"
         :busy="busy"
+        :can-edit="canEditWorkspace"
         :mobile-open="navigatorOpen"
         @create-workspace="controller.createWorkspace($event)"
         @select-workspace="controller.selectWorkspace($event)"
@@ -536,6 +622,8 @@ function discardRequestTab(): void {
         @edit-collection-properties="editCollectionProperties"
         @edit-workspace-properties="editWorkspaceProperties"
         @select-request="selectRequest"
+        @duplicate-request="duplicateRequest"
+        @delete-request="requestRequestDeletion"
         @dismiss="closeNavigator"
       />
       <div
@@ -630,6 +718,33 @@ function discardRequestTab(): void {
       "
       @close="discardDialogTab = null"
       @discard="discardRequestTab"
+    />
+    <RequestDuplicateDialog
+      v-if="requestDuplicateTarget"
+      :request-name="requestDuplicateTarget.name"
+      :busy="busy"
+      @close="requestDuplicateTarget = null"
+      @confirm="confirmRequestDuplication"
+    />
+    <ResourceDeleteDialog
+      v-if="requestDeleteTarget"
+      :open="true"
+      title-id="request-delete-dialog-title"
+      :title="t('request.deleteTitle')"
+      :message="
+        t('request.deleteMessage', { name: requestDeleteTarget.request.name })
+      "
+      :additional-message="
+        t(
+          requestDeleteTarget.hasUnsavedChanges
+            ? 'request.deleteUnsavedChanges'
+            : 'request.deleteHistoryRetained',
+        )
+      "
+      :confirm-label="t('request.deleteAction')"
+      :busy="busy"
+      @update:open="setRequestDeleteDialogOpen"
+      @confirm="confirmRequestDeletion"
     />
     <CollectionPropertiesDialog
       v-if="collectionProperties"

@@ -630,6 +630,9 @@
             "$ref": "#/components/schemas/RequestGetCommand"
           },
           {
+            "$ref": "#/components/schemas/RequestDuplicateCommand"
+          },
+          {
             "$ref": "#/components/schemas/RequestUpdateCommand"
           },
           {
@@ -1544,6 +1547,37 @@
                 "properties": {
                   "requestId": {
                     "$ref": "#/components/schemas/RequestId"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RequestDuplicateCommand": {
+        "description": "Creates an adjacent request with a fresh draft and cloned request-scoped variables, excluding execution and revision history.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "request.duplicate"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requestId", "name"],
+                "properties": {
+                  "requestId": {
+                    "$ref": "#/components/schemas/RequestId"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
                   }
                 }
               }

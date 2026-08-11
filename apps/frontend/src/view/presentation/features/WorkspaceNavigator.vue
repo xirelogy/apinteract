@@ -26,6 +26,7 @@ const props = defineProps<{
   expandedCollectionIds: readonly string[];
   selectedRequestId: string | null;
   busy: boolean;
+  canEdit: boolean;
   mobileOpen: boolean;
 }>();
 const { t } = useI18n();
@@ -40,6 +41,8 @@ const emit = defineEmits<{
   editCollectionProperties: [collectionId: string];
   editWorkspaceProperties: [workspaceId: string];
   selectRequest: [requestId: string];
+  duplicateRequest: [requestId: string, name: string];
+  deleteRequest: [requestId: string];
   reorderTree: [
     parentCollectionId: string | null,
     orderedNodeIds: readonly string[],
@@ -168,7 +171,7 @@ function startDrag(
   parentCollectionId: string | null,
   nodeKind: TreeNodeKind,
 ): void {
-  if (props.busy) {
+  if (props.busy || !props.canEdit) {
     event.preventDefault();
     return;
   }
@@ -287,7 +290,7 @@ function moveByKeyboard(
   parentCollectionId: string | null,
   offset: -1 | 1,
 ): void {
-  if (props.busy) return;
+  if (props.busy || !props.canEdit) return;
   const orderedNodeIds = reorderSiblings(parentCollectionId).map(
     (node) => node.nodeId,
   );
@@ -308,7 +311,7 @@ function indentByKeyboard(
   nodeId: string,
   parentCollectionId: string | null,
 ): void {
-  if (props.busy) return;
+  if (props.busy || !props.canEdit) return;
   const siblings = reorderSiblings(parentCollectionId);
   const position = siblings.findIndex((node) => node.nodeId === nodeId);
   const precedingNode = siblings[position - 1];
@@ -321,7 +324,7 @@ function outdentByKeyboard(
   nodeId: string,
   parentCollectionId: string | null,
 ): void {
-  if (props.busy || parentCollectionId === null) return;
+  if (props.busy || !props.canEdit || parentCollectionId === null) return;
   emitMove(nodeId, parentCollectionId, parentCollectionId, "after");
 }
 
@@ -419,6 +422,11 @@ function submitCreation(name: string): void {
   }
 }
 
+/** Forwards a request duplication with the source name used for localization. */
+function duplicateRequest(requestId: string, name: string): void {
+  emit("duplicateRequest", requestId, name);
+}
+
 /** Finds a loaded collection name for creation-dialog context. */
 function findLoadedNodeName(nodeId: string): string | null {
   const groups = [props.rootNodes, ...Object.values(props.collectionChildren)];
@@ -497,7 +505,7 @@ function findLoadedParentCollectionId(nodeId: string): string | null {
             class="compact-icon-button"
             size="compact"
             :label="t('workspace.createRootCollection')"
-            :disabled="busy"
+            :disabled="busy || !canEdit"
             @click="openCreationDialog('collection')"
           >
             <FolderPlus :size="16" aria-hidden="true" />
@@ -525,6 +533,7 @@ function findLoadedParentCollectionId(nodeId: string): string | null {
             :selected-collection-id="selectedCollectionId"
             :selected-request-id="selectedRequestId"
             :busy="busy"
+            :can-edit="canEdit"
             :focusable-node-id="focusableNodeId"
             :parent-node-id="null"
             :level="1"
@@ -536,6 +545,8 @@ function findLoadedParentCollectionId(nodeId: string): string | null {
             @select-collection="emit('selectCollection', $event)"
             @toggle-collection="emit('toggleCollection', $event)"
             @select-request="emit('selectRequest', $event)"
+            @duplicate-request="duplicateRequest"
+            @delete-request="emit('deleteRequest', $event)"
           />
         </ul>
         <p v-else class="tree-empty">{{ t("workspace.noCollections") }}</p>

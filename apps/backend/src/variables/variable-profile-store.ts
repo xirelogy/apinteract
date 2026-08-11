@@ -90,6 +90,15 @@ export interface SecretMutation {
   readonly version: number;
 }
 
+/** Identifies the source, destination, and ownership of one profile clone. */
+interface VariableProfileCloneOptions {
+  readonly workspaceId: EntityId;
+  readonly scopeKind: VariableScopeKind;
+  readonly sourceScopeId: EntityId;
+  readonly targetScopeId: EntityId;
+  readonly userId: EntityId;
+}
+
 /** Raised when a persisted variable changes kind or a profile revision is stale. */
 export class VariableProfileConflictError extends Error {}
 
@@ -138,6 +147,79 @@ export class VariableProfileStore {
       throw new VariableProfileConflictError("The variable profile changed");
     }
     return this.#replaceRows(transaction, profileId, writes);
+  }
+
+  /** Clones one profile with fresh variable IDs without exposing secret payloads. */
+  async clone(
+    transaction: Transaction<DatabaseSchema>,
+    options: VariableProfileCloneOptions,
+  ): Promise<SecretMutation[] | null> {
+    const source = await this.metadata(
+      transaction,
+      options.scopeKind,
+      options.sourceScopeId,
+    );
+    if (source === null) return null;
+
+    const profileId = createEntityId();
+    await transaction
+      .insertInto("variable_profiles")
+      .values({
+        id: idToBytes(profileId),
+        workspace_id: idToBytes(options.workspaceId),
+        scope_kind: options.scopeKind,
+        scope_id: idToBytes(options.targetScopeId),
+        revision: 1,
+        updated_by: idToBytes(options.userId),
+        updated_at: Date.now(),
+      })
+      .executeTakeFirstOrThrow();
+    const variables = await transaction
+      .selectFrom("variables as variable")
+      .leftJoin(
+        "variable_secrets as secret",
+        "secret.variable_id",
+        "variable.id",
+      )
+      .select([
+        "variable.position",
+        "variable.name",
+        "variable.kind",
+        "variable.value_text",
+        "variable.alias_target",
+        "secret.payload",
+      ])
+      .where("variable.profile_id", "=", idToBytes(source.profileId))
+      .orderBy("variable.position")
+      .execute();
+    const mutations: SecretMutation[] = [];
+    for (const variable of variables) {
+      const variableId = createEntityId();
+      await transaction
+        .insertInto("variables")
+        .values({
+          id: idToBytes(variableId),
+          profile_id: idToBytes(profileId),
+          position: variable.position,
+          name: variable.name,
+          kind: variable.kind,
+          value_text: variable.value_text,
+          alias_target: variable.alias_target,
+        })
+        .execute();
+      if (variable.kind !== "secret") continue;
+      await transaction
+        .insertInto("variable_secrets")
+        .values({
+          variable_id: idToBytes(variableId),
+          version: 1,
+          storage_format: "plaintext-v1",
+          payload: variable.payload,
+        })
+        .execute();
+      mutations.push({ type: "created", variableId, version: 1 });
+    }
+    return mutations;
   }
 
   /** Replaces an existing profile and advances its optimistic revision. */

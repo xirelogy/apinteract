@@ -693,24 +693,71 @@ export class ApplicationController {
         "request.get",
         { requestId },
       );
-      const draft = requestToDraft(request);
-      const tab: RequestTab = {
-        tabId: uuidV7(),
-        workspaceId: request.workspaceId,
-        request,
-        draft,
-        baseline: cloneDraft(draft),
-        pendingParentCollectionId: null,
-        inheritedHeaders: request.inheritedHeaders.map((field) => ({
-          ...field,
-        })),
-        execution: null,
-        busy: false,
-      };
-      store.requestTabs.push(tab);
-      store.activeRequestTabId = tab.tabId;
-      store.selectedCollectionId = null;
-      store.selectedCollection = null;
+      this.#openRequestTab(request);
+    });
+  }
+
+  /** Loads one saved request without changing the current tab selection. */
+  async loadRequest(requestId: string): Promise<RequestView> {
+    return this.#run(() =>
+      this.#webSocket.command<RequestView>("request.get", { requestId }),
+    );
+  }
+
+  /** Duplicates a saved request, refreshes its parent, and opens the result. */
+  async duplicateRequest(requestId: string, name: string): Promise<void> {
+    await this.#run(async () => {
+      const duplicate = await this.#webSocket.command<RequestView>(
+        "request.duplicate",
+        { requestId, name },
+      );
+      await this.#reloadCollection(
+        duplicate.workspaceId,
+        duplicate.parentCollectionId,
+      );
+      this.#openRequestTab(duplicate);
+    });
+  }
+
+  /** Deletes one saved request and removes every tab and preview it owns. */
+  async deleteRequest(request: RequestView): Promise<void> {
+    await this.#run(async () => {
+      const store = useApplicationStore();
+      const activeIndex = store.requestTabs.findIndex(
+        (tab) => tab.tabId === store.activeRequestTabId,
+      );
+      const activeRequestId =
+        activeIndex < 0
+          ? null
+          : (store.requestTabs[activeIndex]?.request?.requestId ?? null);
+      await this.#webSocket.command("request.delete", {
+        requestId: request.requestId,
+        expectedDraftRevision: request.draftRevision,
+      });
+      store.requestTabs = store.requestTabs.filter(
+        (tab) => tab.request?.requestId !== request.requestId,
+      );
+      if (activeRequestId === request.requestId) {
+        store.activeRequestTabId =
+          store.requestTabs[activeIndex]?.tabId ??
+          store.requestTabs[activeIndex - 1]?.tabId ??
+          null;
+      }
+      if (
+        store.selectedVariableProfile?.scopeKind === "request" &&
+        store.selectedVariableProfile.scopeId === request.requestId
+      ) {
+        store.selectedVariableProfile = null;
+      }
+      if (activeRequestId === request.requestId) {
+        store.variablePreviews = [];
+        this.#previewNames = [];
+        this.#previewSequence += 1;
+      }
+      await this.#reloadCollection(
+        request.workspaceId,
+        request.parentCollectionId,
+      );
     });
   }
 
@@ -843,6 +890,29 @@ export class ApplicationController {
     } finally {
       this.#updateTab(tabId, (tab) => ({ ...tab, busy: false }));
     }
+  }
+
+  /** Opens a fully loaded saved request in a fresh active tab. */
+  #openRequestTab(request: RequestView): void {
+    const store = useApplicationStore();
+    const draft = requestToDraft(request);
+    const tab: RequestTab = {
+      tabId: uuidV7(),
+      workspaceId: request.workspaceId,
+      request,
+      draft,
+      baseline: cloneDraft(draft),
+      pendingParentCollectionId: null,
+      inheritedHeaders: request.inheritedHeaders.map((field) => ({
+        ...field,
+      })),
+      execution: null,
+      busy: false,
+    };
+    store.requestTabs.push(tab);
+    store.activeRequestTabId = tab.tabId;
+    store.selectedCollectionId = null;
+    store.selectedCollection = null;
   }
 
   /** Replaces one tab through a mutation-safe state projection. */

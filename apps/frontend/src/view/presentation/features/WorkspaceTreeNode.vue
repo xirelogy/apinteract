@@ -2,12 +2,14 @@
 import { computed, inject } from "vue";
 import {
   ChevronRight,
+  Copy,
   FilePlus,
   Folder,
   FolderOpen,
   FolderPlus,
   GripVertical,
   Settings2,
+  Trash2,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
@@ -24,6 +26,7 @@ const props = defineProps<{
   selectedCollectionId: string | null;
   selectedRequestId: string | null;
   busy: boolean;
+  canEdit: boolean;
   focusableNodeId: string | null;
   parentNodeId: string | null;
   level: number;
@@ -42,6 +45,8 @@ const emit = defineEmits<{
   selectCollection: [collectionId: string];
   toggleCollection: [collectionId: string];
   selectRequest: [requestId: string];
+  duplicateRequest: [requestId: string, name: string];
+  deleteRequest: [requestId: string];
 }>();
 
 const expanded = computed(
@@ -56,14 +61,27 @@ const collectionActions = computed<readonly ActionMenuItem[]>(() => [
   {
     value: "create-request",
     label: t("collection.newRequest"),
+    disabled: !props.canEdit,
   },
   {
     value: "create-subcollection",
     label: t("collection.newSubcollection"),
+    disabled: !props.canEdit,
   },
   {
     value: "edit-properties",
     label: t("collection.properties"),
+  },
+]);
+const requestActions = computed<readonly ActionMenuItem[]>(() => [
+  {
+    value: "duplicate",
+    label: t("request.duplicateAction"),
+  },
+  {
+    value: "delete",
+    label: t("request.deleteAction"),
+    variant: "danger",
   },
 ]);
 
@@ -76,6 +94,20 @@ function selectCollectionAction(value: string): void {
   } else if (value === "edit-properties") {
     emit("editCollectionProperties", props.node.nodeId);
   }
+}
+
+/** Routes one request-row command without changing the current selection. */
+function selectRequestAction(value: string): void {
+  if (value === "duplicate") {
+    emit("duplicateRequest", props.node.nodeId, props.node.name);
+  } else if (value === "delete") {
+    emit("deleteRequest", props.node.nodeId);
+  }
+}
+
+/** Forwards a nested request duplication without dropping its display name. */
+function forwardRequestDuplication(requestId: string, name: string): void {
+  emit("duplicateRequest", requestId, name);
 }
 
 /** Returns drag-state classes for this row's insertion indicator. */
@@ -175,7 +207,7 @@ function handleTreeItemKeydown(event: KeyboardEvent): void {
         :data-tree-node-id="node.nodeId"
         :data-tree-parent-id="parentNodeId ?? undefined"
         :data-tree-text="node.name"
-        :draggable="!busy"
+        :draggable="!busy && canEdit"
         :disabled="busy"
         aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
         :title="t('workspace.reorderHint')"
@@ -226,30 +258,13 @@ function handleTreeItemKeydown(event: KeyboardEvent): void {
       </ActionMenu>
     </div>
 
-    <button
+    <div
       v-else
       class="workspace-tree-row request-tree-row"
       :class="[
         { 'is-selected': node.nodeId === selectedRequestId },
         reorderClasses(),
       ]"
-      type="button"
-      role="treeitem"
-      :aria-level="level"
-      :aria-selected="node.nodeId === selectedRequestId"
-      :tabindex="node.nodeId === focusableNodeId ? 0 : -1"
-      :data-tree-node-id="node.nodeId"
-      :data-tree-parent-id="parentNodeId ?? undefined"
-      :data-tree-text="node.name"
-      :draggable="!busy"
-      :disabled="busy"
-      aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
-      :title="t('workspace.reorderHint')"
-      @click="emit('selectRequest', node.nodeId)"
-      @keydown="handleTreeItemKeydown"
-      @dragstart="
-        treeReorder.startDrag($event, node.nodeId, parentNodeId, node.kind)
-      "
       @dragover.stop="
         treeReorder.updateDropTarget(
           $event,
@@ -261,19 +276,63 @@ function handleTreeItemKeydown(event: KeyboardEvent): void {
       @drop.stop="
         treeReorder.finishDrop($event, node.nodeId, parentNodeId, node.kind)
       "
-      @dragend="treeReorder.cancelDrag"
     >
-      <span class="tree-toggle-spacer" aria-hidden="true"></span>
-      <span class="request-tree-label">
-        <GripVertical
-          class="tree-drag-indicator"
-          :size="14"
-          aria-hidden="true"
-        />
-        <span class="method-badge">{{ node.method ?? "GET" }}</span>
-        <span class="tree-node-name">{{ node.name }}</span>
-      </span>
-    </button>
+      <button
+        class="tree-node-main request-tree-main"
+        type="button"
+        role="treeitem"
+        :aria-level="level"
+        :aria-selected="node.nodeId === selectedRequestId"
+        :tabindex="node.nodeId === focusableNodeId ? 0 : -1"
+        :data-tree-node-id="node.nodeId"
+        :data-tree-parent-id="parentNodeId ?? undefined"
+        :data-tree-text="node.name"
+        :draggable="!busy && canEdit"
+        :disabled="busy"
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
+        :title="t('workspace.reorderHint')"
+        @click="emit('selectRequest', node.nodeId)"
+        @keydown="handleTreeItemKeydown"
+        @dragstart="
+          treeReorder.startDrag($event, node.nodeId, parentNodeId, node.kind)
+        "
+        @dragend="treeReorder.cancelDrag"
+      >
+        <span class="tree-toggle-spacer" aria-hidden="true"></span>
+        <span class="request-tree-label">
+          <GripVertical
+            class="tree-drag-indicator"
+            :size="14"
+            aria-hidden="true"
+          />
+          <span class="method-badge">{{ node.method ?? "GET" }}</span>
+          <span class="tree-node-name">{{ node.name }}</span>
+        </span>
+      </button>
+      <ActionMenu
+        class="tree-node-action-menu"
+        :label="t('request.moreActions', { name: node.name })"
+        :items="requestActions"
+        :disabled="busy || !canEdit"
+        @select="selectRequestAction"
+      >
+        <template #item="{ item }">
+          <Copy
+            v-if="item.value === 'duplicate'"
+            class="action-menu-item-icon"
+            :size="16"
+            aria-hidden="true"
+          />
+          <Trash2
+            v-else
+            class="action-menu-item-icon"
+            :size="16"
+            aria-hidden="true"
+          />
+          <span>{{ item.label }}</span>
+        </template>
+      </ActionMenu>
+    </div>
 
     <ul
       v-if="node.kind === 'collection' && expanded"
@@ -289,6 +348,7 @@ function handleTreeItemKeydown(event: KeyboardEvent): void {
         :selected-collection-id="selectedCollectionId"
         :selected-request-id="selectedRequestId"
         :busy="busy"
+        :can-edit="canEdit"
         :focusable-node-id="focusableNodeId"
         :parent-node-id="node.nodeId"
         :level="level + 1"
@@ -298,6 +358,8 @@ function handleTreeItemKeydown(event: KeyboardEvent): void {
         @select-collection="emit('selectCollection', $event)"
         @toggle-collection="emit('toggleCollection', $event)"
         @select-request="emit('selectRequest', $event)"
+        @duplicate-request="forwardRequestDuplication"
+        @delete-request="emit('deleteRequest', $event)"
       />
       <li v-if="children.length === 0" class="tree-empty">
         {{ t("collection.empty") }}

@@ -14,7 +14,10 @@ import {
   TreeOrderConflictError,
 } from "../src/requests/request-service.js";
 import { VariableService } from "../src/variables/variable-service.js";
-import { WorkspaceService } from "../src/workspaces/workspace-service.js";
+import {
+  AccessDeniedError,
+  WorkspaceService,
+} from "../src/workspaces/workspace-service.js";
 
 describe("RequestService draft updates", () => {
   it("keeps the current revision when normalized draft content is unchanged", async () => {
@@ -323,6 +326,244 @@ describe("RequestService draft updates", () => {
           1,
         ),
       ).rejects.toBeInstanceOf(TreeOrderConflictError);
+    } finally {
+      await database.close();
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
+
+  it("duplicates saved content and variables beside the source without history", async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), "apinteract-duplicate-"));
+    const database = await SqliteDatabase.open(
+      join(rootPath, "database.sqlite"),
+    );
+
+    try {
+      const userId = createEntityId();
+      const viewerId = createEntityId();
+      await database.db
+        .insertInto("users")
+        .values([
+          {
+            id: idToBytes(userId),
+            status: "active",
+            username: "duplicate-test",
+            display_name: "Duplicate Test",
+            is_instance_admin: 0,
+            created_at: Date.now(),
+            deleted_at: null,
+          },
+          {
+            id: idToBytes(viewerId),
+            status: "active",
+            username: "duplicate-viewer",
+            display_name: "Duplicate Viewer",
+            is_instance_admin: 0,
+            created_at: Date.now(),
+            deleted_at: null,
+          },
+        ])
+        .execute();
+      const audit = new AuditService(database.db, join(rootPath, "audit"));
+      const workspaces = new WorkspaceService(database.db, audit);
+      const environments = new EnvironmentService(
+        database.db,
+        workspaces,
+        audit,
+      );
+      const variables = new VariableService(
+        database.db,
+        workspaces,
+        environments,
+        audit,
+      );
+      const requests = new RequestService(
+        database.db,
+        workspaces,
+        variables,
+        audit,
+      );
+      const workspace = await workspaces.create(userId, "Workspace");
+      await database.db
+        .insertInto("workspace_memberships")
+        .values({
+          workspace_id: idToBytes(workspace.workspaceId),
+          user_id: idToBytes(viewerId),
+          role: "viewer",
+          created_at: Date.now(),
+        })
+        .execute();
+      const before = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        null,
+        "Before",
+        "GET",
+        "https://example.test/before",
+        [],
+        [],
+        "",
+      );
+      const source = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        null,
+        "Source",
+        "POST",
+        "https://example.test/items",
+        [{ name: "page", value: "2", enabled: true }],
+        [{ name: "Accept", value: "application/json", enabled: true }],
+        '{"source":true}',
+        "asdk.request.header.set('X-Before', '1');",
+        "asdk.test('status', () => asdk.expect(true).toBeTruthy());",
+      );
+      const after = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        null,
+        "After",
+        "GET",
+        "https://example.test/after",
+        [],
+        [],
+        "",
+      );
+      const profile = await variables.update(
+        userId,
+        "request",
+        source.requestId,
+        0,
+        [
+          { name: "plain", kind: "value", value: "visible" },
+          { name: "stored", kind: "secret", value: "top-secret" },
+          { name: "empty", kind: "secret", value: "clear-me" },
+        ],
+      );
+      const [plain, stored, empty] = profile.variables;
+      if (
+        plain?.kind !== "value" ||
+        stored?.kind !== "secret" ||
+        empty?.kind !== "secret"
+      ) {
+        throw new Error("Unexpected variable profile fixture");
+      }
+      await variables.update(
+        userId,
+        "request",
+        source.requestId,
+        profile.revision,
+        [
+          { ...plain, value: plain.value },
+          { variableId: stored.variableId, name: stored.name, kind: "secret" },
+          {
+            variableId: empty.variableId,
+            name: empty.name,
+            kind: "secret",
+            clearValue: true,
+          },
+        ],
+      );
+      await requests.prepareExecution(
+        userId,
+        createEntityId(),
+        source.requestId,
+      );
+
+      await expect(
+        requests.duplicate(viewerId, source.requestId, "Forbidden copy"),
+      ).rejects.toBeInstanceOf(AccessDeniedError);
+
+      const duplicate = await requests.duplicate(
+        userId,
+        source.requestId,
+        "Source copy",
+      );
+
+      expect(duplicate).toMatchObject({
+        name: "Source copy",
+        method: source.method,
+        targetUrl: source.targetUrl,
+        query: source.query,
+        headers: source.headers,
+        body: source.body,
+        preRequestScript: source.preRequestScript,
+        postResponseScript: source.postResponseScript,
+        draftRevision: 0,
+      });
+      expect(
+        (await requests.listChildren(userId, workspace.workspaceId, null)).map(
+          (node) => node.nodeId,
+        ),
+      ).toEqual([
+        before.requestId,
+        source.requestId,
+        duplicate.requestId,
+        after.requestId,
+      ]);
+      const duplicateProfile = await variables.get(
+        userId,
+        "request",
+        duplicate.requestId,
+      );
+      expect(duplicateProfile.revision).toBe(1);
+      expect(duplicateProfile.variables).toEqual([
+        expect.objectContaining({
+          name: "plain",
+          kind: "value",
+          value: "visible",
+        }),
+        expect.objectContaining({
+          name: "stored",
+          kind: "secret",
+          hasValue: true,
+          secretVersion: 1,
+        }),
+        expect.objectContaining({
+          name: "empty",
+          kind: "secret",
+          hasValue: false,
+          secretVersion: 1,
+        }),
+      ]);
+      expect(
+        duplicateProfile.variables.map((variable) => variable.variableId),
+      ).not.toEqual(profile.variables.map((variable) => variable.variableId));
+      expect(
+        await database.db
+          .selectFrom("variable_profiles as profile")
+          .innerJoin(
+            "variables as variable",
+            "variable.profile_id",
+            "profile.id",
+          )
+          .innerJoin(
+            "variable_secrets as secret",
+            "secret.variable_id",
+            "variable.id",
+          )
+          .select(["variable.name", "secret.payload"])
+          .where("profile.scope_kind", "=", "request")
+          .where("profile.scope_id", "=", idToBytes(duplicate.requestId))
+          .orderBy("variable.position")
+          .execute(),
+      ).toEqual([
+        { name: "stored", payload: "top-secret" },
+        { name: "empty", payload: null },
+      ]);
+      expect(
+        await database.db
+          .selectFrom("request_revisions")
+          .select(({ fn }) => fn.countAll<number>().as("count"))
+          .where("request_id", "=", idToBytes(duplicate.requestId))
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ count: 0 });
+      expect(
+        await database.db
+          .selectFrom("executions")
+          .select(({ fn }) => fn.countAll<number>().as("count"))
+          .where("request_id", "=", idToBytes(duplicate.requestId))
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ count: 0 });
     } finally {
       await database.close();
       await rm(rootPath, { recursive: true, force: true });

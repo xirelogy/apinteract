@@ -603,11 +603,13 @@
 }
 
 .request-tree-row {
-  grid-template-columns: var(--tree-leading-width) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) var(--tree-action-width);
   padding: 0;
-  padding-inline-end: var(--space-2);
   text-align: start;
-  cursor: pointer;
+}
+
+.request-tree-main {
+  padding-inline-end: var(--space-2);
 }
 
 .request-tree-label {
@@ -670,13 +672,11 @@
   text-align: start;
 }
 
-.tree-node-main[draggable="true"],
-.request-tree-row[draggable="true"] {
+.tree-node-main[draggable="true"] {
   cursor: grab;
 }
 
-.tree-node-main[draggable="true"]:active,
-.request-tree-row[draggable="true"]:active {
+.tree-node-main[draggable="true"]:active {
   cursor: grabbing;
 }
 
