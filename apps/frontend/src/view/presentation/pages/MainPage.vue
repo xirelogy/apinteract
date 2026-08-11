@@ -35,6 +35,11 @@ const saveDialogTab = ref<RequestTab | null>(null);
 const discardDialogTab = ref<RequestTab | null>(null);
 const collectionPropertiesOpen = ref(false);
 const workspacePropertiesOpen = ref(false);
+const applicationBody = ref<HTMLElement | null>(null);
+const navigatorWidth = ref(
+  Math.min(304, Math.max(256, window.innerWidth * 0.2)),
+);
+const navigatorResizePointerId = ref<number | null>(null);
 const environmentManager = ref<InstanceType<typeof EnvironmentManager> | null>(
   null,
 );
@@ -119,6 +124,9 @@ const canDeleteWorkspace = computed(() => {
   );
   return workspace?.role === "owner";
 });
+const navigatorPaneStyle = computed(() => ({
+  "--navigator-width": `${navigatorWidth.value}px`,
+}));
 const errorMessage = computed(() => {
   if (error.value === null) {
     return null;
@@ -158,6 +166,77 @@ function toggleNavigator(): void {
 /** Closes the mobile workspace navigator drawer. */
 function closeNavigator(): void {
   navigatorOpen.value = false;
+}
+
+/** Constrains the desktop navigator while preserving useful request width. */
+function setNavigatorWidth(width: number): void {
+  const bodyWidth = applicationBody.value?.getBoundingClientRect().width;
+  if (bodyWidth === undefined || bodyWidth <= 0) return;
+  const maximumWidth = Math.max(224, Math.min(480, bodyWidth - 328));
+  navigatorWidth.value = Math.min(Math.max(width, 224), maximumWidth);
+}
+
+/** Converts a physical pointer coordinate into logical navigator width. */
+function setNavigatorWidthFromClientX(clientX: number): void {
+  const body = applicationBody.value;
+  const bounds = body?.getBoundingClientRect();
+  if (body === null || bounds === undefined) return;
+  const width =
+    getComputedStyle(body).direction === "rtl"
+      ? bounds.right - clientX
+      : clientX - bounds.left;
+  setNavigatorWidth(width);
+}
+
+/** Starts pointer-captured resizing from the desktop navigator separator. */
+function startNavigatorResize(event: PointerEvent): void {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  navigatorResizePointerId.value = event.pointerId;
+  (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+  setNavigatorWidthFromClientX(event.clientX);
+}
+
+/** Applies movement from the pointer currently resizing the navigator. */
+function continueNavigatorResize(event: PointerEvent): void {
+  if (navigatorResizePointerId.value !== event.pointerId) return;
+  setNavigatorWidthFromClientX(event.clientX);
+}
+
+/** Releases pointer capture and ends desktop navigator resizing. */
+function finishNavigatorResize(event: PointerEvent): void {
+  if (navigatorResizePointerId.value !== event.pointerId) return;
+  navigatorResizePointerId.value = null;
+  const separator = event.currentTarget as HTMLElement;
+  if (separator.hasPointerCapture?.(event.pointerId)) {
+    separator.releasePointerCapture(event.pointerId);
+  }
+}
+
+/** Ends navigator resizing when the browser revokes pointer capture. */
+function cancelNavigatorResize(): void {
+  navigatorResizePointerId.value = null;
+}
+
+/** Resizes the navigator by keyboard in the document's logical direction. */
+function resizeNavigatorByKeyboard(event: KeyboardEvent): void {
+  const body = applicationBody.value;
+  if (body === null) return;
+  const rtl = getComputedStyle(body).direction === "rtl";
+  let nextWidth: number;
+  if (event.key === "ArrowLeft") {
+    nextWidth = navigatorWidth.value + (rtl ? 24 : -24);
+  } else if (event.key === "ArrowRight") {
+    nextWidth = navigatorWidth.value + (rtl ? -24 : 24);
+  } else if (event.key === "Home") {
+    nextWidth = 0;
+  } else if (event.key === "End") {
+    nextWidth = Number.POSITIVE_INFINITY;
+  } else {
+    return;
+  }
+  event.preventDefault();
+  setNavigatorWidth(nextWidth);
 }
 
 /** Opens a temporary tab with an optional eventual collection destination. */
@@ -409,7 +488,14 @@ function discardRequestTab(): void {
     <div v-if="errorMessage" class="global-error" role="alert">
       {{ errorMessage }}
     </div>
-    <div class="application-body">
+    <div
+      ref="applicationBody"
+      class="application-body"
+      :style="navigatorPaneStyle"
+      :data-resizing-navigator="
+        navigatorResizePointerId === null ? undefined : ''
+      "
+    >
       <WorkspaceNavigator
         id="workspace-navigator"
         :workspaces="workspaces"
@@ -452,6 +538,23 @@ function discardRequestTab(): void {
         @select-request="selectRequest"
         @dismiss="closeNavigator"
       />
+      <div
+        class="navigator-pane-separator"
+        role="separator"
+        tabindex="0"
+        aria-orientation="vertical"
+        aria-controls="workspace-navigator"
+        :aria-label="t('workspace.resizeNavigation')"
+        aria-valuemin="224"
+        aria-valuemax="480"
+        :aria-valuenow="Math.round(navigatorWidth)"
+        @pointerdown="startNavigatorResize"
+        @pointermove="continueNavigatorResize"
+        @pointerup="finishNavigatorResize"
+        @pointercancel="finishNavigatorResize"
+        @lostpointercapture="cancelNavigatorResize"
+        @keydown="resizeNavigatorByKeyboard"
+      ></div>
       <button
         v-if="navigatorOpen"
         class="navigator-scrim"

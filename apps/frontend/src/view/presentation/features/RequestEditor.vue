@@ -115,7 +115,14 @@ const postResponseScript = ref("");
 const activeTab = ref<(typeof requestTabs)[number]>("query");
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 const requestVariableCount = ref<number | null>(null);
+const workbench = ref<HTMLElement | null>(null);
+const requestPanePercent = ref(44);
+const resizingPointerId = ref<number | null>(null);
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
+
+const paneStyle = computed(() => ({
+  "--request-editor-share": `${requestPanePercent.value}%`,
+}));
 
 watch(
   () => props.draft,
@@ -328,13 +335,82 @@ function saveVariables(): void {
     emit("saveVariables", variableEditor.value?.writes() ?? []);
   }
 }
+
+/** Constrains one splitter position to usable request and response panes. */
+function setRequestPaneFromClientY(clientY: number): void {
+  const bounds = workbench.value?.getBoundingClientRect();
+  if (bounds === undefined || bounds.height <= 0) return;
+  const availableHeight = Math.max(bounds.height - 8, 1);
+  const minimumRequestHeight = Math.min(260, availableHeight * 0.45);
+  const minimumResponseHeight = Math.min(112, availableHeight * 0.3);
+  const requestHeight = Math.min(
+    Math.max(clientY - bounds.top, minimumRequestHeight),
+    availableHeight - minimumResponseHeight,
+  );
+  requestPanePercent.value = (requestHeight / bounds.height) * 100;
+}
+
+/** Starts pointer-captured resizing from the horizontal pane separator. */
+function startPaneResize(event: PointerEvent): void {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  resizingPointerId.value = event.pointerId;
+  (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+  setRequestPaneFromClientY(event.clientY);
+}
+
+/** Applies pointer movement while the separator owns the active pointer. */
+function continuePaneResize(event: PointerEvent): void {
+  if (resizingPointerId.value !== event.pointerId) return;
+  setRequestPaneFromClientY(event.clientY);
+}
+
+/** Releases pointer capture and ends the current pane resize gesture. */
+function finishPaneResize(event: PointerEvent): void {
+  if (resizingPointerId.value !== event.pointerId) return;
+  resizingPointerId.value = null;
+  const separator = event.currentTarget as HTMLElement;
+  if (separator.hasPointerCapture?.(event.pointerId)) {
+    separator.releasePointerCapture(event.pointerId);
+  }
+}
+
+/** Ends resizing if the browser revokes pointer capture unexpectedly. */
+function cancelPaneResize(): void {
+  resizingPointerId.value = null;
+}
+
+/** Resizes the panes with arrow keys or jumps to either usable limit. */
+function resizePanesByKeyboard(event: KeyboardEvent): void {
+  const bounds = workbench.value?.getBoundingClientRect();
+  if (bounds === undefined || bounds.height <= 0) return;
+  const currentY =
+    bounds.top + (requestPanePercent.value / 100) * bounds.height;
+  let nextY: number;
+  if (event.key === "ArrowUp") {
+    nextY = currentY - bounds.height * 0.04;
+  } else if (event.key === "ArrowDown") {
+    nextY = currentY + bounds.height * 0.04;
+  } else if (event.key === "Home") {
+    nextY = bounds.top;
+  } else if (event.key === "End") {
+    nextY = bounds.bottom;
+  } else {
+    return;
+  }
+  event.preventDefault();
+  setRequestPaneFromClientY(nextY);
+}
 </script>
 
 <template>
   <main
     id="request-workbench"
+    ref="workbench"
     class="request-workbench"
     role="tabpanel"
+    :style="paneStyle"
+    :data-resizing="resizingPointerId === null ? undefined : ''"
     :aria-labelledby="tabId === null ? undefined : `request-tab-${tabId}`"
   >
     <div v-if="draft === null" class="empty-workbench">
@@ -711,6 +787,22 @@ function saveVariables(): void {
           </TabsPanel>
         </TabsRoot>
       </section>
+      <div
+        class="request-pane-separator"
+        role="separator"
+        tabindex="0"
+        aria-orientation="horizontal"
+        :aria-label="t('request.resizePanes')"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        :aria-valuenow="Math.round(requestPanePercent)"
+        @pointerdown="startPaneResize"
+        @pointermove="continuePaneResize"
+        @pointerup="finishPaneResize"
+        @pointercancel="finishPaneResize"
+        @lostpointercapture="cancelPaneResize"
+        @keydown="resizePanesByKeyboard"
+      ></div>
       <ResponsePanel
         :execution="execution"
         @download="emit('download', $event)"

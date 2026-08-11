@@ -14,6 +14,84 @@ Object.defineProperty(Range.prototype, "getClientRects", {
 });
 
 describe("RequestEditor", () => {
+  it("resizes the request and response panes by pointer and keyboard", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft: {
+          name: "Resizable request",
+          method: "GET",
+          targetUrl: "https://example.test",
+          query: [],
+          headers: [],
+          body: "",
+          preRequestScript: "",
+          postResponseScript: "",
+        },
+        execution: null,
+        tabId: "019facab-1eee-765f-bd9f-ac2449151be8",
+        temporary: true,
+        inheritedHeaders: [],
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+    const workbench = wrapper.get(".request-workbench");
+    vi.spyOn(workbench.element, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 1000,
+      bottom: 800,
+      left: 0,
+      width: 1000,
+      height: 800,
+      toJSON: () => ({}),
+    });
+    const separator = wrapper.get('[role="separator"]');
+
+    expect(separator.attributes("aria-label")).toBe(
+      "Resize request and response panes",
+    );
+    expect(separator.attributes("aria-valuenow")).toBe("44");
+    const pointerDown = new MouseEvent("pointerdown", {
+      bubbles: true,
+      button: 0,
+      clientY: 400,
+    });
+    Object.defineProperty(pointerDown, "pointerId", { value: 7 });
+    separator.element.dispatchEvent(pointerDown);
+    const pointerMove = new MouseEvent("pointermove", {
+      bubbles: true,
+      clientY: 560,
+    });
+    Object.defineProperty(pointerMove, "pointerId", { value: 7 });
+    separator.element.dispatchEvent(pointerMove);
+    await wrapper.vm.$nextTick();
+    expect(workbench.attributes("data-resizing")).toBe("");
+    expect(separator.attributes("aria-valuenow")).toBe("70");
+    expect(workbench.attributes("style")).toContain(
+      "--request-editor-share: 70%",
+    );
+    const pointerUp = new MouseEvent("pointerup", {
+      bubbles: true,
+      clientY: 560,
+    });
+    Object.defineProperty(pointerUp, "pointerId", { value: 7 });
+    separator.element.dispatchEvent(pointerUp);
+    await wrapper.vm.$nextTick();
+    expect(workbench.attributes("data-resizing")).toBeUndefined();
+
+    await separator.trigger("keydown", { key: "ArrowUp" });
+    expect(separator.attributes("aria-valuenow")).toBe("66");
+    wrapper.unmount();
+  });
+
   it("keeps one trailing blank query and header row out of draft changes", async () => {
     const i18n = createI18n({
       legacy: false,

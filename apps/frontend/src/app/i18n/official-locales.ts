@@ -64,6 +64,7 @@ const zhHansMessages = {
     reorderHint:
       "拖动以移动。使用键盘时，请按住 Alt 并使用方向键重新排序、缩进或减少缩进。",
     reorderRequested: "已将{name}移动到第 {position} 位。",
+    resizeNavigation: "调整工作区导航窗格大小",
     moveRequested: "正在将{name}移动到新位置。",
     headersDescription:
       "启用的请求头将应用于此工作区中的所有请求，除非被更近的作用域覆盖。",
@@ -202,6 +203,7 @@ const zhHansMessages = {
     removeField: "移除第 {index} 个{kind}字段",
     removeFieldTitle: "移除{kind}字段",
     requestSettings: "请求设置",
+    resizePanes: "调整请求和响应窗格大小",
     saveDialog: "保存请求",
     savedName: "已保存的请求名称",
     selectDescription: "请从工作区导航中选择集合和请求。",
@@ -367,6 +369,7 @@ const zhHantMessages = {
     reorderHint:
       "拖曳以移動。使用鍵盤時，請按住 Alt 並使用方向鍵重新排序、縮排或減少縮排。",
     reorderRequested: "已將{name}移至第 {position} 位。",
+    resizeNavigation: "調整工作區導覽窗格大小",
     moveRequested: "正在將{name}移至新位置。",
     headersDescription:
       "啟用的標頭會套用到此工作區中的所有請求，除非被較近的範圍覆寫。",
@@ -506,6 +509,7 @@ const zhHantMessages = {
     removeField: "移除第 {index} 個{kind}欄位",
     removeFieldTitle: "移除{kind}欄位",
     requestSettings: "請求設定",
+    resizePanes: "調整請求和回應窗格大小",
     saveDialog: "儲存請求",
     savedName: "已儲存的請求名稱",
     selectDescription: "請從工作區導覽中選擇集合和請求。",

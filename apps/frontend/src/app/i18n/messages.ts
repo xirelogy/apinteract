@@ -63,6 +63,7 @@ export const enUsMessages = {
     reorderHint:
       "Drag to move. From the keyboard, use Alt with an arrow key to reorder, indent, or outdent.",
     reorderRequested: "Moved {name} to position {position}.",
+    resizeNavigation: "Resize workspace navigator",
     moveRequested: "Moving {name} to a new location.",
     headersDescription:
       "Enabled headers apply to every request in this workspace unless a nearer scope overrides them.",
@@ -212,6 +213,7 @@ export const enUsMessages = {
     removeField: "Remove {kind} field {index}",
     removeFieldTitle: "Remove {kind} field",
     requestSettings: "Request settings",
+    resizePanes: "Resize request and response panes",
     saveDialog: "Save request",
     savedName: "Saved request name",
     selectDescription:
