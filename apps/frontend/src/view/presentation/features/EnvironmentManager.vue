@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { X } from "@lucide/vue";
+import { Trash2, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -16,6 +16,7 @@ import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
 import DialogControl from "@/view/presentation/controls/dialog/DialogControl.vue";
+import ResourceDeleteDialog from "./ResourceDeleteDialog.vue";
 import VariableFieldsEditor from "./VariableFieldsEditor.vue";
 
 interface VariableFieldsEditorApi {
@@ -47,10 +48,22 @@ const name = ref("");
 const editingId = ref<string | null>(null);
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 const variableEditorKey = ref(0);
+const deleteConfirmationOpen = ref(false);
+const deletionTarget = ref<{
+  readonly environmentId: string;
+  readonly revision: number;
+  readonly name: string;
+} | null>(null);
 const editorReady = computed(
   () =>
     editingId.value === null ||
     props.environment?.environmentId === editingId.value,
+);
+const editorEnvironmentName = computed(
+  () =>
+    props.environments.find(
+      (environment) => environment.environmentId === editingId.value,
+    )?.name ?? name.value,
 );
 const options = computed(() => [
   { value: "", label: t("environment.none") },
@@ -86,6 +99,14 @@ const environmentActions = computed<readonly ActionMenuItem[]>(() => {
       })),
   ];
 });
+const editorActions = computed<readonly ActionMenuItem[]>(() => [
+  {
+    value: "delete",
+    label: t("environment.deleteAction"),
+    variant: "danger",
+    disabled: !editorReady.value,
+  },
+]);
 watch(
   () => props.environment,
   (environment) => {
@@ -132,6 +153,8 @@ function selectEnvironmentAction(action: string): void {
 
 /** Requests closure through the shared controlled-dialog lifecycle. */
 function close(): void {
+  deleteConfirmationOpen.value = false;
+  deletionTarget.value = null;
   open.value = false;
 }
 
@@ -154,22 +177,47 @@ function save(): void {
 
 /** Closes the editor only after its owning controller confirms persistence. */
 function finishMutation(): void {
+  deleteConfirmationOpen.value = false;
+  deletionTarget.value = null;
   open.value = false;
 }
 
 defineExpose({ finishMutation });
 
-/** Confirms destructive deletion using the browser's accessible prompt. */
-function deleteEnvironment(): void {
+/** Opens styled confirmation for the currently loaded saved environment. */
+function requestEnvironmentDeletion(): void {
   const environment = props.environment;
   if (
     environment !== null &&
-    window.confirm(
-      t("environment.deleteConfirmation", { name: environment.name }),
-    )
+    editingId.value === environment.environmentId &&
+    props.canEdit
   ) {
-    emit("delete", environment.environmentId, environment.revision);
+    deletionTarget.value = {
+      environmentId: environment.environmentId,
+      revision: environment.revision,
+      name: environment.name,
+    };
+    deleteConfirmationOpen.value = true;
   }
+}
+
+/** Routes one infrequent editor action from the header overflow menu. */
+function selectEditorAction(action: string): void {
+  if (action === "delete") requestEnvironmentDeletion();
+}
+
+/** Emits deletion while retaining both modal surfaces until persistence succeeds. */
+function confirmEnvironmentDeletion(): void {
+  const target = deletionTarget.value;
+  if (target !== null) {
+    emit("delete", target.environmentId, target.revision);
+  }
+}
+
+/** Synchronizes confirmation visibility and releases a cancelled target. */
+function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
+  deleteConfirmationOpen.value = confirmationOpen;
+  if (!confirmationOpen) deletionTarget.value = null;
 }
 </script>
 
@@ -202,13 +250,35 @@ function deleteEnvironment(): void {
         <h2 id="environment-dialog-title">
           {{ editingId ? t("environment.edit") : t("environment.create") }}
         </h2>
-        <IconButton
-          :label="t('common.actions.close')"
-          :disabled="busy"
-          @click="close"
-        >
-          <X :size="18" aria-hidden="true" />
-        </IconButton>
+        <div class="resource-dialog-header-actions">
+          <ActionMenu
+            v-if="editingId && canEdit"
+            :label="
+              t('environment.moreActions', {
+                name: editorEnvironmentName,
+              })
+            "
+            :items="editorActions"
+            :disabled="busy"
+            @select="selectEditorAction"
+          >
+            <template #item="{ item }">
+              <Trash2
+                class="action-menu-item-icon"
+                :size="16"
+                aria-hidden="true"
+              />
+              <span>{{ item.label }}</span>
+            </template>
+          </ActionMenu>
+          <IconButton
+            :label="t('common.actions.close')"
+            :disabled="busy"
+            @click="close"
+          >
+            <X :size="18" aria-hidden="true" />
+          </IconButton>
+        </div>
       </header>
       <form class="resource-dialog-form" @submit.prevent="save">
         <label class="field-label">
@@ -246,15 +316,6 @@ function deleteEnvironment(): void {
             {{ t("common.actions.cancel") }}
           </ButtonControl>
           <ButtonControl
-            v-if="editingId && canEdit"
-            type="button"
-            variant="danger"
-            :disabled="busy"
-            @click="deleteEnvironment"
-          >
-            {{ t("common.actions.delete") }}
-          </ButtonControl>
-          <ButtonControl
             v-if="canEdit"
             type="submit"
             variant="primary"
@@ -266,4 +327,18 @@ function deleteEnvironment(): void {
       </form>
     </div>
   </DialogControl>
+
+  <ResourceDeleteDialog
+    v-if="deletionTarget"
+    class="environment-delete-dialog"
+    :open="deleteConfirmationOpen"
+    title-id="environment-delete-dialog-title"
+    :title="t('environment.deleteTitle')"
+    :message="t('environment.deleteMessage', { name: deletionTarget.name })"
+    :additional-message="t('environment.deleteUnsavedChanges')"
+    :confirm-label="t('environment.deleteAction')"
+    :busy="busy"
+    @update:open="setDeleteConfirmationOpen"
+    @confirm="confirmEnvironmentDeletion"
+  />
 </template>

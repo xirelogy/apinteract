@@ -204,12 +204,14 @@ export interface components {
       | components["schemas"]["WorkspaceCreateCommand"]
       | components["schemas"]["WorkspaceGetCommand"]
       | components["schemas"]["WorkspaceUpdateCommand"]
+      | components["schemas"]["WorkspaceDeleteCommand"]
       | components["schemas"]["TreeListCommand"]
       | components["schemas"]["TreeReorderCommand"]
       | components["schemas"]["TreeMoveCommand"]
       | components["schemas"]["CollectionCreateCommand"]
       | components["schemas"]["CollectionGetCommand"]
       | components["schemas"]["CollectionUpdateCommand"]
+      | components["schemas"]["CollectionDeleteCommand"]
       | components["schemas"]["CollectionHeadersUpdateCommand"]
       | components["schemas"]["EnvironmentListCommand"]
       | components["schemas"]["EnvironmentCreateCommand"]
@@ -224,6 +226,7 @@ export interface components {
       | components["schemas"]["RequestCreateCommand"]
       | components["schemas"]["RequestGetCommand"]
       | components["schemas"]["RequestUpdateCommand"]
+      | components["schemas"]["RequestDeleteCommand"]
       | components["schemas"]["ExecutionStartCommand"]
       | components["schemas"]["ExecutionStartTemporaryCommand"];
     CommandEnvelope: {
@@ -311,6 +314,21 @@ export interface components {
        * @enum {string}
        */
       type: "WorkspaceUpdateCommand";
+    };
+    /** @description Owner-only deletion that removes the workspace from active access while retaining its immutable execution and audit history. */
+    WorkspaceDeleteCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "workspace.delete";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+        expectedRevision: number;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "WorkspaceDeleteCommand";
     };
     TreeListCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
@@ -403,6 +421,21 @@ export interface components {
        * @enum {string}
        */
       type: "CollectionUpdateCommand";
+    };
+    /** @description Recursively deletes a collection, its descendant collections and requests, and their mutable profiles. Existing execution snapshots remain available. */
+    CollectionDeleteCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "collection.delete";
+      payload?: {
+        collectionId: components["schemas"]["CollectionId"];
+        expectedRevision: number;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "CollectionDeleteCommand";
     };
     CollectionHeadersUpdateCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
@@ -622,6 +655,21 @@ export interface components {
        * @enum {string}
        */
       type: "RequestUpdateCommand";
+    };
+    /** @description Deletes a mutable saved request and its variable profile after detaching any durable execution snapshots. */
+    RequestDeleteCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "request.delete";
+      payload?: {
+        requestId: components["schemas"]["RequestId"];
+        expectedDraftRevision: number;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "RequestDeleteCommand";
     };
     ExecutionStartCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */

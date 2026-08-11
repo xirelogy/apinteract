@@ -129,6 +129,7 @@ interface RequestRow {
   readonly pre_request_script: string;
   readonly post_response_script: string;
   readonly draft_revision: number;
+  readonly order_revision: number;
 }
 
 /** Represents the persistence projection required to build a collection view. */
@@ -139,6 +140,14 @@ interface CollectionRow {
   readonly name: string;
   readonly profile_revision: number | null;
   readonly headers_json: string | null;
+  readonly order_revision: number;
+}
+
+/** Identifies one collection subtree node and its dependency deletion depth. */
+interface TreeDeletionNode {
+  readonly nodeId: EntityId;
+  readonly kind: "collection" | "request";
+  readonly depth: number;
 }
 
 /** Raised when an update targets a stale persisted draft revision. */
@@ -621,6 +630,77 @@ export class RequestService {
     });
   }
 
+  /** Recursively deletes a collection subtree after a profile revision check. */
+  async deleteCollection(
+    userId: EntityId,
+    collectionId: EntityId,
+    expectedRevision: number,
+  ): Promise<{ readonly deleted: true }> {
+    return this.#database.transaction().execute(async (transaction) => {
+      const row = await this.#collectionRow(transaction, collectionId);
+      const workspaceId = bytesToId(row.workspace_id);
+      await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
+      if ((row.profile_revision ?? 0) !== expectedRevision) {
+        throw new CollectionProfileConflictError(
+          "The collection properties changed",
+        );
+      }
+
+      const descendants = await this.#collectionDescendants(
+        transaction,
+        row.workspace_id,
+        collectionId,
+      );
+
+      const requestIds = descendants
+        .filter((node) => node.kind === "request")
+        .map((node) => node.nodeId);
+      await this.#detachAndDeleteRequestHistory(transaction, requestIds);
+      await this.#deleteVariableProfiles(
+        transaction,
+        userId,
+        workspaceId,
+        descendants.map((node) => ({
+          scopeKind: node.kind,
+          scopeId: node.nodeId,
+        })),
+      );
+      for (const node of descendants.sort(
+        (left, right) => right.depth - left.depth,
+      )) {
+        await transaction
+          .deleteFrom("workspace_tree_nodes")
+          .where("id", "=", idToBytes(node.nodeId))
+          .execute();
+      }
+      const parentCollectionId =
+        row.parent_collection_id === null
+          ? null
+          : bytesToId(row.parent_collection_id);
+      const orderRevision = await this.#compactSiblingOrder(
+        transaction,
+        workspaceId,
+        parentCollectionId,
+        row.order_revision,
+      );
+      await this.#audit.record(transaction, {
+        type: "collection.deleted",
+        actorUserId: userId,
+        workspaceId,
+        data: {
+          collectionId,
+          parentCollectionId,
+          deletedCollections: descendants.filter(
+            (node) => node.kind === "collection",
+          ).length,
+          deletedRequests: requestIds.length,
+          orderRevision,
+        },
+      });
+      return { deleted: true };
+    });
+  }
+
   /** Preserves the focused common-header update boundary for existing callers. */
   async updateCollectionHeaders(
     userId: EntityId,
@@ -836,6 +916,47 @@ export class RequestService {
         postResponseScript: content.postResponseScript,
         draftRevision: expectedDraftRevision + 1,
       };
+    });
+  }
+
+  /** Deletes a request draft while retaining detached execution snapshots. */
+  async delete(
+    userId: EntityId,
+    requestId: EntityId,
+    expectedDraftRevision: number,
+  ): Promise<{ readonly deleted: true }> {
+    return this.#database.transaction().execute(async (transaction) => {
+      const row = await this.#requestRow(transaction, requestId);
+      const workspaceId = bytesToId(row.workspace_id);
+      await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
+      if (row.draft_revision !== expectedDraftRevision) {
+        throw new DraftConflictError("The request draft changed");
+      }
+      await this.#detachAndDeleteRequestHistory(transaction, [requestId]);
+      await this.#deleteVariableProfiles(transaction, userId, workspaceId, [
+        { scopeKind: "request", scopeId: requestId },
+      ]);
+      await transaction
+        .deleteFrom("workspace_tree_nodes")
+        .where("id", "=", idToBytes(requestId))
+        .executeTakeFirstOrThrow();
+      const parentCollectionId =
+        row.parent_collection_id === null
+          ? null
+          : bytesToId(row.parent_collection_id);
+      const orderRevision = await this.#compactSiblingOrder(
+        transaction,
+        workspaceId,
+        parentCollectionId,
+        row.order_revision,
+      );
+      await this.#audit.record(transaction, {
+        type: "request.deleted",
+        actorUserId: userId,
+        workspaceId,
+        data: { requestId, parentCollectionId, orderRevision },
+      });
+      return { deleted: true };
     });
   }
 
@@ -1105,6 +1226,7 @@ export class RequestService {
         "node.workspace_id",
         "node.parent_collection_id",
         "node.name",
+        "node.order_revision",
       ])
       .where("draft.request_id", "=", idToBytes(requestId))
       .executeTakeFirst();
@@ -1133,6 +1255,7 @@ export class RequestService {
         "node.name",
         "profile.revision as profile_revision",
         "profile.headers_json",
+        "node.order_revision",
       ])
       .where("node.id", "=", idToBytes(collectionId))
       .where("node.kind", "=", "collection")
@@ -1261,6 +1384,151 @@ export class RequestService {
       position: row.position,
       orderRevision: row.order_revision,
     }));
+  }
+
+  /** Detaches durable executions before removing mutable request history. */
+  async #detachAndDeleteRequestHistory(
+    transaction: Transaction<DatabaseSchema>,
+    requestIds: readonly EntityId[],
+  ): Promise<void> {
+    if (requestIds.length === 0) return;
+    const persistedIds = requestIds.map(idToBytes);
+    await transaction
+      .updateTable("executions")
+      .set({ request_id: null, request_revision_id: null })
+      .where("request_id", "in", persistedIds)
+      .execute();
+    await transaction
+      .updateTable("request_revisions")
+      .set({ parent_revision_id: null })
+      .where("request_id", "in", persistedIds)
+      .execute();
+    await transaction
+      .deleteFrom("request_revisions")
+      .where("request_id", "in", persistedIds)
+      .execute();
+  }
+
+  /** Resolves a complete collection subtree for deepest-first deletion. */
+  async #collectionDescendants(
+    transaction: Transaction<DatabaseSchema>,
+    workspaceId: Uint8Array,
+    collectionId: EntityId,
+  ): Promise<TreeDeletionNode[]> {
+    const persistedNodes = await transaction
+      .selectFrom("workspace_tree_nodes")
+      .select(["id", "parent_collection_id", "kind"])
+      .where("workspace_id", "=", workspaceId)
+      .execute();
+    const nodes = new Map(
+      persistedNodes.map((node) => [bytesToId(node.id), node] as const),
+    );
+    const children = new Map<EntityId, EntityId[]>();
+    for (const node of persistedNodes) {
+      if (node.parent_collection_id === null) continue;
+      const parentId = bytesToId(node.parent_collection_id);
+      children.set(parentId, [
+        ...(children.get(parentId) ?? []),
+        bytesToId(node.id),
+      ]);
+    }
+    const descendants: TreeDeletionNode[] = [];
+    const pending = [{ nodeId: collectionId, depth: 0 }];
+    const visited = new Set<EntityId>();
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (current === undefined || visited.has(current.nodeId)) continue;
+      visited.add(current.nodeId);
+      const node = nodes.get(current.nodeId);
+      if (node === undefined) {
+        throw new ResourceNotFoundError("Collection not found");
+      }
+      descendants.push({
+        nodeId: current.nodeId,
+        kind: node.kind,
+        depth: current.depth,
+      });
+      for (const childId of children.get(current.nodeId) ?? []) {
+        pending.push({ nodeId: childId, depth: current.depth + 1 });
+      }
+    }
+    return descendants;
+  }
+
+  /** Deletes current variable profiles and audits secret-version removal. */
+  async #deleteVariableProfiles(
+    transaction: Transaction<DatabaseSchema>,
+    userId: EntityId,
+    workspaceId: EntityId,
+    scopes: readonly {
+      readonly scopeKind: "collection" | "request";
+      readonly scopeId: EntityId;
+    }[],
+  ): Promise<void> {
+    if (scopes.length === 0) return;
+    const scopeIds = scopes.map((scope) => idToBytes(scope.scopeId));
+    const secrets = await transaction
+      .selectFrom("variable_profiles as profile")
+      .innerJoin("variables as variable", "variable.profile_id", "profile.id")
+      .innerJoin(
+        "variable_secrets as secret",
+        "secret.variable_id",
+        "variable.id",
+      )
+      .select([
+        "profile.scope_kind",
+        "profile.scope_id",
+        "variable.id as variable_id",
+        "secret.version",
+      ])
+      .where("profile.scope_kind", "in", ["collection", "request"])
+      .where("profile.scope_id", "in", scopeIds)
+      .execute();
+    await transaction
+      .deleteFrom("variable_profiles")
+      .where("scope_kind", "in", ["collection", "request"])
+      .where("scope_id", "in", scopeIds)
+      .execute();
+    for (const secret of secrets) {
+      await this.#audit.record(transaction, {
+        type: "secret_variable.deleted",
+        actorUserId: userId,
+        workspaceId,
+        data: {
+          scopeKind: secret.scope_kind,
+          scopeId: bytesToId(secret.scope_id),
+          variableId: bytesToId(secret.variable_id),
+          secretVersion: secret.version,
+        },
+      });
+    }
+  }
+
+  /** Compacts a sibling list and advances its optimistic ordering revision. */
+  async #compactSiblingOrder(
+    transaction: Transaction<DatabaseSchema>,
+    workspaceId: EntityId,
+    parentCollectionId: EntityId | null,
+    deletedOrderRevision: number,
+  ): Promise<number> {
+    const siblings = await this.#listSiblingOrder(
+      transaction,
+      workspaceId,
+      parentCollectionId,
+    );
+    const orderRevision =
+      siblings.reduce(
+        (revision, sibling) => Math.max(revision, sibling.orderRevision),
+        deletedOrderRevision,
+      ) + 1;
+    for (const [position, sibling] of siblings.entries()) {
+      await transaction
+        .updateTable("workspace_tree_nodes")
+        .set({ position, order_revision: orderRevision })
+        .where("id", "=", idToBytes(sibling.nodeId))
+        .executeTakeFirstOrThrow();
+    }
+    return orderRevision;
   }
 
   /** Frees the final position range before rewriting one sibling order. */

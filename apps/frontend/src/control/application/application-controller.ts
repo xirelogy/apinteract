@@ -181,6 +181,46 @@ export class ApplicationController {
     });
   }
 
+  /** Deletes an owner-managed workspace and selects the next visible workspace. */
+  async deleteWorkspace(
+    workspaceId: string,
+    expectedRevision: number,
+  ): Promise<void> {
+    await this.#run(async () => {
+      await this.#webSocket.command("workspace.delete", {
+        workspaceId,
+        expectedRevision,
+      });
+      const result = await this.#webSocket.command<{
+        workspaces: WorkspaceSummary[];
+      }>("workspace.list", {});
+      const store = useApplicationStore();
+      store.workspaces = result.workspaces;
+      store.requestTabs = store.requestTabs.filter(
+        (tab) => tab.workspaceId !== workspaceId,
+      );
+      store.activeRequestTabId = null;
+      store.selectedWorkspaceId = null;
+      store.selectedWorkspace = null;
+      store.environments = [];
+      store.selectedEnvironmentId = null;
+      store.selectedEnvironment = null;
+      store.selectedVariableProfile = null;
+      store.variablePreviews = [];
+      store.rootNodes = [];
+      store.selectedCollectionId = null;
+      store.selectedCollection = null;
+      store.collectionChildren = {};
+      store.expandedCollectionIds = [];
+      this.#previewNames = [];
+      this.#previewSequence += 1;
+      const nextWorkspace = result.workspaces[0];
+      if (nextWorkspace !== undefined) {
+        await this.#selectWorkspace(nextWorkspace.workspaceId);
+      }
+    });
+  }
+
   /** Selects the current session's environment for the active workspace. */
   async selectEnvironment(environmentId: string | null): Promise<void> {
     const store = useApplicationStore();
@@ -477,6 +517,60 @@ export class ApplicationController {
       );
       store.selectedVariableProfile = profile;
       await this.#refreshVariablePreviews();
+    });
+  }
+
+  /** Deletes a collection subtree and removes its loaded tabs and navigation state. */
+  async deleteCollection(
+    collectionId: string,
+    expectedRevision: number,
+  ): Promise<void> {
+    const store = useApplicationStore();
+    const workspaceId = requireSelection(store.selectedWorkspaceId);
+    const collection = store.selectedCollection;
+    const parentCollectionId =
+      collection?.collectionId === collectionId
+        ? collection.parentCollectionId
+        : null;
+    const deleted = loadedCollectionSubtree(
+      collectionId,
+      store.collectionChildren,
+    );
+    await this.#run(async () => {
+      await this.#webSocket.command("collection.delete", {
+        collectionId,
+        expectedRevision,
+      });
+      store.requestTabs = store.requestTabs.filter((tab) => {
+        const request = tab.request;
+        return !(
+          tab.workspaceId === workspaceId &&
+          ((request !== null && deleted.requestIds.has(request.requestId)) ||
+            (request !== null &&
+              request.parentCollectionId !== null &&
+              deleted.collectionIds.has(request.parentCollectionId)) ||
+            (tab.pendingParentCollectionId !== null &&
+              deleted.collectionIds.has(tab.pendingParentCollectionId)))
+        );
+      });
+      if (
+        !store.requestTabs.some((tab) => tab.tabId === store.activeRequestTabId)
+      ) {
+        store.activeRequestTabId = null;
+      }
+      store.selectedCollectionId = null;
+      store.selectedCollection = null;
+      store.selectedVariableProfile = null;
+      store.variablePreviews = [];
+      store.expandedCollectionIds = store.expandedCollectionIds.filter(
+        (id) => !deleted.collectionIds.has(id),
+      );
+      for (const id of deleted.collectionIds) {
+        delete store.collectionChildren[id];
+      }
+      this.#previewNames = [];
+      this.#previewSequence += 1;
+      await this.#reloadCollection(workspaceId, parentCollectionId);
     });
   }
 
@@ -895,6 +989,34 @@ function executableDraft(draft: RequestDraftInput) {
 /** Returns an array containing the value exactly once. */
 function includeOnce(values: readonly string[], value: string): string[] {
   return values.includes(value) ? [...values] : [...values, value];
+}
+
+/** Collects every currently loaded collection and request beneath one collection. */
+function loadedCollectionSubtree(
+  rootCollectionId: string,
+  children: Readonly<Record<string, readonly TreeNode[]>>,
+): {
+  readonly collectionIds: ReadonlySet<string>;
+  readonly requestIds: ReadonlySet<string>;
+} {
+  const collectionIds = new Set([rootCollectionId]);
+  const requestIds = new Set<string>();
+  const pending = [rootCollectionId];
+  for (let index = 0; index < pending.length; index += 1) {
+    const collectionId = pending[index];
+    if (collectionId === undefined) continue;
+    for (const node of children[collectionId] ?? []) {
+      if (node.kind === "collection") {
+        if (!collectionIds.has(node.nodeId)) {
+          collectionIds.add(node.nodeId);
+          pending.push(node.nodeId);
+        }
+      } else {
+        requestIds.add(node.nodeId);
+      }
+    }
+  }
+  return { collectionIds, requestIds };
 }
 
 /** Updates request labels and methods in every loaded tree branch. */

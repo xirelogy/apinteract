@@ -45,10 +45,17 @@ export const enUsMessages = {
     create: "Create workspace",
     createRequest: "Create request",
     createRootCollection: "Create root collection",
+    deleteAction: "Delete workspace",
+    deleteMessage:
+      "“{name}” and all of its collections, requests, environments, and variables will be permanently deleted.",
+    deleteTitle: "Delete workspace?",
+    deleteUnsavedChanges:
+      "Unsaved edits and open request tabs in this workspace will be discarded.",
     label: "Workspace",
     navigation: "Workspace navigation",
     name: "Workspace name",
     noCollections: "No collections yet",
+    moreActions: "More actions for {name}",
     properties: "Workspace properties",
     propertiesDescription:
       "Rename this workspace and manage headers and variables inherited by every request.",
@@ -70,6 +77,12 @@ export const enUsMessages = {
     createSubcollection: "Create subcollection in {name}",
     createRequestIn: "Create request in {name}",
     commonHeaders: "Common headers",
+    deleteAction: "Delete collection",
+    deleteMessage:
+      "“{name}” and all nested collections, requests, and variables will be permanently deleted.",
+    deleteTitle: "Delete collection?",
+    deleteUnsavedChanges:
+      "Unsaved edits and open request tabs in this collection will be discarded.",
     destination: "Destination collection",
     empty: "This collection is empty",
     expand: "Expand {name}",
@@ -93,8 +106,14 @@ export const enUsMessages = {
     clearStoredSecret: "Clear stored secret",
     create: "Create environment",
     createNew: "Create new environment",
+    deleteAction: "Delete environment",
     deleteConfirmation:
       "Delete {name}? Any session using it will switch to no environment.",
+    deleteMessage:
+      "“{name}” and all of its variables will be permanently deleted. Any sessions using it will switch to no environment.",
+    deleteTitle: "Delete environment?",
+    deleteUnsavedChanges:
+      "Any unsaved edits to this environment will be discarded.",
     edit: "Edit environment",
     editNamed: "Edit {name}",
     discardSecretReplacement: "Discard replacement",
@@ -108,6 +127,7 @@ export const enUsMessages = {
     },
     label: "Environment",
     manage: "Manage environments",
+    moreActions: "More actions for {name}",
     noValue: "No value",
     none: "No environment",
     preview: {

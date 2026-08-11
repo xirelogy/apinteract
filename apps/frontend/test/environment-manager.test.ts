@@ -175,6 +175,79 @@ describe("EnvironmentManager", () => {
     wrapper.unmount();
   });
 
+  it("moves deletion into the editor menu and confirms it in a styled dialog", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const environmentId = "019fa8be-a510-76b9-b73b-69f4c7af7875";
+    const wrapper = mount(EnvironmentManager, {
+      attachTo: document.body,
+      props: {
+        environments: [{ environmentId, name: "Development", revision: 2 }],
+        selectedEnvironmentId: environmentId,
+        environment: {
+          environmentId,
+          workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
+          name: "Development",
+          revision: 2,
+          variables: [],
+        },
+        canEdit: true,
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .get('button[aria-label="Manage environments"]')
+      .trigger("click");
+    await flushPromises();
+    document.body
+      .querySelector<HTMLButtonElement>('[role="menuitem"]')
+      ?.click();
+    await flushPromises();
+
+    const editor = wrapper.get(".environment-dialog");
+    expect(editor.attributes()).toHaveProperty("open");
+    expect(
+      editor.findAll("footer button").map((button) => button.text()),
+    ).toEqual(["Cancel", "Save"]);
+
+    await wrapper
+      .get('button[aria-label="More actions for Development"]')
+      .trigger("click");
+    await flushPromises();
+    const deleteMenuItem = editor.get('[role="menuitem"]');
+    expect(deleteMenuItem.text()).toBe("Delete environment");
+    expect(deleteMenuItem.attributes("data-variant")).toBe("danger");
+    await deleteMenuItem.trigger("click");
+    await flushPromises();
+
+    const confirmation = wrapper.get(".environment-delete-dialog");
+    expect(confirmation.attributes()).toHaveProperty("open");
+    expect(confirmation.get("h2").text()).toBe("Delete environment?");
+    expect(confirmation.text()).toContain(
+      "“Development” and all of its variables will be permanently deleted.",
+    );
+    expect(wrapper.emitted("delete")).toBeUndefined();
+
+    await confirmation.get(".danger-button").trigger("click");
+    expect(wrapper.emitted("delete")).toEqual([[environmentId, 2]]);
+    expect(confirmation.attributes()).toHaveProperty("open");
+
+    await wrapper.setProps({ busy: true });
+    expect(confirmation.get(".danger-button").attributes()).toHaveProperty(
+      "disabled",
+    );
+    wrapper.vm.finishMutation();
+    await wrapper.vm.$nextTick();
+    expect(editor.attributes()).not.toHaveProperty("open");
+    expect(wrapper.find(".environment-delete-dialog").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("preserves a stored secret without rendering or resubmitting plaintext", async () => {
     const i18n = createI18n({
       legacy: false,

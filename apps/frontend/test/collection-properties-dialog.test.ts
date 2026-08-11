@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createI18n } from "vue-i18n";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
@@ -160,6 +160,61 @@ describe("CollectionPropertiesDialog", () => {
     ]);
     wrapper.unmount();
   });
+
+  it("confirms collection deletion from the header action menu", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const collectionId = "019fa8be-a510-76b9-b73b-69f4c7af7875";
+    const wrapper = mount(CollectionPropertiesDialog, {
+      attachTo: document.body,
+      props: {
+        collection: {
+          collectionId,
+          workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
+          parentCollectionId: null,
+          name: "Examples",
+          headers: [],
+          effectiveHeaders: [],
+          revision: 3,
+        },
+        variableProfile: {
+          workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
+          scopeKind: "collection",
+          scopeId: collectionId,
+          scopeName: "Examples",
+          revision: 0,
+          variables: [],
+        },
+        canEdit: true,
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .get('button[aria-label="More actions for Examples"]')
+      .trigger("click");
+    await flushPromises();
+    const deleteMenuItem = wrapper.get('[role="menuitem"]');
+    expect(deleteMenuItem.text()).toBe("Delete collection");
+    expect(deleteMenuItem.attributes("data-variant")).toBe("danger");
+    await deleteMenuItem.trigger("click");
+    await flushPromises();
+
+    const confirmation = wrapper.get(".collection-delete-dialog");
+    expect(confirmation.attributes()).toHaveProperty("open");
+    expect(confirmation.get("h2").text()).toBe("Delete collection?");
+    expect(confirmation.text()).toContain(
+      "“Examples” and all nested collections, requests, and variables",
+    );
+    expect(wrapper.emitted("delete")).toBeUndefined();
+    await confirmation.get(".danger-button").trigger("click");
+    expect(wrapper.emitted("delete")).toEqual([[collectionId, 3]]);
+    wrapper.unmount();
+  });
 });
 
 describe("WorkspacePropertiesDialog", () => {
@@ -189,6 +244,7 @@ describe("WorkspacePropertiesDialog", () => {
           variables: [],
         },
         canEdit: true,
+        canDelete: true,
         busy: false,
       },
       global: { plugins: [i18n] },
@@ -222,6 +278,59 @@ describe("WorkspacePropertiesDialog", () => {
         [{ name: "team", kind: "value", value: "platform" }],
       ],
     ]);
+    wrapper.unmount();
+  });
+
+  it("offers workspace deletion only to owners and confirms its revision", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const workspaceId = "019fa8be-a510-76b9-b73b-69f4c7af7876";
+    const wrapper = mount(WorkspacePropertiesDialog, {
+      attachTo: document.body,
+      props: {
+        workspace: {
+          workspaceId,
+          name: "Platform",
+          role: "owner",
+          headers: [],
+          revision: 4,
+        },
+        variableProfile: {
+          workspaceId,
+          scopeKind: "workspace",
+          scopeId: workspaceId,
+          scopeName: "Platform",
+          revision: 0,
+          variables: [],
+        },
+        canEdit: true,
+        canDelete: true,
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .get('button[aria-label="More actions for Platform"]')
+      .trigger("click");
+    await flushPromises();
+    await wrapper.get('[role="menuitem"]').trigger("click");
+    await flushPromises();
+    const confirmation = wrapper.get(".workspace-delete-dialog");
+    expect(confirmation.attributes()).toHaveProperty("open");
+    expect(confirmation.text()).toContain(
+      "collections, requests, environments, and variables",
+    );
+    await confirmation.get(".danger-button").trigger("click");
+    expect(wrapper.emitted("delete")).toEqual([[workspaceId, 4]]);
+
+    await wrapper.setProps({ canDelete: false });
+    expect(
+      wrapper.find('button[aria-label="More actions for Platform"]').exists(),
+    ).toBe(false);
     wrapper.unmount();
   });
 });

@@ -52,6 +52,8 @@ export interface WorkspaceTable {
   headers_json: string;
   created_by: BinaryId;
   created_at: number;
+  deleted_by: BinaryId | null;
+  deleted_at: number | null;
 }
 
 export interface WorkspaceMembershipTable {

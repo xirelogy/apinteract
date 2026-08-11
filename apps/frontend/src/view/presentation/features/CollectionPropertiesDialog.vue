@@ -15,6 +15,9 @@ import {
   isBlankRequestField,
   meaningfulRequestFields,
 } from "@/model/domain/request-fields";
+import ActionMenu, {
+  type ActionMenuItem,
+} from "@/view/presentation/controls/ActionMenu.vue";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import FormField from "@/view/presentation/controls/FormField.vue";
@@ -26,6 +29,7 @@ import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
 import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
 import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
 import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
+import ResourceDeleteDialog from "./ResourceDeleteDialog.vue";
 import VariableFieldsEditor from "./VariableFieldsEditor.vue";
 import { useRowReorder } from "@/view/presentation/controls/row-reorder";
 
@@ -41,6 +45,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   close: [];
+  delete: [collectionId: string, revision: number];
   save: [
     name: string,
     headers: readonly RequestField[],
@@ -51,6 +56,7 @@ const { t } = useI18n();
 const open = ref(true);
 const activeSection = ref<"headers" | "variables">("headers");
 const name = ref(props.collection.name);
+const deleteConfirmationOpen = ref(false);
 const headers = ref<RequestField[]>(
   editableRequestFields(props.collection.headers, props.canEdit),
 );
@@ -62,6 +68,13 @@ const canSave = computed(
       (header) => !header.enabled || header.name.trim() !== "",
     ),
 );
+const collectionActions = computed<readonly ActionMenuItem[]>(() => [
+  {
+    value: "delete",
+    label: t("collection.deleteAction"),
+    variant: "danger",
+  },
+]);
 
 /** Removes one common header by its visible ordered position. */
 function removeHeader(index: number): void {
@@ -91,7 +104,23 @@ const headerReorder = useRowReorder({
 
 /** Requests closure through the shared controlled dialog lifecycle. */
 function close(): void {
+  deleteConfirmationOpen.value = false;
   open.value = false;
+}
+
+/** Opens styled confirmation before requesting collection deletion. */
+function requestCollectionDeletion(): void {
+  if (props.canEdit) deleteConfirmationOpen.value = true;
+}
+
+/** Routes one infrequent collection action from the header overflow menu. */
+function selectCollectionAction(action: string): void {
+  if (action === "delete") requestCollectionDeletion();
+}
+
+/** Emits the immutable collection deletion target after confirmation. */
+function confirmCollectionDeletion(): void {
+  emit("delete", props.collection.collectionId, props.collection.revision);
 }
 
 /** Emits all editable collection properties as one user operation. */
@@ -121,13 +150,31 @@ function save(): void {
         <h2 id="collection-properties-title">
           {{ t("collection.propertiesTitle") }}
         </h2>
-        <IconButton
-          :label="t('common.actions.close')"
-          :disabled="busy"
-          @click="close"
-        >
-          <X :size="18" aria-hidden="true" />
-        </IconButton>
+        <div class="resource-dialog-header-actions">
+          <ActionMenu
+            v-if="canEdit"
+            :label="t('collection.moreActions', { name: collection.name })"
+            :items="collectionActions"
+            :disabled="busy"
+            @select="selectCollectionAction"
+          >
+            <template #item="{ item }">
+              <Trash2
+                class="action-menu-item-icon"
+                :size="16"
+                aria-hidden="true"
+              />
+              <span>{{ item.label }}</span>
+            </template>
+          </ActionMenu>
+          <IconButton
+            :label="t('common.actions.close')"
+            :disabled="busy"
+            @click="close"
+          >
+            <X :size="18" aria-hidden="true" />
+          </IconButton>
+        </div>
       </header>
       <form class="resource-dialog-form" @submit.prevent="save">
         <FormField
@@ -277,4 +324,17 @@ function save(): void {
       </form>
     </div>
   </DialogControl>
+
+  <ResourceDeleteDialog
+    class="collection-delete-dialog"
+    :open="deleteConfirmationOpen"
+    title-id="collection-delete-dialog-title"
+    :title="t('collection.deleteTitle')"
+    :message="t('collection.deleteMessage', { name: collection.name })"
+    :additional-message="t('collection.deleteUnsavedChanges')"
+    :confirm-label="t('collection.deleteAction')"
+    :busy="busy"
+    @update:open="deleteConfirmationOpen = $event"
+    @confirm="confirmCollectionDeletion"
+  />
 </template>

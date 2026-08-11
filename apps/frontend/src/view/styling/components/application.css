@@ -1261,6 +1261,12 @@
   font-size: var(--font-size-lg);
 }
 
+.resource-dialog-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .resource-dialog-context {
   margin-top: 0.125rem;
   color: var(--text-secondary);
@@ -1355,17 +1361,25 @@
 }
 
 .discard-dialog-content,
-.logout-confirmation-content {
+.logout-confirmation-content,
+.resource-delete-content {
   padding: var(--space-4);
 }
 
 .discard-dialog-content .resource-dialog-actions,
-.logout-confirmation-content .resource-dialog-actions {
+.logout-confirmation-content .resource-dialog-actions,
+.resource-delete-content .resource-dialog-actions {
   margin-top: var(--space-4);
 }
 
+.resource-delete-content > p + p {
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+}
+
 .account-options-dialog,
-.logout-confirmation-dialog {
+.logout-confirmation-dialog,
+.resource-delete-dialog {
   width: min(24rem, calc(100vi - var(--space-6)));
 }
 

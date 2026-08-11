@@ -59,6 +59,8 @@ export class WorkspaceService {
           headers_json: "[]",
           created_by: idToBytes(userId),
           created_at: now,
+          deleted_by: null,
+          deleted_at: null,
         })
         .execute();
       await transaction
@@ -98,6 +100,7 @@ export class WorkspaceService {
       ])
       .where("workspace.id", "=", idToBytes(workspaceId))
       .where("membership.user_id", "=", idToBytes(userId))
+      .where("workspace.deleted_at", "is", null)
       .executeTakeFirst();
     if (row === undefined) {
       throw new ResourceNotFoundError("Workspace not found");
@@ -127,6 +130,7 @@ export class WorkspaceService {
         .selectFrom("workspaces")
         .select(["name", "revision", "headers_json"])
         .where("id", "=", idToBytes(workspaceId))
+        .where("deleted_at", "is", null)
         .executeTakeFirst();
       if (row === undefined) {
         throw new ResourceNotFoundError("Workspace not found");
@@ -156,6 +160,7 @@ export class WorkspaceService {
         .set({ name: normalizedName, headers_json: headersJson, revision })
         .where("id", "=", idToBytes(workspaceId))
         .where("revision", "=", expectedRevision)
+        .where("deleted_at", "is", null)
         .executeTakeFirst();
       if (result.numUpdatedRows !== 1n) {
         throw new WorkspaceConflictError("The workspace properties changed");
@@ -180,6 +185,54 @@ export class WorkspaceService {
     });
   }
 
+  /** Tombstones an owner-managed workspace while retaining immutable history. */
+  async delete(
+    userId: EntityId,
+    workspaceId: EntityId,
+    expectedRevision: number,
+  ): Promise<{ readonly deleted: true }> {
+    return this.#database.transaction().execute(async (transaction) => {
+      const row = await transaction
+        .selectFrom("workspaces as workspace")
+        .innerJoin(
+          "workspace_memberships as membership",
+          "membership.workspace_id",
+          "workspace.id",
+        )
+        .select(["workspace.revision", "membership.role"])
+        .where("workspace.id", "=", idToBytes(workspaceId))
+        .where("membership.user_id", "=", idToBytes(userId))
+        .where("workspace.deleted_at", "is", null)
+        .executeTakeFirst();
+      if (row === undefined) {
+        throw new ResourceNotFoundError("Workspace not found");
+      }
+      if (row.role !== "owner") {
+        throw new AccessDeniedError("Workspace ownership is required");
+      }
+      if (row.revision !== expectedRevision) {
+        throw new WorkspaceConflictError("The workspace properties changed");
+      }
+      const result = await transaction
+        .updateTable("workspaces")
+        .set({ deleted_by: idToBytes(userId), deleted_at: Date.now() })
+        .where("id", "=", idToBytes(workspaceId))
+        .where("revision", "=", expectedRevision)
+        .where("deleted_at", "is", null)
+        .executeTakeFirst();
+      if (result.numUpdatedRows !== 1n) {
+        throw new WorkspaceConflictError("The workspace properties changed");
+      }
+      await this.#audit.record(transaction, {
+        type: "workspace.deleted",
+        actorUserId: userId,
+        workspaceId,
+        data: { revision: expectedRevision },
+      });
+      return { deleted: true };
+    });
+  }
+
   /** Lists workspaces visible through the user's current memberships. */
   async list(userId: EntityId): Promise<readonly WorkspaceSummary[]> {
     const rows = await this.#database
@@ -191,6 +244,7 @@ export class WorkspaceService {
       )
       .select(["workspace.id", "workspace.name", "membership.role"])
       .where("membership.user_id", "=", idToBytes(userId))
+      .where("workspace.deleted_at", "is", null)
       .orderBy("workspace.created_at")
       .orderBy("workspace.id")
       .execute();
@@ -208,10 +262,16 @@ export class WorkspaceService {
     workspaceId: EntityId,
   ): Promise<void> {
     const membership = await database
-      .selectFrom("workspace_memberships")
-      .select("role")
-      .where("workspace_id", "=", idToBytes(workspaceId))
-      .where("user_id", "=", idToBytes(userId))
+      .selectFrom("workspace_memberships as membership")
+      .innerJoin(
+        "workspaces as workspace",
+        "workspace.id",
+        "membership.workspace_id",
+      )
+      .select("membership.role")
+      .where("membership.workspace_id", "=", idToBytes(workspaceId))
+      .where("membership.user_id", "=", idToBytes(userId))
+      .where("workspace.deleted_at", "is", null)
       .executeTakeFirst();
     if (
       membership === undefined ||
@@ -228,10 +288,16 @@ export class WorkspaceService {
     workspaceId: EntityId,
   ): Promise<void> {
     const membership = await database
-      .selectFrom("workspace_memberships")
-      .select("role")
-      .where("workspace_id", "=", idToBytes(workspaceId))
-      .where("user_id", "=", idToBytes(userId))
+      .selectFrom("workspace_memberships as membership")
+      .innerJoin(
+        "workspaces as workspace",
+        "workspace.id",
+        "membership.workspace_id",
+      )
+      .select("membership.role")
+      .where("membership.workspace_id", "=", idToBytes(workspaceId))
+      .where("membership.user_id", "=", idToBytes(userId))
+      .where("workspace.deleted_at", "is", null)
       .executeTakeFirst();
     if (membership === undefined) {
       // Read operations conceal whether a workspace exists when the user has

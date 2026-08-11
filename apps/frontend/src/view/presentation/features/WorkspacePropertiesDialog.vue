@@ -15,6 +15,9 @@ import {
   isBlankRequestField,
   meaningfulRequestFields,
 } from "@/model/domain/request-fields";
+import ActionMenu, {
+  type ActionMenuItem,
+} from "@/view/presentation/controls/ActionMenu.vue";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import FormField from "@/view/presentation/controls/FormField.vue";
@@ -26,6 +29,7 @@ import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
 import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
 import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
 import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
+import ResourceDeleteDialog from "./ResourceDeleteDialog.vue";
 import VariableFieldsEditor from "./VariableFieldsEditor.vue";
 import { useRowReorder } from "@/view/presentation/controls/row-reorder";
 
@@ -37,10 +41,12 @@ const props = defineProps<{
   workspace: WorkspaceView;
   variableProfile: VariableProfileView;
   canEdit: boolean;
+  canDelete: boolean;
   busy: boolean;
 }>();
 const emit = defineEmits<{
   close: [];
+  delete: [workspaceId: string, revision: number];
   save: [
     name: string,
     headers: readonly RequestField[],
@@ -51,6 +57,7 @@ const { t } = useI18n();
 const open = ref(true);
 const activeSection = ref<"headers" | "variables">("headers");
 const name = ref(props.workspace.name);
+const deleteConfirmationOpen = ref(false);
 const headers = ref<RequestField[]>(
   editableRequestFields(props.workspace.headers, props.canEdit),
 );
@@ -62,6 +69,13 @@ const canSave = computed(
       (header) => !header.enabled || header.name.trim() !== "",
     ),
 );
+const workspaceActions = computed<readonly ActionMenuItem[]>(() => [
+  {
+    value: "delete",
+    label: t("workspace.deleteAction"),
+    variant: "danger",
+  },
+]);
 
 /** Removes one workspace header by its visible ordered position. */
 function removeHeader(index: number): void {
@@ -91,7 +105,23 @@ const headerReorder = useRowReorder({
 
 /** Requests closure through the shared controlled dialog lifecycle. */
 function close(): void {
+  deleteConfirmationOpen.value = false;
   open.value = false;
+}
+
+/** Opens styled confirmation before requesting workspace deletion. */
+function requestWorkspaceDeletion(): void {
+  if (props.canDelete) deleteConfirmationOpen.value = true;
+}
+
+/** Routes one infrequent workspace action from the header overflow menu. */
+function selectWorkspaceAction(action: string): void {
+  if (action === "delete") requestWorkspaceDeletion();
+}
+
+/** Emits the immutable workspace deletion target after confirmation. */
+function confirmWorkspaceDeletion(): void {
+  emit("delete", props.workspace.workspaceId, props.workspace.revision);
 }
 
 /** Emits all editable workspace properties as one user operation. */
@@ -121,13 +151,31 @@ function save(): void {
         <h2 id="workspace-properties-title">
           {{ t("workspace.propertiesTitle") }}
         </h2>
-        <IconButton
-          :label="t('common.actions.close')"
-          :disabled="busy"
-          @click="close"
-        >
-          <X :size="18" aria-hidden="true" />
-        </IconButton>
+        <div class="resource-dialog-header-actions">
+          <ActionMenu
+            v-if="canDelete"
+            :label="t('workspace.moreActions', { name: workspace.name })"
+            :items="workspaceActions"
+            :disabled="busy"
+            @select="selectWorkspaceAction"
+          >
+            <template #item="{ item }">
+              <Trash2
+                class="action-menu-item-icon"
+                :size="16"
+                aria-hidden="true"
+              />
+              <span>{{ item.label }}</span>
+            </template>
+          </ActionMenu>
+          <IconButton
+            :label="t('common.actions.close')"
+            :disabled="busy"
+            @click="close"
+          >
+            <X :size="18" aria-hidden="true" />
+          </IconButton>
+        </div>
       </header>
       <form class="resource-dialog-form" @submit.prevent="save">
         <FormField
@@ -277,4 +325,17 @@ function save(): void {
       </form>
     </div>
   </DialogControl>
+
+  <ResourceDeleteDialog
+    class="workspace-delete-dialog"
+    :open="deleteConfirmationOpen"
+    title-id="workspace-delete-dialog-title"
+    :title="t('workspace.deleteTitle')"
+    :message="t('workspace.deleteMessage', { name: workspace.name })"
+    :additional-message="t('workspace.deleteUnsavedChanges')"
+    :confirm-label="t('workspace.deleteAction')"
+    :busy="busy"
+    @update:open="deleteConfirmationOpen = $event"
+    @confirm="confirmWorkspaceDeletion"
+  />
 </template>

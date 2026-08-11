@@ -15,6 +15,7 @@ const ENVIRONMENTS_MIGRATION = "0005_environments";
 const VARIABLE_SCOPES_MIGRATION = "0006_variable_scopes";
 const WORKSPACE_HEADERS_MIGRATION = "0007_workspace_headers";
 const REQUEST_SCRIPTS_MIGRATION = "0008_request_scripts";
+const RESOURCE_DELETION_MIGRATION = "0009_resource_deletion";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -317,6 +318,13 @@ export class SqliteDatabase {
     if (requestScriptsApplied === undefined) {
       this.#migrateRequestScripts();
     }
+
+    const resourceDeletionApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(RESOURCE_DELETION_MIGRATION);
+    if (resourceDeletionApplied === undefined) {
+      this.#migrateResourceDeletion();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -352,6 +360,7 @@ export class SqliteDatabase {
       VARIABLE_SCOPES_MIGRATION,
       WORKSPACE_HEADERS_MIGRATION,
       REQUEST_SCRIPTS_MIGRATION,
+      RESOURCE_DELETION_MIGRATION,
     ].some((identifier) => !identifiers.has(identifier));
   }
 
@@ -667,6 +676,19 @@ export class SqliteDatabase {
           ADD COLUMN script_result_json TEXT;
       `);
       this.#recordMigration(REQUEST_SCRIPTS_MIGRATION);
+    })();
+  }
+
+  /** Adds workspace tombstone ownership for history-preserving deletion. */
+  #migrateResourceDeletion(): void {
+    this.#driver.transaction(() => {
+      this.#driver.exec(`
+        ALTER TABLE workspaces
+          ADD COLUMN deleted_by BLOB REFERENCES users(id);
+        ALTER TABLE workspaces
+          ADD COLUMN deleted_at INTEGER;
+      `);
+      this.#recordMigration(RESOURCE_DELETION_MIGRATION);
     })();
   }
 

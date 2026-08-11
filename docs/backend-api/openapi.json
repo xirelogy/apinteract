@@ -567,6 +567,9 @@
             "$ref": "#/components/schemas/WorkspaceUpdateCommand"
           },
           {
+            "$ref": "#/components/schemas/WorkspaceDeleteCommand"
+          },
+          {
             "$ref": "#/components/schemas/TreeListCommand"
           },
           {
@@ -583,6 +586,9 @@
           },
           {
             "$ref": "#/components/schemas/CollectionUpdateCommand"
+          },
+          {
+            "$ref": "#/components/schemas/CollectionDeleteCommand"
           },
           {
             "$ref": "#/components/schemas/CollectionHeadersUpdateCommand"
@@ -625,6 +631,9 @@
           },
           {
             "$ref": "#/components/schemas/RequestUpdateCommand"
+          },
+          {
+            "$ref": "#/components/schemas/RequestDeleteCommand"
           },
           {
             "$ref": "#/components/schemas/ExecutionStartCommand"
@@ -814,6 +823,36 @@
                     "items": {
                       "$ref": "#/components/schemas/RequestField"
                     }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "WorkspaceDeleteCommand": {
+        "description": "Owner-only deletion that removes the workspace from active access while retaining its immutable execution and audit history.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "workspace.delete"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["workspaceId", "expectedRevision"],
+                "properties": {
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/WorkspaceId"
+                  },
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 }
               }
@@ -1056,6 +1095,36 @@
                     "items": {
                       "$ref": "#/components/schemas/RequestField"
                     }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CollectionDeleteCommand": {
+        "description": "Recursively deletes a collection, its descendant collections and requests, and their mutable profiles. Existing execution snapshots remain available.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "collection.delete"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["collectionId", "expectedRevision"],
+                "properties": {
+                  "collectionId": {
+                    "$ref": "#/components/schemas/CollectionId"
+                  },
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 }
               }
@@ -1550,6 +1619,36 @@
                   "postResponseScript": {
                     "type": "string",
                     "maxLength": 65536
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RequestDeleteCommand": {
+        "description": "Deletes a mutable saved request and its variable profile after detaching any durable execution snapshots.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CommandEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "request.delete"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requestId", "expectedDraftRevision"],
+                "properties": {
+                  "requestId": {
+                    "$ref": "#/components/schemas/RequestId"
+                  },
+                  "expectedDraftRevision": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 }
               }

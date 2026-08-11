@@ -611,9 +611,19 @@
   color: var(--text-secondary);
 }
 
+.action-menu-item[data-variant="danger"],
+.action-menu-item[data-variant="danger"] .action-menu-item-icon {
+  color: var(--danger);
+}
+
 .action-menu-item:focus-visible,
 .action-menu-item:hover:not(:disabled) {
   background: var(--surface-selected);
+}
+
+.action-menu-item[data-variant="danger"]:focus-visible,
+.action-menu-item[data-variant="danger"]:hover:not(:disabled) {
+  background: var(--surface-danger-subtle);
 }
 
 @media (width <= 47.5rem) {

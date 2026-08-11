@@ -180,6 +180,12 @@ async function dispatch(
         requireString(command.payload.name, "name"),
         requireRequestFields(command.payload.headers, "headers"),
       );
+    case "workspace.delete":
+      return application.workspaces.delete(
+        userId,
+        requireString(command.payload.workspaceId, "workspaceId"),
+        requireInteger(command.payload.expectedRevision, "expectedRevision"),
+      );
     case "tree.list":
       return {
         children: await application.requests.listChildren(
@@ -237,6 +243,12 @@ async function dispatch(
         requireString(command.payload.collectionId, "collectionId"),
         requireInteger(command.payload.expectedRevision, "expectedRevision"),
         requireRequestFields(command.payload.headers, "headers"),
+      );
+    case "collection.delete":
+      return application.requests.deleteCollection(
+        userId,
+        requireString(command.payload.collectionId, "collectionId"),
+        requireInteger(command.payload.expectedRevision, "expectedRevision"),
       );
     case "environment.list":
       return application.environments.list(
@@ -347,6 +359,15 @@ async function dispatch(
         optionalScript(
           command.payload.postResponseScript,
           "postResponseScript",
+        ),
+      );
+    case "request.delete":
+      return application.requests.delete(
+        userId,
+        requireString(command.payload.requestId, "requestId"),
+        requireInteger(
+          command.payload.expectedDraftRevision,
+          "expectedDraftRevision",
         ),
       );
     case "execution.start":

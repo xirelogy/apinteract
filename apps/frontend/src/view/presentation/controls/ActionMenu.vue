@@ -16,6 +16,7 @@ export interface ActionMenuItem {
   readonly value: string;
   readonly label: string;
   readonly disabled?: boolean;
+  readonly variant?: "default" | "danger";
 }
 
 const props = withDefaults(
@@ -42,6 +43,7 @@ defineSlots<{
 
 const root = ref<HTMLElement | null>(null);
 const popup = ref<HTMLElement | null>(null);
+const teleportTarget = ref<HTMLElement | null>(null);
 const open = ref(false);
 const activeIndex = ref(-1);
 const popupStyle = ref<CSSProperties>({});
@@ -57,6 +59,7 @@ watch(
 );
 
 onMounted(() => {
+  teleportTarget.value = root.value?.closest("dialog") ?? document.body;
   document.addEventListener("pointerdown", closeFromOutside);
   window.addEventListener("resize", closeFromViewportChange);
   window.addEventListener("scroll", closeFromViewportChange, true);
@@ -235,7 +238,7 @@ function closeFromViewportChange(): void {
         <MoreHorizontal :size="16" aria-hidden="true" />
       </IconButton>
     </slot>
-    <Teleport to="body">
+    <Teleport v-if="teleportTarget" :to="teleportTarget">
       <div
         v-if="open"
         :id="popupId"
@@ -253,6 +256,7 @@ function closeFromViewportChange(): void {
           type="button"
           role="menuitem"
           :disabled="item.disabled"
+          :data-variant="item.variant ?? 'default'"
           :tabindex="index === activeIndex ? 0 : -1"
           :data-action-index="index"
           @click="selectItem(item)"

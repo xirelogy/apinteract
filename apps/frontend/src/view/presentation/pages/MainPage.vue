@@ -113,6 +113,12 @@ const canEditWorkspace = computed(() => {
   );
   return workspace?.role === "owner" || workspace?.role === "editor";
 });
+const canDeleteWorkspace = computed(() => {
+  const workspace = workspaces.value.find(
+    (candidate) => candidate.workspaceId === selectedWorkspaceId.value,
+  );
+  return workspace?.role === "owner";
+});
 const errorMessage = computed(() => {
   if (error.value === null) {
     return null;
@@ -322,6 +328,24 @@ async function saveWorkspaceProperties(
   workspacePropertiesOpen.value = false;
 }
 
+/** Deletes the selected collection and closes its properties after refresh. */
+async function deleteCollection(
+  collectionId: string,
+  revision: number,
+): Promise<void> {
+  await controller.deleteCollection(collectionId, revision);
+  collectionPropertiesOpen.value = false;
+}
+
+/** Deletes the selected owner-managed workspace and closes its properties. */
+async function deleteWorkspace(
+  workspaceId: string,
+  revision: number,
+): Promise<void> {
+  await controller.deleteWorkspace(workspaceId, revision);
+  workspacePropertiesOpen.value = false;
+}
+
 /** Creates an environment and closes its editor after summaries refresh. */
 async function createEnvironment(
   name: string,
@@ -512,15 +536,18 @@ function discardRequestTab(): void {
       :busy="busy"
       @close="collectionPropertiesOpen = false"
       @save="saveCollectionProperties"
+      @delete="deleteCollection"
     />
     <WorkspacePropertiesDialog
       v-if="workspaceProperties"
       :workspace="workspaceProperties.workspace"
       :variable-profile="workspaceProperties.variableProfile"
       :can-edit="canEditWorkspace"
+      :can-delete="canDeleteWorkspace"
       :busy="busy"
       @close="workspacePropertiesOpen = false"
       @save="saveWorkspaceProperties"
+      @delete="deleteWorkspace"
     />
   </div>
 </template>
