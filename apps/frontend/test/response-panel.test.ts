@@ -48,6 +48,10 @@ describe("ResponsePanel body transfer", () => {
       executionId: "019fa8be-a510-76b9-b73b-69f4c7af7875",
       state: "failed",
       bodyComplete: false,
+      bodyBytes: 0,
+      bodySha256:
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      bodyBlobId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
       createdAt: "2026-07-28T00:00:00.000Z",
       completedAt: "2026-07-28T00:00:01.000Z",
       error: {
@@ -69,8 +73,50 @@ describe("ResponsePanel body transfer", () => {
     });
 
     const alert = wrapper.get('[role="alert"]');
+    expect(alert.get("strong").text()).toBe("Request execution failed");
     expect(alert.text()).toContain("execution_failed");
     expect(alert.text()).toContain("The proxy is unavailable.");
+    expect(wrapper.find('[role="tab"]').exists()).toBe(false);
+    expect(wrapper.find(".response-summary").exists()).toBe(false);
+    expect(
+      wrapper.find('button[aria-label="Download response body"]').exists(),
+    ).toBe(false);
+  });
+
+  it("retains useful partial response details after transport failure", () => {
+    const execution: ExecutionView = {
+      executionId: "019fa8be-a510-76b9-b73b-69f4c7af7878",
+      state: "failed",
+      status: 502,
+      headers: [{ name: "content-type", value: "text/plain" }],
+      bodyComplete: false,
+      bodyBytes: 7,
+      bodyPreview: "partial",
+      createdAt: "2026-07-28T00:00:00.000Z",
+      completedAt: "2026-07-28T00:00:01.000Z",
+      error: {
+        code: "upstream_disconnected",
+        message: "The upstream disconnected.",
+        errors: [],
+      },
+      scriptLogs: [],
+      scriptTests: [],
+    };
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(ResponsePanel, {
+      props: { execution },
+      global: { plugins: [i18n] },
+    });
+
+    expect(wrapper.findAll('[role="tab"]').map((tab) => tab.text())).toEqual([
+      "Raw",
+      "Headers 1",
+    ]);
+    expect(wrapper.get(".body-preview").text()).toBe("partial");
   });
 
   it("shows script logs, tests, and post-response errors", async () => {

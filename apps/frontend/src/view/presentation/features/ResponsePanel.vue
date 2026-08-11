@@ -18,7 +18,8 @@ const emit = defineEmits<{
 }>();
 const { t } = useI18n();
 
-const activeTab = ref<"headers" | "raw" | "scripts">("raw");
+type ResponseDetailTab = "headers" | "raw" | "scripts";
+const selectedTab = ref<ResponseDetailTab>("raw");
 
 type ScriptLog = ExecutionView["scriptLogs"][number];
 type ScriptTest = ExecutionView["scriptTests"][number];
@@ -43,6 +44,7 @@ const scriptTestMessageCodes = new Set([
   "assertion_value_does_not_match",
   "test_threw_non_error",
 ]);
+const executionFailureCodes = new Set(["execution_failed"]);
 type ScriptResultCard =
   | {
       readonly type: "log";
@@ -92,6 +94,41 @@ const scriptResultCards = computed<readonly ScriptResultCard[]>(() => {
   return cards;
 });
 
+/** Reports whether the execution produced any inspectable HTTP response data. */
+const hasResponseHead = computed(() => {
+  const execution = props.execution;
+  return (
+    execution !== null &&
+    (execution.status !== undefined || execution.headers !== undefined)
+  );
+});
+
+/** Exposes only detail tabs backed by useful data after execution failure. */
+const visibleDetailTabs = computed<readonly ResponseDetailTab[]>(() => {
+  const execution = props.execution;
+  if (execution === null) return [];
+  if (execution.error === undefined || execution.state === "running") {
+    return ["raw", "headers", "scripts"];
+  }
+  return [
+    ...(hasResponseHead.value ? (["raw", "headers"] as const) : ([] as const)),
+    ...(scriptResultCards.value.length > 0
+      ? (["scripts"] as const)
+      : ([] as const)),
+  ];
+});
+
+/** Keeps tab selection valid when a failed execution has limited results. */
+const activeTab = computed<ResponseDetailTab>({
+  get: () =>
+    visibleDetailTabs.value.includes(selectedTab.value)
+      ? selectedTab.value
+      : (visibleDetailTabs.value[0] ?? "raw"),
+  set: (tab) => {
+    selectedTab.value = tab;
+  },
+});
+
 /** Formats a byte count with locale-aware plural selection. */
 function formatBytes(count: number): string {
   return t("response.bytes", { count }, count);
@@ -105,6 +142,14 @@ function localizeScriptCode(code: string): string {
   return scriptFailureCodes.has(failureCode)
     ? t(`scripting.failure.${failureCode}`)
     : code;
+}
+
+/** Localizes stable execution failures while retaining unknown raw codes. */
+function localizeExecutionCode(code: string): string {
+  if (code.startsWith("script_")) return localizeScriptCode(code);
+  return executionFailureCodes.has(code)
+    ? t(`response.failure.${code}`)
+    : t("response.failure.unknown");
 }
 
 /** Localizes SDK-generated test details without rewriting script-authored text. */
@@ -140,7 +185,10 @@ function formatScriptLocation(error: ScriptError): string {
           <LoaderCircle :size="14" aria-hidden="true" />
           {{ t("response.inProgress") }}
         </span>
-        <span class="response-summary">
+        <span
+          v-if="execution.state === 'running' || hasResponseHead"
+          class="response-summary"
+        >
           <span
             v-if="execution.status"
             class="status-code"
@@ -151,7 +199,7 @@ function formatScriptLocation(error: ScriptError): string {
           <span>{{ formatBytes(execution.bodyBytes ?? 0) }}</span>
         </span>
         <IconButton
-          v-if="execution.bodyBlobId"
+          v-if="execution.bodyBlobId && hasResponseHead"
           size="compact"
           :label="t('response.downloadBody')"
           :title="t('response.downloadBody')"
@@ -165,29 +213,45 @@ function formatScriptLocation(error: ScriptError): string {
       {{ t("response.empty") }}
     </div>
     <div v-else-if="execution.error" class="execution-error" role="alert">
-      <strong>{{ localizeScriptCode(execution.error.code) }}</strong>
+      <strong>{{ localizeExecutionCode(execution.error.code) }}</strong>
       <code>{{ execution.error.code }}</code>
       <span>{{ execution.error.message }}</span>
     </div>
     <TabsRoot
-      v-if="execution !== null"
+      v-if="execution !== null && visibleDetailTabs.length > 0"
       v-model="activeTab"
       activation-mode="manual"
     >
       <TabsList class="response-tabs" :label="t('response.details')">
-        <TabsTrigger class="tab-button" value="raw">
+        <TabsTrigger
+          v-if="visibleDetailTabs.includes('raw')"
+          class="tab-button"
+          value="raw"
+        >
           {{ t("response.raw") }}
         </TabsTrigger>
-        <TabsTrigger class="tab-button" value="headers">
+        <TabsTrigger
+          v-if="visibleDetailTabs.includes('headers')"
+          class="tab-button"
+          value="headers"
+        >
           {{ t("response.headers") }}
           <span class="tab-count">{{ execution.headers?.length ?? 0 }}</span>
         </TabsTrigger>
-        <TabsTrigger class="tab-button" value="scripts">
+        <TabsTrigger
+          v-if="visibleDetailTabs.includes('scripts')"
+          class="tab-button"
+          value="scripts"
+        >
           {{ t("scripting.results") }}
           <span class="tab-count">{{ scriptResultCards.length }}</span>
         </TabsTrigger>
       </TabsList>
-      <TabsPanel value="headers" class="response-content">
+      <TabsPanel
+        v-if="visibleDetailTabs.includes('headers')"
+        value="headers"
+        class="response-content"
+      >
         <div class="response-headers">
           <div
             v-for="(header, index) in execution.headers ?? []"
@@ -206,7 +270,11 @@ function formatScriptLocation(error: ScriptError): string {
           </div>
         </div>
       </TabsPanel>
-      <TabsPanel value="raw" class="response-content">
+      <TabsPanel
+        v-if="visibleDetailTabs.includes('raw')"
+        value="raw"
+        class="response-content"
+      >
         <pre class="body-preview">{{
           execution.bodyPreview ??
           (execution.state === "running"
@@ -214,7 +282,11 @@ function formatScriptLocation(error: ScriptError): string {
             : t("response.binaryBody"))
         }}</pre>
       </TabsPanel>
-      <TabsPanel value="scripts" class="response-content script-results">
+      <TabsPanel
+        v-if="visibleDetailTabs.includes('scripts')"
+        value="scripts"
+        class="response-content script-results"
+      >
         <div
           v-for="card in scriptResultCards"
           :key="`${card.type}-${card.sequence}`"

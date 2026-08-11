@@ -279,6 +279,10 @@ const zhHansMessages = {
     details: "响应详情",
     downloadBody: "下载响应体",
     empty: "发送请求后可查看响应。",
+    failure: {
+      execution_failed: "请求执行失败",
+      unknown: "请求执行失败",
+    },
     headers: "响应头",
     heading: "响应",
     inProgress: "进行中",
@@ -585,6 +589,10 @@ const zhHantMessages = {
     details: "回應詳細資料",
     downloadBody: "下載回應本文",
     empty: "傳送請求後可查看回應。",
+    failure: {
+      execution_failed: "請求執行失敗",
+      unknown: "請求執行失敗",
+    },
     headers: "回應標頭",
     heading: "回應",
     inProgress: "進行中",

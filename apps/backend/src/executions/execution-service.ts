@@ -269,26 +269,37 @@ export class ExecutionService {
     try {
       const resolver = new VariableResolver(prepared.variables);
       if (prepared.request.preRequestScript.trim() !== "") {
-        const result = await this.#scripts.runPreRequest(
-          prepared.request.preRequestScript,
-          {
-            execution: scriptExecutionContext(prepared),
-            request: preRequestScriptView(prepared.request, resolver),
-            variables: scriptVariables(prepared, resolver),
-          },
-        );
-        local = result.local;
-        scripts = {
-          logs: result.logs.map((entry) => ({
-            ...entry,
-            phase: "pre-request" as const,
-          })),
-          tests: [],
-        };
-        working = {
-          ...prepared,
-          request: executionRequestFromScript(prepared.request, result.request),
-        };
+        try {
+          const result = await this.#scripts.runPreRequest(
+            prepared.request.preRequestScript,
+            {
+              execution: scriptExecutionContext(prepared),
+              request: preRequestScriptView(prepared.request, resolver),
+              variables: scriptVariables(prepared, resolver),
+            },
+          );
+          local = result.local;
+          scripts = {
+            logs: result.logs.map((entry) => ({
+              ...entry,
+              phase: "pre-request" as const,
+            })),
+            tests: [],
+          };
+          working = {
+            ...prepared,
+            request: executionRequestFromScript(
+              prepared.request,
+              result.request,
+            ),
+          };
+        } catch (cause) {
+          scripts = {
+            ...scripts,
+            error: scriptPhaseError(cause, "pre-request"),
+          };
+          throw cause;
+        }
       }
       if (!working.materialized) {
         const templateRequest = working.request;
@@ -370,8 +381,6 @@ export class ExecutionService {
         },
       );
     } catch (cause) {
-      const error = scriptPhaseError(cause, "pre-request");
-      if (error !== undefined) scripts = { ...scripts, error };
       await this.#fail(working, userId, writer, head, cause, scripts, publish);
     }
   }

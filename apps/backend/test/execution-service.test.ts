@@ -227,7 +227,7 @@ describe("ExecutionService shutdown", () => {
         execute: async (
           _idempotencyKey: string,
           method: string,
-          _url: string,
+          url: string,
           headers: readonly { readonly name: string; readonly value: string }[],
           _body: Buffer,
           sink: {
@@ -236,6 +236,9 @@ describe("ExecutionService shutdown", () => {
             complete(value: unknown): Promise<void>;
           },
         ) => {
+          if (url.endsWith("/unavailable")) {
+            throw new Error("The proxy is unavailable");
+          }
           sentMethod = method;
           sentHeaders = headers;
           await sink.responseHead({
@@ -289,6 +292,26 @@ describe("ExecutionService shutdown", () => {
         failingRequest.requestId,
         (event) => failingEvents.push(event),
       );
+      const transportFailingRequest = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        null,
+        "Failing transport without scripts",
+        "GET",
+        "https://example.test/unavailable",
+        [],
+        [],
+        "",
+        "",
+        "",
+      );
+      const transportFailingEvents: ExecutionEvent[] = [];
+      await executions.start(
+        userId,
+        createEntityId(),
+        transportFailingRequest.requestId,
+        (event) => transportFailingEvents.push(event),
+      );
       await executions.close();
 
       expect(sentMethod).toBe("POST");
@@ -319,6 +342,14 @@ describe("ExecutionService shutdown", () => {
           line: 1,
         },
       });
+      expect(transportFailingEvents.at(-1)?.payload).toMatchObject({
+        state: "failed",
+        scriptLogs: [],
+        scriptTests: [],
+      });
+      expect(transportFailingEvents.at(-1)?.payload).not.toHaveProperty(
+        "scriptError",
+      );
     } finally {
       await scripts.close();
       await database.close();

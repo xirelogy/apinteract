@@ -290,6 +290,10 @@ export const enUsMessages = {
     details: "Response details",
     downloadBody: "Download response body",
     empty: "Send the request to inspect its response.",
+    failure: {
+      execution_failed: "Request execution failed",
+      unknown: "Request execution failed",
+    },
     headers: "Headers",
     heading: "Response",
     inProgress: "In progress",
