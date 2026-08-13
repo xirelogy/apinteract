@@ -275,7 +275,6 @@ export const enUsMessages = {
     preRequestDescription: "Runs before variables are resolved and sent.",
     postResponse: "Post-response script",
     postResponseDescription: "Runs after the complete response is stored.",
-    sdkHelp: "Scripts run on the backend and use the sandboxed SDK global",
     results: "Scripts",
     waitingResults: "Waiting for script results...",
     noResults: "No script output was produced.",

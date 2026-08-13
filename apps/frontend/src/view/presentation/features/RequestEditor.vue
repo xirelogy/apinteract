@@ -896,10 +896,6 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 @input="emitChange"
               />
             </div>
-            <p class="script-sdk-help">
-              {{ t("scripting.sdkHelp") }}
-              <code>asdk</code>.
-            </p>
           </TabsPanel>
 
           <TabsPanel
@@ -923,10 +919,6 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 @input="emitChange"
               />
             </div>
-            <p class="script-sdk-help">
-              {{ t("scripting.sdkHelp") }}
-              <code>asdk</code>.
-            </p>
           </TabsPanel>
 
           <TabsPanel

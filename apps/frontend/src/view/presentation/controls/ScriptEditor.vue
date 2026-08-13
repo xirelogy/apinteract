@@ -81,7 +81,7 @@ const syntaxTheme = HighlightStyle.define([
 const editorTheme = EditorView.theme({
   "&": {
     height: "100%",
-    minHeight: "10rem",
+    minHeight: "0",
     color: "var(--text-primary)",
     backgroundColor: "var(--surface-code)",
     fontSize: "var(--font-size-xs)",
@@ -91,11 +91,13 @@ const editorTheme = EditorView.theme({
     outlineOffset: "-2px",
   },
   ".cm-scroller": {
+    minHeight: "0",
+    overflow: "auto",
     fontFamily: "var(--font-mono)",
     lineHeight: "var(--line-height-code)",
   },
   ".cm-content": {
-    minHeight: "10rem",
+    minHeight: "100%",
     padding: "var(--space-2) 0",
     caretColor: "var(--text-primary)",
   },
