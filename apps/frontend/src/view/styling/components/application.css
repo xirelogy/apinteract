@@ -831,8 +831,11 @@
 }
 
 .request-editor {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-width: 0;
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
   padding: var(--space-4) var(--space-5);
 }
 
@@ -933,6 +936,21 @@
 .url-template-input .template-text-control-input,
 .field-template-input .template-text-control-input {
   width: 100%;
+}
+
+.tabs-root.request-settings-tabs {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.request-settings-tabs > .tabs-panel {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .request-tabs {
@@ -1078,7 +1096,7 @@
 }
 
 .request-body-editor {
-  height: calc(100% - var(--space-5));
+  height: 100%;
   min-height: 8rem;
   padding-top: var(--space-3);
 }
