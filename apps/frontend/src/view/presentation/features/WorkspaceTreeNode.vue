@@ -277,6 +277,7 @@ function handleTreeItemKeydown(event: KeyboardEvent): void {
         treeReorder.finishDrop($event, node.nodeId, parentNodeId, node.kind)
       "
     >
+      <span class="tree-toggle-spacer" aria-hidden="true"></span>
       <button
         class="tree-node-main request-tree-main"
         type="button"
@@ -298,7 +299,6 @@ function handleTreeItemKeydown(event: KeyboardEvent): void {
         "
         @dragend="treeReorder.cancelDrag"
       >
-        <span class="tree-toggle-spacer" aria-hidden="true"></span>
         <span class="request-tree-label">
           <GripVertical
             class="tree-drag-indicator"

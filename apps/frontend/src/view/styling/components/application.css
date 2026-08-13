@@ -600,14 +600,14 @@
   background: transparent;
 }
 
-.collection-tree-row {
+.collection-tree-row,
+.request-tree-row {
   grid-template-columns: var(--tree-leading-width) minmax(0, 1fr) var(
       --tree-action-width
     );
 }
 
 .request-tree-row {
-  grid-template-columns: minmax(0, 1fr) var(--tree-action-width);
   padding: 0;
   text-align: start;
 }
@@ -785,6 +785,7 @@
 
 .tree-toggle-spacer {
   width: var(--tree-leading-width);
+  height: var(--tree-control-height);
 }
 
 .tree-empty {

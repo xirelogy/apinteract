@@ -244,6 +244,19 @@ describe("WorkspaceNavigator tree reordering", () => {
       `[data-tree-node-id="${firstNodeId}"]`,
     );
     const collectionRow = wrapper.get<HTMLElement>(".collection-tree-row");
+    const requestRow = wrapper.get<HTMLElement>(".request-tree-row");
+    expect(collectionRow.element.children[0]?.classList).toContain(
+      "tree-toggle-button",
+    );
+    expect(requestRow.element.children[0]?.classList).toContain(
+      "tree-toggle-spacer",
+    );
+    expect(collectionRow.element.children[1]?.classList).toContain(
+      "tree-node-main",
+    );
+    expect(requestRow.element.children[1]?.classList).toContain(
+      "tree-node-main",
+    );
     vi.spyOn(collectionRow.element, "getBoundingClientRect").mockReturnValue({
       x: 0,
       y: 0,
