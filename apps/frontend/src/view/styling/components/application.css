@@ -472,7 +472,6 @@
   --tree-leading-width: 1.625rem;
   --tree-action-width: var(--control-height-compact);
   --tree-control-height: 2rem;
-  --tree-method-width: 4.25rem;
   --tree-row-height: var(--control-height-dense);
 
   display: flex;
@@ -803,8 +802,7 @@
 }
 
 .method-badge {
-  width: var(--tree-method-width);
-  flex: 0 0 var(--tree-method-width);
+  flex: 0 0 auto;
 }
 
 .request-workbench {
