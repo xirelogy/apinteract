@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Asterisk, Trash2, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
@@ -7,6 +7,7 @@ import type {
   CollectionView,
   RequestField,
   VariableProfileView,
+  VariablePreview,
   VariableWrite,
 } from "@/model/contracts/backend";
 import {
@@ -15,6 +16,7 @@ import {
   isBlankRequestField,
   meaningfulRequestFields,
 } from "@/model/domain/request-fields";
+import { collectTemplateVariableNames } from "@/model/domain/template-variables";
 import ActionMenu, {
   type ActionMenuItem,
 } from "@/view/presentation/controls/ActionMenu.vue";
@@ -23,6 +25,7 @@ import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import FormField from "@/view/presentation/controls/FormField.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue";
+import TemplateTextControl from "@/view/presentation/controls/TemplateTextControl.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
 import DialogControl from "@/view/presentation/controls/dialog/DialogControl.vue";
 import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
@@ -40,12 +43,14 @@ interface VariableFieldsEditorApi {
 const props = defineProps<{
   collection: CollectionView;
   variableProfile: VariableProfileView;
+  variablePreviews: readonly VariablePreview[];
   canEdit: boolean;
   busy: boolean;
 }>();
 const emit = defineEmits<{
   close: [];
   delete: [collectionId: string, revision: number];
+  preview: [names: readonly string[]];
   save: [
     name: string,
     pathPrefix: string,
@@ -63,6 +68,16 @@ const headers = ref<RequestField[]>(
   editableRequestFields(props.collection.headers, props.canEdit),
 );
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
+let previewTimer: ReturnType<typeof setTimeout> | undefined;
+const referencedVariableNames = computed(() =>
+  collectTemplateVariableNames([
+    pathPrefix.value,
+    ...headers.value.map((header) => header.value),
+  ]),
+);
+const previewSignature = computed(() =>
+  referencedVariableNames.value.join("\0"),
+);
 const canSave = computed(
   () =>
     name.value.trim() !== "" &&
@@ -77,6 +92,21 @@ const collectionActions = computed<readonly ActionMenuItem[]>(() => [
     variant: "danger",
   },
 ]);
+
+watch(previewSignature, scheduleVariablePreview, { immediate: true });
+
+onBeforeUnmount(() => {
+  if (previewTimer !== undefined) clearTimeout(previewTimer);
+});
+
+/** Debounces redacted variable previews while collection fields are edited. */
+function scheduleVariablePreview(): void {
+  if (previewTimer !== undefined) clearTimeout(previewTimer);
+  previewTimer = setTimeout(() => {
+    previewTimer = undefined;
+    emit("preview", [...referencedVariableNames.value]);
+  }, 150);
+}
 
 /** Removes one common header by its visible ordered position. */
 function removeHeader(index: number): void {
@@ -203,9 +233,10 @@ function save(): void {
             })
           "
         >
-          <TextInput
+          <TemplateTextControl
             :id="controlId"
             v-model="pathPrefix"
+            :previews="variablePreviews"
             :aria-describedby="describedBy"
             :aria-label="t('collection.pathPrefix')"
             :invalid="invalid"
@@ -270,11 +301,12 @@ function save(): void {
                   :disabled="busy || !canEdit"
                   @input="updateHeader"
                 />
-                <TextInput
+                <TemplateTextControl
                   v-model="header.value"
                   class="field-cell-input"
                   density="compact"
                   font="mono"
+                  :previews="variablePreviews"
                   :aria-label="t('request.headerValue', { index: index + 1 })"
                   autocomplete="off"
                   spellcheck="false"

@@ -2,7 +2,7 @@
 
 import { createI18n } from "vue-i18n";
 import { flushPromises, mount } from "@vue/test-utils";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
 import CollectionPropertiesDialog from "../src/view/presentation/features/CollectionPropertiesDialog.vue";
@@ -60,6 +60,94 @@ afterEach(() => {
 });
 
 describe("CollectionPropertiesDialog", () => {
+  it("previews variables in target prefixes and common headers", async () => {
+    vi.useFakeTimers();
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(CollectionPropertiesDialog, {
+      attachTo: document.body,
+      props: {
+        collection: {
+          collectionId: "019fa8be-a510-76b9-b73b-69f4c7af7875",
+          workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
+          parentCollectionId: null,
+          name: "Examples",
+          pathPrefix: "https://<<host>>",
+          effectivePath: "https://<<host>>",
+          headers: [
+            { name: "Authorization", value: "Bearer <<token>>", enabled: true },
+          ],
+          effectiveHeaders: [],
+          revision: 0,
+        },
+        variableProfile: {
+          workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
+          scopeKind: "collection",
+          scopeId: "019fa8be-a510-76b9-b73b-69f4c7af7875",
+          scopeName: "Examples",
+          revision: 0,
+          variables: [],
+        },
+        variablePreviews: [
+          {
+            name: "host",
+            status: "resolved",
+            declaredKind: "value",
+            effectiveKind: "value",
+            aliasTarget: null,
+            value: "api.example.test",
+            secretVersion: null,
+            diagnostic: null,
+            source: {
+              scope: "workspace",
+              scopeId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
+              scopeName: "Workspace",
+              revision: 1,
+            },
+          },
+          {
+            name: "token",
+            status: "resolved",
+            declaredKind: "secret",
+            effectiveKind: "secret",
+            aliasTarget: null,
+            value: null,
+            secretVersion: 1,
+            diagnostic: null,
+            source: {
+              scope: "environment",
+              scopeId: "019fa8be-a510-76b9-b73b-69f4c7af7877",
+              scopeName: "Development",
+              revision: 1,
+            },
+          },
+        ],
+        canEdit: true,
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await vi.advanceTimersByTimeAsync(150);
+    expect(wrapper.emitted("preview")).toEqual([[["host", "token"]]]);
+    expect(wrapper.findAll('[data-preview-status="resolved"]')).toHaveLength(2);
+    const targetPrefix = wrapper.get<HTMLInputElement>(
+      'input[aria-label="Target prefix"]',
+    );
+    targetPrefix.element.setSelectionRange(11, 11);
+    await targetPrefix.trigger("focus");
+    await targetPrefix.trigger("keyup");
+    expect(wrapper.get('[role="tooltip"]').text()).toContain(
+      "api.example.test",
+    );
+
+    wrapper.unmount();
+    vi.useRealTimers();
+  });
+
   it("edits the name, common headers, and variables together", async () => {
     const i18n = createI18n({
       legacy: false,
@@ -88,6 +176,7 @@ describe("CollectionPropertiesDialog", () => {
           revision: 0,
           variables: [],
         },
+        variablePreviews: [],
         canEdit: true,
         busy: false,
       },
@@ -196,6 +285,7 @@ describe("CollectionPropertiesDialog", () => {
           revision: 0,
           variables: [],
         },
+        variablePreviews: [],
         canEdit: true,
         busy: false,
       },

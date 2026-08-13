@@ -739,7 +739,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 :aria-label="
                   t('request.inheritedHeaderValue', { index: index + 1 })
                 "
-                disabled
+                readonly
               />
               <span
                 class="inherited-header-indicator"

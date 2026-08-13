@@ -47,6 +47,10 @@ export class ApplicationController {
   readonly session: SessionController;
   readonly #webSocket: BackendWebSocketClient;
   #previewNames: readonly string[] = [];
+  #previewContext: {
+    readonly parentCollectionId: string | null;
+    readonly requestId: string | null;
+  } | null = null;
   #previewSequence = 0;
 
   constructor(session: SessionController, webSocket: BackendWebSocketClient) {
@@ -119,6 +123,7 @@ export class ApplicationController {
     store.selectedVariableProfile = null;
     store.variablePreviews = [];
     this.#previewNames = [];
+    this.#previewContext = null;
     this.#previewSequence += 1;
     store.selectedCollectionId = null;
     store.selectedCollection = null;
@@ -217,6 +222,7 @@ export class ApplicationController {
       store.collectionChildren = {};
       store.expandedCollectionIds = [];
       this.#previewNames = [];
+      this.#previewContext = null;
       this.#previewSequence += 1;
       const nextWorkspace = result.workspaces[0];
       if (nextWorkspace !== undefined) {
@@ -238,9 +244,29 @@ export class ApplicationController {
     });
   }
 
-  /** Refreshes redacted resolution hints without blocking request editing. */
-  async previewVariables(names: readonly string[]): Promise<void> {
+  /** Refreshes redacted resolution hints for an explicit or active request scope. */
+  async previewVariables(
+    names: readonly string[],
+    context?: {
+      readonly parentCollectionId?: string | null;
+      readonly requestId?: string | null;
+    },
+  ): Promise<void> {
+    const store = useApplicationStore();
+    const active = activeRequestTab(store);
     this.#previewNames = [...new Set(names)].slice(0, 100);
+    this.#previewContext = {
+      parentCollectionId:
+        context === undefined
+          ? (active?.request?.parentCollectionId ??
+            active?.pendingParentCollectionId ??
+            null)
+          : (context.parentCollectionId ?? null),
+      requestId:
+        context === undefined
+          ? (active?.request?.requestId ?? null)
+          : (context.requestId ?? null),
+    };
     await this.#refreshVariablePreviews();
   }
 
@@ -249,6 +275,7 @@ export class ApplicationController {
     const store = useApplicationStore();
     const workspaceId = store.selectedWorkspaceId;
     const names = this.#previewNames;
+    const context = this.#previewContext;
     const sequence = ++this.#previewSequence;
     if (workspaceId === null || names.length === 0) {
       store.variablePreviews = [];
@@ -259,11 +286,8 @@ export class ApplicationController {
         "variable.preview",
         {
           workspaceId,
-          parentCollectionId:
-            activeRequestTab(store)?.request?.parentCollectionId ??
-            activeRequestTab(store)?.pendingParentCollectionId ??
-            null,
-          requestId: activeRequestTab(store)?.request?.requestId ?? null,
+          parentCollectionId: context?.parentCollectionId ?? null,
+          requestId: context?.requestId ?? null,
           names,
         },
       );
@@ -576,6 +600,7 @@ export class ApplicationController {
         delete store.collectionChildren[id];
       }
       this.#previewNames = [];
+      this.#previewContext = null;
       this.#previewSequence += 1;
       await this.#reloadCollection(workspaceId, parentCollectionId);
     });
@@ -770,6 +795,7 @@ export class ApplicationController {
       if (activeRequestId === request.requestId) {
         store.variablePreviews = [];
         this.#previewNames = [];
+        this.#previewContext = null;
         this.#previewSequence += 1;
       }
       await this.#reloadCollection(

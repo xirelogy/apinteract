@@ -483,7 +483,7 @@ describe("RequestEditor", () => {
     ]);
   });
 
-  it("shows inherited headers as disabled fields beside local headers", async () => {
+  it("shows inherited headers as read-only fields beside local headers", async () => {
     const i18n = createI18n({
       legacy: false,
       locale: "en-US",
@@ -506,7 +506,27 @@ describe("RequestEditor", () => {
         execution: null,
         tabId: "019facab-1eee-765f-bd9f-ac2449151be2",
         temporary: true,
-        inheritedHeaders: [{ name: "X-Team", value: "shared", enabled: true }],
+        inheritedHeaders: [
+          { name: "X-Team", value: "<<team>>", enabled: true },
+        ],
+        variablePreviews: [
+          {
+            name: "team",
+            status: "resolved",
+            declaredKind: "value",
+            effectiveKind: "value",
+            aliasTarget: null,
+            value: "platform",
+            secretVersion: null,
+            diagnostic: null,
+            source: {
+              scope: "collection",
+              scopeId: "019facab-1eee-765f-bd9f-ac2449151be3",
+              scopeName: "Shared",
+              revision: 1,
+            },
+          },
+        ],
         busy: false,
       },
       global: { plugins: [i18n] },
@@ -522,6 +542,15 @@ describe("RequestEditor", () => {
     );
     expect(inheritedName.element.value).toBe("X-Team");
     expect(inheritedName.attributes("disabled")).toBeDefined();
+    const inheritedValue = wrapper.get<HTMLInputElement>(
+      'input[aria-label="Inherited header value 1"]',
+    );
+    expect(inheritedValue.attributes("readonly")).toBeDefined();
+    expect(inheritedValue.attributes("disabled")).toBeUndefined();
+    inheritedValue.element.setSelectionRange(3, 3);
+    await inheritedValue.trigger("focus");
+    await inheritedValue.trigger("keyup");
+    expect(wrapper.get('[role="tooltip"]').text()).toContain("platform");
     expect(
       wrapper
         .get('.inherited-header-indicator[role="img"]')
