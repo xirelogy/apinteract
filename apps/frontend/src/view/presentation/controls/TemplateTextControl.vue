@@ -7,6 +7,7 @@ import {
   useAttrs,
   useId,
   watch,
+  type StyleValue,
 } from "vue";
 import { useI18n } from "vue-i18n";
 
@@ -87,6 +88,7 @@ const activeDiagnostic = computed(() =>
 const wrapperClass = computed(() =>
   typeof attrs.class === "string" ? attrs.class : undefined,
 );
+const wrapperStyle = computed(() => attrs.style as StyleValue);
 const controlAttributes = computed(() =>
   Object.fromEntries(
     Object.entries(attrs).filter(
@@ -281,6 +283,7 @@ function localizedDiagnostic(preview: VariablePreview): string | null {
   <div
     class="template-text-control"
     :class="wrapperClass"
+    :style="wrapperStyle"
     :data-multiline="multiline ? '' : undefined"
     :data-density="density"
     :data-font="font"

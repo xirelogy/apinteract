@@ -48,6 +48,7 @@ const emit = defineEmits<{
   delete: [collectionId: string, revision: number];
   save: [
     name: string,
+    pathPrefix: string,
     headers: readonly RequestField[],
     variables: readonly VariableWrite[],
   ];
@@ -56,6 +57,7 @@ const { t } = useI18n();
 const open = ref(true);
 const activeSection = ref<"headers" | "variables">("headers");
 const name = ref(props.collection.name);
+const pathPrefix = ref(props.collection.pathPrefix);
 const deleteConfirmationOpen = ref(false);
 const headers = ref<RequestField[]>(
   editableRequestFields(props.collection.headers, props.canEdit),
@@ -131,6 +133,7 @@ function save(): void {
   emit(
     "save",
     name.value.trim(),
+    pathPrefix.value,
     meaningfulRequestFields(headers.value),
     variableEditor.value?.writes() ?? [],
   );
@@ -188,6 +191,27 @@ function save(): void {
             :aria-label="t('collection.name')"
             :invalid="invalid"
             autocomplete="off"
+            :disabled="busy || !canEdit"
+          />
+        </FormField>
+        <FormField
+          v-slot="{ controlId, describedBy, invalid }"
+          :label="t('collection.pathPrefix')"
+          :hint="
+            t('collection.pathPrefixHint', {
+              path: collection.effectivePath || '/',
+            })
+          "
+        >
+          <TextInput
+            :id="controlId"
+            v-model="pathPrefix"
+            :aria-describedby="describedBy"
+            :aria-label="t('collection.pathPrefix')"
+            :invalid="invalid"
+            :placeholder="t('collection.pathPrefixPlaceholder')"
+            autocomplete="off"
+            spellcheck="false"
             :disabled="busy || !canEdit"
           />
         </FormField>

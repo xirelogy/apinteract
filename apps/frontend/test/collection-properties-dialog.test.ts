@@ -74,6 +74,8 @@ describe("CollectionPropertiesDialog", () => {
           workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
           parentCollectionId: null,
           name: "Examples",
+          pathPrefix: "",
+          effectivePath: "",
           headers: [],
           effectiveHeaders: [],
           revision: 0,
@@ -112,6 +114,9 @@ describe("CollectionPropertiesDialog", () => {
     await wrapper
       .get('input[aria-label="Header value 1"]')
       .setValue("platform");
+    await wrapper
+      .get('input[aria-label="Target prefix"]')
+      .setValue("/v1/examples");
     expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toContain(
       "Common headers",
     );
@@ -148,6 +153,7 @@ describe("CollectionPropertiesDialog", () => {
     expect(wrapper.emitted("save")).toEqual([
       [
         "Renamed examples",
+        "/v1/examples",
         [{ name: "X-Team", value: "platform", enabled: true }],
         [
           {
@@ -176,6 +182,8 @@ describe("CollectionPropertiesDialog", () => {
           workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
           parentCollectionId: null,
           name: "Examples",
+          pathPrefix: "",
+          effectivePath: "",
           headers: [],
           effectiveHeaders: [],
           revision: 3,
@@ -232,6 +240,7 @@ describe("WorkspacePropertiesDialog", () => {
           workspaceId,
           name: "Platform",
           role: "owner",
+          baseUrl: "",
           headers: [],
           revision: 0,
         },
@@ -258,6 +267,9 @@ describe("WorkspacePropertiesDialog", () => {
       .get('input[aria-label="Header value 1"]')
       .setValue("platform");
     await wrapper
+      .get('input[aria-label="Base URL"]')
+      .setValue("https://api.example.test");
+    await wrapper
       .findAll('[role="tab"]')
       .find((tab) => tab.text().includes("Variables"))
       ?.trigger("click");
@@ -274,6 +286,7 @@ describe("WorkspacePropertiesDialog", () => {
     expect(wrapper.emitted("save")).toEqual([
       [
         "Platform",
+        "https://api.example.test",
         [{ name: "X-Workspace", value: "platform", enabled: true }],
         [{ name: "team", kind: "value", value: "platform" }],
       ],
@@ -295,6 +308,7 @@ describe("WorkspacePropertiesDialog", () => {
           workspaceId,
           name: "Platform",
           role: "owner",
+          baseUrl: "",
           headers: [],
           revision: 4,
         },

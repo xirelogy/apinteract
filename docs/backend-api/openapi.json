@@ -823,6 +823,7 @@
                   "workspaceId",
                   "expectedRevision",
                   "name",
+                  "baseUrl",
                   "headers"
                 ],
                 "properties": {
@@ -837,6 +838,11 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 200
+                  },
+                  "baseUrl": {
+                    "type": "string",
+                    "maxLength": 8192,
+                    "description": "Absolute HTTP URL template used as the root of composed request targets; blank disables composition until configured."
                   },
                   "headers": {
                     "type": "array",
@@ -1096,6 +1102,7 @@
                   "collectionId",
                   "expectedRevision",
                   "name",
+                  "pathPrefix",
                   "headers"
                 ],
                 "properties": {
@@ -1110,6 +1117,11 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 200
+                  },
+                  "pathPrefix": {
+                    "type": "string",
+                    "maxLength": 8192,
+                    "description": "An absolute HTTP(S) URL template when this collection is the first non-empty target component, or a path template appended to an earlier component."
                   },
                   "headers": {
                     "type": "array",
@@ -1485,6 +1497,7 @@
                   "parentCollectionId",
                   "name",
                   "method",
+                  "targetMode",
                   "targetUrl",
                   "query",
                   "headers",
@@ -1512,10 +1525,14 @@
                   "method": {
                     "$ref": "#/components/schemas/HttpMethod"
                   },
+                  "targetMode": {
+                    "type": "string",
+                    "enum": ["absolute", "composed"]
+                  },
                   "targetUrl": {
                     "type": "string",
                     "maxLength": 8192,
-                    "description": "Absolute HTTP URL template validated after variable interpolation."
+                    "description": "Absolute URL template or composed request-local path."
                   },
                   "query": {
                     "type": "array",
@@ -1712,6 +1729,7 @@
                   "expectedDraftRevision",
                   "name",
                   "method",
+                  "targetMode",
                   "targetUrl",
                   "query",
                   "headers",
@@ -1733,10 +1751,14 @@
                   "method": {
                     "$ref": "#/components/schemas/HttpMethod"
                   },
+                  "targetMode": {
+                    "type": "string",
+                    "enum": ["absolute", "composed"]
+                  },
                   "targetUrl": {
                     "type": "string",
                     "maxLength": 8192,
-                    "description": "Absolute HTTP URL template validated after variable interpolation."
+                    "description": "Absolute URL template or composed request-local path."
                   },
                   "query": {
                     "type": "array",
@@ -2003,7 +2025,14 @@
       "WorkspaceView": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["workspaceId", "name", "role", "headers", "revision"],
+        "required": [
+          "workspaceId",
+          "name",
+          "role",
+          "baseUrl",
+          "headers",
+          "revision"
+        ],
         "properties": {
           "workspaceId": {
             "$ref": "#/components/schemas/WorkspaceId"
@@ -2014,6 +2043,10 @@
           "role": {
             "type": "string",
             "enum": ["owner", "editor", "viewer"]
+          },
+          "baseUrl": {
+            "type": "string",
+            "maxLength": 8192
           },
           "headers": {
             "type": "array",
@@ -2356,6 +2389,8 @@
           "workspaceId",
           "parentCollectionId",
           "name",
+          "pathPrefix",
+          "effectivePath",
           "headers",
           "effectiveHeaders",
           "revision"
@@ -2379,6 +2414,15 @@
           },
           "name": {
             "type": "string"
+          },
+          "pathPrefix": {
+            "type": "string",
+            "maxLength": 8192,
+            "description": "An absolute HTTP(S) URL template when this collection is the first non-empty target component, or a path template appended to an earlier component."
+          },
+          "effectivePath": {
+            "type": "string",
+            "description": "Root-to-current collection target prefix. It may include an absolute URL established by the first non-empty collection component."
           },
           "headers": {
             "type": "array",
@@ -2410,6 +2454,7 @@
           "method",
           "targetMode",
           "targetUrl",
+          "inheritedTarget",
           "queryMode",
           "query",
           "headers",
@@ -2444,12 +2489,16 @@
           },
           "targetMode": {
             "type": "string",
-            "const": "absolute"
+            "enum": ["absolute", "composed"]
           },
           "targetUrl": {
             "type": "string",
             "maxLength": 8192,
-            "description": "Absolute HTTP URL template validated after variable interpolation."
+            "description": "Absolute URL template in absolute mode, or a path-only template in composed mode."
+          },
+          "inheritedTarget": {
+            "type": "string",
+            "description": "Current composed workspace and collection target prefix before the request-local path."
           },
           "queryMode": {
             "type": "string",
@@ -2682,15 +2731,26 @@
       "RequestExecutionInput": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["method", "targetUrl", "query", "headers", "body"],
+        "required": [
+          "method",
+          "targetMode",
+          "targetUrl",
+          "query",
+          "headers",
+          "body"
+        ],
         "properties": {
           "method": {
             "$ref": "#/components/schemas/HttpMethod"
           },
+          "targetMode": {
+            "type": "string",
+            "enum": ["absolute", "composed"]
+          },
           "targetUrl": {
             "type": "string",
             "maxLength": 8192,
-            "description": "Absolute HTTP URL template validated after variable interpolation."
+            "description": "Absolute URL template or composed request-local path."
           },
           "query": {
             "type": "array",

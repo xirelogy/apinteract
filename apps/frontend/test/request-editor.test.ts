@@ -30,6 +30,7 @@ describe("RequestEditor", () => {
       method: "GET" as const,
       targetMode: "absolute" as const,
       targetUrl: "https://example.test/current",
+      inheritedTarget: "",
       queryMode: "structured" as const,
       query: [],
       headers: [],
@@ -54,6 +55,7 @@ describe("RequestEditor", () => {
         draft: {
           name: request.name,
           method: request.method,
+          targetMode: request.targetMode,
           targetUrl: request.targetUrl,
           query: [],
           headers: [],
@@ -116,6 +118,7 @@ describe("RequestEditor", () => {
         draft: {
           name: "Resizable request",
           method: "GET",
+          targetMode: "absolute",
           targetUrl: "https://example.test",
           query: [],
           headers: [],
@@ -194,6 +197,7 @@ describe("RequestEditor", () => {
         draft: {
           name: "Trailing rows",
           method: "GET",
+          targetMode: "absolute",
           targetUrl: "https://example.test",
           query: [],
           headers: [],
@@ -284,6 +288,7 @@ describe("RequestEditor", () => {
         draft: {
           name: "Templated request",
           method: "GET",
+          targetMode: "absolute",
           targetUrl: "<<base_url>>/resource",
           query: [],
           headers: [],
@@ -314,6 +319,119 @@ describe("RequestEditor", () => {
     vi.useRealTimers();
   });
 
+  it("previews and emits a composed request path", async () => {
+    vi.useFakeTimers();
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft: {
+          name: "Composed request",
+          method: "GET",
+          targetMode: "composed",
+          targetUrl: "/42",
+          query: [],
+          headers: [],
+          body: "",
+          preRequestScript: "",
+          postResponseScript: "",
+        },
+        execution: null,
+        tabId: "019facab-1eee-765f-bd9f-ac2449151be7",
+        temporary: true,
+        inheritedTarget: "https://<<service_host>>/<<api_version>>/users/",
+        inheritedHeaders: [],
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    const inheritedTarget = wrapper.get('input[aria-label="Inherited target"]');
+    expect(inheritedTarget.attributes("readonly")).toBeDefined();
+    expect(inheritedTarget.attributes("placeholder")).toBeUndefined();
+    expect((inheritedTarget.element as HTMLInputElement).value).toBe(
+      "https://<<service_host>>/<<api_version>>/users",
+    );
+    expect(
+      wrapper.get(".inherited-target-input").attributes("style"),
+    ).toContain("50ch");
+    expect(
+      wrapper
+        .get(".inherited-target-input")
+        .findAll(".template-variable-token")
+        .map((token) => token.attributes("data-variable-name")),
+    ).toEqual(["service_host", "api_version"]);
+    expect(
+      (
+        wrapper.get('input[aria-label="Request path"]')
+          .element as HTMLInputElement
+      ).value,
+    ).toBe("/42");
+    const targetMode = wrapper.get('.target-mode-picker [role="combobox"]');
+    expect(targetMode.text()).not.toContain("Composed");
+    expect(targetMode.find("svg").exists()).toBe(true);
+    await targetMode.trigger("click");
+    expect(
+      [...document.body.querySelectorAll('[role="option"]')].map((option) =>
+        option.textContent?.trim(),
+      ),
+    ).toEqual(["Composed", "Absolute"]);
+    const send = wrapper
+      .findAll(".command-bar button")
+      .find((button) => button.text().includes("Send"));
+    expect(send?.attributes("disabled")).toBeUndefined();
+    await send?.trigger("click");
+    expect(wrapper.emitted("execute")?.[0]?.[0]).toMatchObject({
+      targetMode: "composed",
+      targetUrl: "/42",
+    });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(wrapper.emitted("preview")).toEqual([
+      [["service_host", "api_version"]],
+    ]);
+    vi.useRealTimers();
+  });
+
+  it("does not treat a variable-bearing inherited path as an absolute base", () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft: {
+          name: "Missing base",
+          method: "GET",
+          targetMode: "composed",
+          targetUrl: "/users",
+          query: [],
+          headers: [],
+          body: "",
+          preRequestScript: "",
+          postResponseScript: "",
+        },
+        execution: null,
+        tabId: "019facab-1eee-765f-bd9f-ac2449151be4",
+        temporary: true,
+        inheritedTarget: "/<<version>>",
+        inheritedHeaders: [],
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    const send = wrapper
+      .findAll(".command-bar button")
+      .find((button) => button.text().includes("Send"));
+    expect(send?.attributes("disabled")).toBeDefined();
+  });
+
   it("allows an unnamed temporary request to open the naming dialog", async () => {
     const i18n = createI18n({
       legacy: false,
@@ -326,6 +444,7 @@ describe("RequestEditor", () => {
         draft: {
           name: "",
           method: "GET",
+          targetMode: "absolute",
           targetUrl: "https://example.test/temporary",
           query: [],
           headers: [],
@@ -352,6 +471,7 @@ describe("RequestEditor", () => {
         {
           name: "",
           method: "GET",
+          targetMode: "absolute",
           targetUrl: "https://example.test/temporary",
           query: [],
           headers: [],
@@ -375,6 +495,7 @@ describe("RequestEditor", () => {
         draft: {
           name: "Example",
           method: "GET",
+          targetMode: "absolute",
           targetUrl: "https://example.test",
           query: [],
           headers: [{ name: "X-Local", value: "local", enabled: true }],
@@ -429,6 +550,7 @@ describe("RequestEditor", () => {
           method: "GET",
           targetMode: "absolute",
           targetUrl: "https://example.test",
+          inheritedTarget: "",
           queryMode: "structured",
           query: [],
           headers: [],
@@ -441,6 +563,7 @@ describe("RequestEditor", () => {
         draft: {
           name: "Saved request",
           method: "GET",
+          targetMode: "absolute",
           targetUrl: "https://example.test",
           query: [],
           headers: [],
@@ -515,6 +638,7 @@ describe("RequestEditor", () => {
         draft: {
           name: "Scripted request",
           method: "GET",
+          targetMode: "absolute",
           targetUrl: "https://example.test",
           query: [],
           headers: [],

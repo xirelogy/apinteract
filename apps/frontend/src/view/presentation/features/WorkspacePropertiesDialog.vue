@@ -49,6 +49,7 @@ const emit = defineEmits<{
   delete: [workspaceId: string, revision: number];
   save: [
     name: string,
+    baseUrl: string,
     headers: readonly RequestField[],
     variables: readonly VariableWrite[],
   ];
@@ -57,6 +58,7 @@ const { t } = useI18n();
 const open = ref(true);
 const activeSection = ref<"headers" | "variables">("headers");
 const name = ref(props.workspace.name);
+const baseUrl = ref(props.workspace.baseUrl);
 const deleteConfirmationOpen = ref(false);
 const headers = ref<RequestField[]>(
   editableRequestFields(props.workspace.headers, props.canEdit),
@@ -132,6 +134,7 @@ function save(): void {
   emit(
     "save",
     name.value.trim(),
+    baseUrl.value.trim(),
     meaningfulRequestFields(headers.value),
     variableEditor.value?.writes() ?? [],
   );
@@ -189,6 +192,23 @@ function save(): void {
             :aria-label="t('workspace.name')"
             :invalid="invalid"
             autocomplete="off"
+            :disabled="busy || !canEdit"
+          />
+        </FormField>
+        <FormField
+          v-slot="{ controlId, describedBy, invalid }"
+          :label="t('workspace.baseUrl')"
+          :hint="t('workspace.baseUrlHint')"
+        >
+          <TextInput
+            :id="controlId"
+            v-model="baseUrl"
+            :aria-describedby="describedBy"
+            :aria-label="t('workspace.baseUrl')"
+            :invalid="invalid"
+            :placeholder="t('workspace.baseUrlPlaceholder')"
+            autocomplete="off"
+            spellcheck="false"
             :disabled="busy || !canEdit"
           />
         </FormField>

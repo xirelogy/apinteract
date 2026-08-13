@@ -26,6 +26,7 @@ export interface WorkspaceSummary {
 }
 
 export interface WorkspaceView extends WorkspaceSummary {
+  readonly baseUrl: string;
   readonly headers: readonly WorkspaceHeader[];
   readonly revision: number;
 }
@@ -57,6 +58,7 @@ export class WorkspaceService {
           name: normalizeName(name),
           revision: 0,
           headers_json: "[]",
+          base_url_template: "",
           created_by: idToBytes(userId),
           created_at: now,
           deleted_by: null,
@@ -96,6 +98,7 @@ export class WorkspaceService {
         "workspace.name",
         "workspace.revision",
         "workspace.headers_json",
+        "workspace.base_url_template",
         "membership.role",
       ])
       .where("workspace.id", "=", idToBytes(workspaceId))
@@ -109,6 +112,7 @@ export class WorkspaceService {
       workspaceId: bytesToId(row.id),
       name: row.name,
       role: row.role,
+      baseUrl: row.base_url_template,
       headers: parseWorkspaceHeaders(row.headers_json),
       revision: row.revision,
     };
@@ -121,14 +125,16 @@ export class WorkspaceService {
     expectedRevision: number,
     name: string,
     headers: readonly WorkspaceHeader[],
+    baseUrl = "",
   ): Promise<WorkspaceView> {
     const normalizedName = normalizeName(name);
     const normalizedHeaders = validateWorkspaceHeaders(headers);
+    const normalizedBaseUrl = validateBaseUrlTemplate(baseUrl);
     return this.#database.transaction().execute(async (transaction) => {
       await this.requireCanEdit(transaction, userId, workspaceId);
       const row = await transaction
         .selectFrom("workspaces")
-        .select(["name", "revision", "headers_json"])
+        .select(["name", "revision", "headers_json", "base_url_template"])
         .where("id", "=", idToBytes(workspaceId))
         .where("deleted_at", "is", null)
         .executeTakeFirst();
@@ -145,11 +151,16 @@ export class WorkspaceService {
         .where("workspace_id", "=", idToBytes(workspaceId))
         .where("user_id", "=", idToBytes(userId))
         .executeTakeFirstOrThrow();
-      if (row.name === normalizedName && row.headers_json === headersJson) {
+      if (
+        row.name === normalizedName &&
+        row.headers_json === headersJson &&
+        row.base_url_template === normalizedBaseUrl
+      ) {
         return {
           workspaceId,
           name: normalizedName,
           role: membership.role,
+          baseUrl: normalizedBaseUrl,
           headers: normalizedHeaders,
           revision: row.revision,
         };
@@ -157,7 +168,12 @@ export class WorkspaceService {
       const revision = row.revision + 1;
       const result = await transaction
         .updateTable("workspaces")
-        .set({ name: normalizedName, headers_json: headersJson, revision })
+        .set({
+          name: normalizedName,
+          headers_json: headersJson,
+          base_url_template: normalizedBaseUrl,
+          revision,
+        })
         .where("id", "=", idToBytes(workspaceId))
         .where("revision", "=", expectedRevision)
         .where("deleted_at", "is", null)
@@ -173,12 +189,14 @@ export class WorkspaceService {
           revision,
           nameChanged: row.name !== normalizedName,
           headersChanged: row.headers_json !== headersJson,
+          baseUrlChanged: row.base_url_template !== normalizedBaseUrl,
         },
       });
       return {
         workspaceId,
         name: normalizedName,
         role: membership.role,
+        baseUrl: normalizedBaseUrl,
         headers: normalizedHeaders,
         revision,
       };
@@ -314,6 +332,40 @@ export function normalizeName(name: string): string {
     throw new Error("Name must contain between 1 and 200 characters");
   }
   return normalized;
+}
+
+/** Validates a bounded absolute HTTP URL template used for composed targets. */
+export function validateBaseUrlTemplate(value: string): string {
+  const normalized = value.trim();
+  if (normalized === "") return "";
+  if (
+    normalized.length > 8192 ||
+    normalized.includes("?") ||
+    normalized.includes("#") ||
+    normalized.includes("\\") ||
+    containsControlCharacter(normalized)
+  ) {
+    throw new Error("Workspace base URL template is invalid");
+  }
+  if (!normalized.includes("<<")) {
+    const url = new URL(normalized);
+    if (
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      url.username !== "" ||
+      url.password !== ""
+    ) {
+      throw new Error("Workspace base URL must be an absolute HTTP URL");
+    }
+  }
+  return normalized;
+}
+
+/** Detects prohibited ASCII controls without embedding them in a regexp. */
+function containsControlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 31 || codePoint === 127;
+  });
 }
 
 /** Validates workspace headers before persistence or inheritance resolution. */

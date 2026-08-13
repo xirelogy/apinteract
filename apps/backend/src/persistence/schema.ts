@@ -50,6 +50,7 @@ export interface WorkspaceTable {
   name: string;
   revision: number;
   headers_json: string;
+  base_url_template: Generated<string>;
   created_by: BinaryId;
   created_at: number;
   deleted_by: BinaryId | null;
@@ -78,6 +79,7 @@ export interface CollectionProfileTable {
   collection_id: BinaryId;
   revision: number;
   headers_json: string;
+  path_prefix: Generated<string>;
   updated_by: BinaryId;
   updated_at: number;
 }
@@ -132,7 +134,7 @@ export interface RequestDraftTable {
   request_id: BinaryId;
   draft_revision: number;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
-  target_mode: "absolute";
+  target_mode: "absolute" | "composed";
   target_url: string;
   query_mode: "structured";
   query_json: string;

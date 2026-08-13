@@ -17,6 +17,7 @@ const WORKSPACE_HEADERS_MIGRATION = "0007_workspace_headers";
 const REQUEST_SCRIPTS_MIGRATION = "0008_request_scripts";
 const RESOURCE_DELETION_MIGRATION = "0009_resource_deletion";
 const REQUEST_VERSIONS_MIGRATION = "0010_request_versions";
+const COMPOSED_TARGETS_MIGRATION = "0011_composed_targets";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -333,6 +334,13 @@ export class SqliteDatabase {
     if (requestVersionsApplied === undefined) {
       this.#migrateRequestVersions();
     }
+
+    const composedTargetsApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(COMPOSED_TARGETS_MIGRATION);
+    if (composedTargetsApplied === undefined) {
+      this.#migrateComposedTargets();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -370,6 +378,7 @@ export class SqliteDatabase {
       REQUEST_SCRIPTS_MIGRATION,
       RESOURCE_DELETION_MIGRATION,
       REQUEST_VERSIONS_MIGRATION,
+      COMPOSED_TARGETS_MIGRATION,
     ].some((identifier) => !identifiers.has(identifier));
   }
 
@@ -722,6 +731,77 @@ export class SqliteDatabase {
       `);
       this.#recordMigration(REQUEST_VERSIONS_MIGRATION);
     })();
+  }
+
+  /** Adds workspace and collection target components plus composed drafts. */
+  #migrateComposedTargets(): void {
+    this.#driver.pragma("foreign_keys = OFF");
+    try {
+      this.#driver.transaction(() => {
+        this.#driver.exec(`
+          ALTER TABLE workspaces
+            ADD COLUMN base_url_template TEXT NOT NULL DEFAULT '';
+          ALTER TABLE collection_profiles
+            ADD COLUMN path_prefix TEXT NOT NULL DEFAULT '';
+
+          CREATE TABLE request_drafts_composed (
+            request_id BLOB PRIMARY KEY REFERENCES workspace_tree_nodes(id) ON DELETE CASCADE,
+            draft_revision INTEGER NOT NULL CHECK(draft_revision >= 0),
+            method TEXT NOT NULL CHECK(method IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS')),
+            target_mode TEXT NOT NULL CHECK(target_mode IN ('absolute', 'composed')),
+            target_url TEXT NOT NULL,
+            query_mode TEXT NOT NULL CHECK(query_mode = 'structured'),
+            query_json TEXT NOT NULL,
+            headers_json TEXT NOT NULL,
+            body_text TEXT NOT NULL,
+            pre_request_script TEXT NOT NULL DEFAULT '',
+            post_response_script TEXT NOT NULL DEFAULT '',
+            updated_by BLOB NOT NULL REFERENCES users(id),
+            updated_at INTEGER NOT NULL
+          ) STRICT;
+
+          INSERT INTO request_drafts_composed (
+            request_id,
+            draft_revision,
+            method,
+            target_mode,
+            target_url,
+            query_mode,
+            query_json,
+            headers_json,
+            body_text,
+            pre_request_script,
+            post_response_script,
+            updated_by,
+            updated_at
+          )
+          SELECT
+            request_id,
+            draft_revision,
+            method,
+            target_mode,
+            target_url,
+            query_mode,
+            query_json,
+            headers_json,
+            body_text,
+            pre_request_script,
+            post_response_script,
+            updated_by,
+            updated_at
+          FROM request_drafts;
+          DROP TABLE request_drafts;
+          ALTER TABLE request_drafts_composed RENAME TO request_drafts;
+        `);
+        this.#recordMigration(COMPOSED_TARGETS_MIGRATION);
+      })();
+    } finally {
+      this.#driver.pragma("foreign_keys = ON");
+    }
+    const violation = this.#driver.prepare("PRAGMA foreign_key_check").get();
+    if (violation !== undefined) {
+      throw new Error("Composed target migration violated a foreign key");
+    }
   }
 
   /** Records one successfully applied schema migration. */

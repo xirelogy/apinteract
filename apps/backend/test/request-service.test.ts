@@ -48,10 +48,16 @@ describe("RequestService draft updates", () => {
         workspaces,
         audit,
       );
+      const variables = new VariableService(
+        database.db,
+        workspaces,
+        environments,
+        audit,
+      );
       const requests = new RequestService(
         database.db,
         workspaces,
-        new VariableService(database.db, workspaces, environments, audit),
+        variables,
         audit,
       );
       const workspace = await workspaces.create(userId, "Workspace");
@@ -165,10 +171,16 @@ describe("RequestService draft updates", () => {
         workspaces,
         audit,
       );
+      const variables = new VariableService(
+        database.db,
+        workspaces,
+        environments,
+        audit,
+      );
       const requests = new RequestService(
         database.db,
         workspaces,
-        new VariableService(database.db, workspaces, environments, audit),
+        variables,
         audit,
       );
       const workspace = await workspaces.create(userId, "Workspace");
@@ -699,6 +711,287 @@ describe("RequestService draft updates", () => {
       expect(
         await requests.listRevisions(userId, request.requestId),
       ).toHaveLength(4);
+    } finally {
+      await database.close();
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
+
+  it("composes nested collection paths and snapshots them for revisions", async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), "apinteract-paths-"));
+    const database = await SqliteDatabase.open(
+      join(rootPath, "database.sqlite"),
+    );
+    try {
+      const userId = createEntityId();
+      await database.db
+        .insertInto("users")
+        .values({
+          id: idToBytes(userId),
+          status: "active",
+          username: "path-test",
+          display_name: "Path Test",
+          is_instance_admin: 0,
+          created_at: Date.now(),
+          deleted_at: null,
+        })
+        .execute();
+      const audit = new AuditService(database.db, join(rootPath, "audit"));
+      const workspaces = new WorkspaceService(database.db, audit);
+      const environments = new EnvironmentService(
+        database.db,
+        workspaces,
+        audit,
+      );
+      const variables = new VariableService(
+        database.db,
+        workspaces,
+        environments,
+        audit,
+      );
+      const requests = new RequestService(
+        database.db,
+        workspaces,
+        variables,
+        audit,
+      );
+      const workspaceSummary = await workspaces.create(userId, "Workspace");
+      const workspace = await workspaces.get(
+        userId,
+        workspaceSummary.workspaceId,
+      );
+      const root = await requests.createCollection(
+        userId,
+        workspace.workspaceId,
+        null,
+        "API",
+      );
+      let rootView = await requests.getCollection(userId, root.nodeId);
+      rootView = await requests.updateCollection(
+        userId,
+        root.nodeId,
+        rootView.revision,
+        rootView.name,
+        [],
+        "",
+      );
+      const child = await requests.createCollection(
+        userId,
+        workspace.workspaceId,
+        root.nodeId,
+        "Users",
+      );
+      let childView = await requests.getCollection(userId, child.nodeId);
+      childView = await requests.updateCollection(
+        userId,
+        child.nodeId,
+        childView.revision,
+        childView.name,
+        [],
+        "https://api.example.test/root/v1/users/",
+      );
+      expect(childView.effectivePath).toBe(
+        "https://api.example.test/root/v1/users/",
+      );
+
+      const composed = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        child.nodeId,
+        "User",
+        "GET",
+        "/42",
+        [],
+        [],
+        "",
+        "",
+        "",
+        "composed",
+      );
+      expect(composed).toMatchObject({
+        targetMode: "composed",
+        inheritedTarget: "https://api.example.test/root/v1/users/",
+      });
+      const original = await requests.prepareExecution(
+        userId,
+        createEntityId(),
+        composed.requestId,
+      );
+      expect(original.request.targetUrl).toBe(
+        "https://api.example.test/root/v1/users/42",
+      );
+      if (original.revisionId === undefined) {
+        throw new Error("Missing composed request revision");
+      }
+      const composedDuplicate = await requests.duplicate(
+        userId,
+        composed.requestId,
+        "User copy",
+      );
+      expect(composedDuplicate.targetMode).toBe("composed");
+      expect(composedDuplicate.targetUrl).toBe("/42");
+
+      await requests.updateCollection(
+        userId,
+        root.nodeId,
+        rootView.revision,
+        rootView.name,
+        [],
+        "https://api.example.test/root/v2",
+      );
+      await requests.updateCollection(
+        userId,
+        child.nodeId,
+        childView.revision,
+        childView.name,
+        [],
+        "/users",
+      );
+      const current = await requests.prepareExecution(
+        userId,
+        createEntityId(),
+        composed.requestId,
+      );
+      expect(current.request.targetUrl).toBe(
+        "https://api.example.test/root/v2/users/42",
+      );
+      const historical = await requests.prepareRevisionExecution(
+        userId,
+        createEntityId(),
+        composed.requestId,
+        original.revisionId,
+      );
+      expect(historical.request.targetUrl).toBe(
+        "https://api.example.test/root/v1/users/42",
+      );
+
+      const absolute = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        child.nodeId,
+        "Status",
+        "GET",
+        "https://status.example.test/health",
+        [],
+        [],
+        "",
+      );
+      const absoluteExecution = await requests.prepareExecution(
+        userId,
+        createEntityId(),
+        absolute.requestId,
+      );
+      expect(absoluteExecution.request.targetUrl).toBe(
+        "https://status.example.test/health",
+      );
+
+      const serviceRoot = await requests.createCollection(
+        userId,
+        workspace.workspaceId,
+        null,
+        "Service root",
+      );
+      const serviceRootView = await requests.getCollection(
+        userId,
+        serviceRoot.nodeId,
+      );
+      await requests.updateCollection(
+        userId,
+        serviceRoot.nodeId,
+        serviceRootView.revision,
+        serviceRootView.name,
+        [],
+        "https://root.example.test/api",
+      );
+      const rootComposed = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        serviceRoot.nodeId,
+        "Root-composed",
+        "GET",
+        "/health",
+        [],
+        [],
+        "",
+        "",
+        "",
+        "composed",
+      );
+      const rootExecution = await requests.prepareExecution(
+        userId,
+        createEntityId(),
+        rootComposed.requestId,
+      );
+      expect(rootExecution.request.targetUrl).toBe(
+        "https://root.example.test/api/health",
+      );
+
+      const variableRoot = await requests.createCollection(
+        userId,
+        workspace.workspaceId,
+        null,
+        "Variable service",
+      );
+      const variableRootView = await requests.getCollection(
+        userId,
+        variableRoot.nodeId,
+      );
+      await requests.updateCollection(
+        userId,
+        variableRoot.nodeId,
+        variableRootView.revision,
+        variableRootView.name,
+        [],
+        "<<service_url>>/<<api_version>>",
+      );
+      const variableLeaf = await requests.createCollection(
+        userId,
+        workspace.workspaceId,
+        variableRoot.nodeId,
+        "Variable resource",
+      );
+      await requests.updateCollection(
+        userId,
+        variableLeaf.nodeId,
+        0,
+        "Variable resource",
+        [],
+        "/<<resource>>",
+      );
+      await variables.update(userId, "collection", variableRoot.nodeId, 0, [
+        {
+          name: "service_url",
+          kind: "value",
+          value: "https://variables.example.test/root",
+        },
+        { name: "api_version", kind: "value", value: "v3" },
+      ]);
+      await variables.update(userId, "collection", variableLeaf.nodeId, 0, [
+        { name: "resource", kind: "value", value: "users" },
+        { name: "identifier", kind: "value", value: "42" },
+      ]);
+      const variableRequest = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        variableLeaf.nodeId,
+        "Variable target",
+        "GET",
+        "/<<identifier>>",
+        [],
+        [],
+        "",
+        "",
+        "",
+        "composed",
+      );
+      const variableExecution = await requests.prepareExecution(
+        userId,
+        createEntityId(),
+        variableRequest.requestId,
+      );
+      expect(variableExecution.request.targetUrl).toBe(
+        "https://variables.example.test/root/v3/users/42",
+      );
     } finally {
       await database.close();
       await rm(rootPath, { recursive: true, force: true });

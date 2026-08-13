@@ -1,6 +1,9 @@
 import type { VariableResolver } from "../environments/variable-resolver.js";
 import type { EntityId } from "../foundation/id.js";
-import type { PreparedExecution } from "../requests/request-service.js";
+import {
+  joinTargetComponents,
+  type PreparedExecution,
+} from "../requests/request-service.js";
 import {
   ScriptExecutionError,
   type ScriptLogEntry,
@@ -98,12 +101,16 @@ export function preRequestScriptView(
   request: PreparedExecution["request"],
   resolver: VariableResolver,
 ): ScriptRequest {
+  const targetTemplate =
+    request.targetMode === "composed"
+      ? joinTargetComponents(request.targetComponents ?? [request.targetUrl])
+      : request.targetUrl;
   return {
     method: request.method,
     url: {
-      value: request.targetUrl,
+      value: targetTemplate,
       readable: true,
-      sensitive: isSensitiveTemplate(request.targetUrl, resolver),
+      sensitive: isSensitiveTemplate(targetTemplate, resolver),
     },
     headers: request.headers.map((header) => ({
       name: header.name,
@@ -177,7 +184,9 @@ export function executionRequestFromScript(
   return {
     ...original,
     method: scripted.method as PreparedExecution["request"]["method"],
+    targetMode: "absolute",
     targetUrl,
+    targetComponents: [targetUrl],
     query,
     headers,
     body: body.kind === "text" ? (body.text ?? "") : "",
@@ -193,8 +202,12 @@ export function postResponseScriptView(
   materialized: PreparedExecution["request"],
   resolver: VariableResolver,
 ): ScriptRequest {
+  const templateTarget =
+    template.targetMode === "composed"
+      ? joinTargetComponents(template.targetComponents ?? [template.targetUrl])
+      : template.targetUrl;
   const urlSensitive =
-    isSensitiveTemplate(template.targetUrl, resolver) ||
+    isSensitiveTemplate(templateTarget, resolver) ||
     template.query.some(
       (field) => field.enabled && isSensitiveTemplate(field.value, resolver),
     );

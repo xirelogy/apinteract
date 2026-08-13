@@ -38,6 +38,7 @@ describe("MainPage", () => {
       method: "GET" as const,
       targetMode: "absolute" as const,
       targetUrl: "https://example.test",
+      inheritedTarget: "",
       queryMode: "structured" as const,
       query: [],
       headers: [],
@@ -58,6 +59,7 @@ describe("MainPage", () => {
           draft: {
             name: request.name,
             method: request.method,
+            targetMode: request.targetMode,
             targetUrl: request.targetUrl,
             query: [],
             headers: [],
@@ -67,6 +69,7 @@ describe("MainPage", () => {
           },
           baseline: null,
           pendingParentCollectionId: null,
+          inheritedTarget: "",
           inheritedHeaders: [],
           execution: null,
           revisions: [revision],

@@ -832,7 +832,7 @@
 
 .request-editor {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -909,9 +909,65 @@
 
 .target-row {
   display: grid;
-  grid-template-columns: 5.75rem minmax(0, 1fr);
+  grid-template-columns: 5.75rem 3.5rem minmax(0, 1fr);
   gap: var(--space-2);
   margin-top: var(--space-4);
+}
+
+.target-mode-picker {
+  --select-trigger-padding-inline: var(--space-1);
+  --select-trigger-gap: 0;
+}
+
+.target-mode-picker .select-menu-selected {
+  justify-content: center;
+}
+
+.target-mode-picker .select-menu-selected > svg {
+  flex: 0 0 auto;
+}
+
+.target-mode-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.composed-target-inputs {
+  display: flex;
+  min-width: 0;
+}
+
+.composed-target-inputs .template-text-control:first-child,
+.composed-target-inputs .template-text-control:first-child input {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.composed-target-inputs .template-text-control:last-child,
+.composed-target-inputs .template-text-control:last-child input {
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+}
+
+.composed-target-inputs .template-text-control:last-child {
+  min-width: 7rem;
+  flex: 1 1 auto;
+  margin-inline-start: -1px;
+}
+
+.composed-target-inputs .template-text-control:focus-within {
+  z-index: 2;
+}
+
+.inherited-target-input {
+  max-width: none;
+  flex: 0 0 auto;
+  background: var(--surface-secondary);
+}
+
+.inherited-target-input input {
+  color: var(--text-secondary);
 }
 
 .method-picker {
@@ -1746,7 +1802,7 @@
   }
 
   .target-row {
-    grid-template-columns: 5.25rem minmax(0, 1fr);
+    grid-template-columns: 5.25rem 3.5rem minmax(0, 1fr);
   }
 
   .request-field-heading,

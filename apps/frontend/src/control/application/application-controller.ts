@@ -149,6 +149,7 @@ export class ApplicationController {
     workspaceId: string,
     expectedRevision: number,
     name: string,
+    baseUrl: string,
     headers: readonly RequestField[],
     expectedVariableRevision: number,
     variables: readonly VariableWrite[],
@@ -156,7 +157,7 @@ export class ApplicationController {
     await this.#run(async () => {
       const workspace = await this.#webSocket.command<WorkspaceView>(
         "workspace.update",
-        { workspaceId, expectedRevision, name, headers },
+        { workspaceId, expectedRevision, name, baseUrl, headers },
       );
       const store = useApplicationStore();
       store.selectedWorkspace = workspace;
@@ -179,6 +180,7 @@ export class ApplicationController {
         },
       );
       store.selectedVariableProfile = profile;
+      await this.#refreshOpenRequestContexts(workspaceId);
       await this.#refreshVariablePreviews();
     });
   }
@@ -459,6 +461,7 @@ export class ApplicationController {
           result.targetParentCollectionId,
         );
       }
+      await this.#refreshOpenRequestContexts(workspaceId);
     });
   }
 
@@ -491,6 +494,7 @@ export class ApplicationController {
     collectionId: string,
     expectedRevision: number,
     name: string,
+    pathPrefix: string,
     headers: readonly RequestField[],
     expectedVariableRevision: number,
     variables: readonly VariableWrite[],
@@ -498,7 +502,7 @@ export class ApplicationController {
     await this.#run(async () => {
       const collection = await this.#webSocket.command<CollectionView>(
         "collection.update",
-        { collectionId, expectedRevision, name, headers },
+        { collectionId, expectedRevision, name, pathPrefix, headers },
       );
       const store = useApplicationStore();
       if (store.selectedCollectionId === collectionId) {
@@ -518,6 +522,7 @@ export class ApplicationController {
         },
       );
       store.selectedVariableProfile = profile;
+      await this.#refreshOpenRequestContexts(collection.workspaceId);
       await this.#refreshVariablePreviews();
     });
   }
@@ -636,6 +641,15 @@ export class ApplicationController {
       draft: emptyDraft(),
       baseline: null,
       pendingParentCollectionId: parentCollectionId,
+      inheritedTarget:
+        parentCollectionId === null
+          ? (store.selectedWorkspace?.baseUrl ?? "")
+          : store.selectedCollectionId === parentCollectionId
+            ? joinTargetPreview(
+                store.selectedWorkspace?.baseUrl ?? "",
+                store.selectedCollection?.effectivePath ?? "",
+              )
+            : "",
       inheritedHeaders:
         parentCollectionId === null
           ? (store.selectedWorkspace?.headers.map((field) => ({ ...field })) ??
@@ -825,6 +839,7 @@ export class ApplicationController {
         draft: savedDraft,
         baseline: cloneDraft(savedDraft),
         pendingParentCollectionId: null,
+        inheritedTarget: request.inheritedTarget,
         inheritedHeaders: request.inheritedHeaders.map((field) => ({
           ...field,
         })),
@@ -1017,6 +1032,7 @@ export class ApplicationController {
       draft,
       baseline: cloneDraft(draft),
       pendingParentCollectionId: null,
+      inheritedTarget: request.inheritedTarget,
       inheritedHeaders: request.inheritedHeaders.map((field) => ({
         ...field,
       })),
@@ -1029,6 +1045,103 @@ export class ApplicationController {
     store.activeRequestTabId = tab.tabId;
     store.selectedCollectionId = null;
     store.selectedCollection = null;
+  }
+
+  /** Refreshes inherited request metadata without replacing editable drafts. */
+  async #refreshOpenRequestContexts(workspaceId: string): Promise<void> {
+    const store = useApplicationStore();
+    const tabs = store.requestTabs.filter(
+      (tab) => tab.workspaceId === workspaceId,
+    );
+    const requestIds = [
+      ...new Set(
+        tabs.flatMap((tab) =>
+          tab.request === null ? [] : [tab.request.requestId],
+        ),
+      ),
+    ];
+    const temporaryCollectionIds = [
+      ...new Set(
+        tabs.flatMap((tab) =>
+          tab.request === null && tab.pendingParentCollectionId !== null
+            ? [tab.pendingParentCollectionId]
+            : [],
+        ),
+      ),
+    ];
+    const selectedCollectionId =
+      store.selectedWorkspaceId === workspaceId
+        ? store.selectedCollectionId
+        : null;
+    const collectionIds = [
+      ...new Set([
+        ...temporaryCollectionIds,
+        ...(selectedCollectionId === null ? [] : [selectedCollectionId]),
+      ]),
+    ];
+    const [requests, collections] = await Promise.all([
+      Promise.all(
+        requestIds.map((requestId) =>
+          this.#webSocket.command<RequestView>("request.get", { requestId }),
+        ),
+      ),
+      Promise.all(
+        collectionIds.map((collectionId) =>
+          this.#webSocket.command<CollectionView>("collection.get", {
+            collectionId,
+          }),
+        ),
+      ),
+    ]);
+    const requestById = new Map(
+      requests.map((request) => [request.requestId, request]),
+    );
+    const collectionById = new Map(
+      collections.map((collection) => [collection.collectionId, collection]),
+    );
+    const workspace =
+      store.selectedWorkspaceId === workspaceId
+        ? store.selectedWorkspace
+        : null;
+    store.requestTabs = store.requestTabs.map((tab) => {
+      if (tab.workspaceId !== workspaceId) return tab;
+      if (tab.request !== null) {
+        const request = requestById.get(tab.request.requestId);
+        return request === undefined
+          ? tab
+          : {
+              ...tab,
+              request,
+              inheritedTarget: request.inheritedTarget,
+              inheritedHeaders: request.inheritedHeaders.map((field) => ({
+                ...field,
+              })),
+            };
+      }
+      const collection =
+        tab.pendingParentCollectionId === null
+          ? null
+          : (collectionById.get(tab.pendingParentCollectionId) ?? null);
+      return {
+        ...tab,
+        inheritedTarget:
+          collection === null
+            ? (workspace?.baseUrl ?? tab.inheritedTarget)
+            : joinTargetPreview(
+                workspace?.baseUrl ?? "",
+                collection.effectivePath,
+              ),
+        inheritedHeaders:
+          collection === null
+            ? (workspace?.headers.map((field) => ({ ...field })) ??
+              tab.inheritedHeaders)
+            : collection.effectiveHeaders.map((field) => ({ ...field })),
+      };
+    });
+    if (selectedCollectionId !== null) {
+      store.selectedCollection =
+        collectionById.get(selectedCollectionId) ?? store.selectedCollection;
+    }
   }
 
   /** Refreshes revision summaries without nesting request-tab busy state. */
@@ -1141,6 +1254,7 @@ function emptyDraft(): RequestDraftInput {
   return {
     name: "",
     method: "GET",
+    targetMode: "composed",
     targetUrl: "",
     query: [],
     headers: [],
@@ -1155,6 +1269,7 @@ function requestToDraft(request: RequestView): RequestDraftInput {
   return {
     name: request.name,
     method: request.method,
+    targetMode: request.targetMode,
     targetUrl: request.targetUrl,
     query: request.query.map((field) => ({ ...field })),
     headers: request.headers.map((field) => ({ ...field })),
@@ -1173,10 +1288,18 @@ function cloneDraft(draft: RequestDraftInput): RequestDraftInput {
   };
 }
 
+/** Joins an inherited target and local path across a single slash boundary. */
+function joinTargetPreview(prefix: string, path: string): string {
+  if (prefix === "") return path;
+  if (path === "") return prefix;
+  return `${prefix.replace(/\/+$/u, "")}/${path.replace(/^\/+/u, "")}`;
+}
+
 /** Removes the editor-only name from a temporary execution snapshot. */
 function executableDraft(draft: RequestDraftInput) {
   return {
     method: draft.method,
+    targetMode: draft.targetMode,
     targetUrl: draft.targetUrl,
     query: draft.query,
     headers: draft.headers,

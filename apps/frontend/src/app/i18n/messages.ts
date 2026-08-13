@@ -41,6 +41,10 @@ export const enUsMessages = {
     options: "Options",
   },
   workspace: {
+    baseUrl: "Base URL",
+    baseUrlHint:
+      "Used with collection and request paths for composed requests.",
+    baseUrlPlaceholder: "https://api.example.com",
     collections: "Collections",
     create: "Create workspace",
     createRequest: "Create request",
@@ -93,6 +97,10 @@ export const enUsMessages = {
     headersDescription:
       "Enabled headers apply to requests in this collection and its descendants.",
     name: "Collection name",
+    pathPrefix: "Target prefix",
+    pathPrefixHint:
+      "Use an absolute URL if this is the first non-empty target component; otherwise use a path. Current effective prefix: {path}",
+    pathPrefixPlaceholder: "/v1/resources or https://api.example.com",
     new: "New collection",
     newRequest: "New request",
     newSubcollection: "New subcollection",
@@ -234,7 +242,17 @@ export const enUsMessages = {
     selectTitle: "Select a request",
     send: "Send",
     temporary: "Temporary",
+    inheritedTarget: "Inherited target",
+    requestPath: "Request path",
+    requestPathPlaceholder: "/resource/{id}",
+    targetMode: "Target mode",
+    targetModes: {
+      absolute: "Absolute",
+      composed: "Composed",
+    },
+    targetUnavailable: "Configure an absolute workspace or collection prefix",
     targetUrl: "Target URL",
+    targetUrlPlaceholder: "https://api.example.com/resource",
     variables: "Manage request variables",
     untitled: "Untitled request",
     unsavedChanges: "Unsaved changes",

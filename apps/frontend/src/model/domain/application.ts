@@ -26,6 +26,7 @@ export interface ApplicationError {
 export interface RequestDraftInput {
   readonly name: string;
   readonly method: HttpMethod;
+  readonly targetMode: "absolute" | "composed";
   readonly targetUrl: string;
   readonly query: readonly RequestField[];
   readonly headers: readonly RequestField[];
@@ -41,6 +42,7 @@ export interface RequestTab {
   readonly draft: RequestDraftInput;
   readonly baseline: RequestDraftInput | null;
   readonly pendingParentCollectionId: string | null;
+  readonly inheritedTarget: string;
   readonly inheritedHeaders: readonly RequestField[];
   readonly execution: ExecutionView | null;
   readonly revisions: readonly RequestRevisionSummary[];

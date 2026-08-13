@@ -25,6 +25,7 @@ import type { WorkspaceService } from "../workspaces/workspace-service.js";
 import {
   normalizeName,
   ResourceNotFoundError,
+  validateBaseUrlTemplate,
 } from "../workspaces/workspace-service.js";
 
 export interface TreeNodeView {
@@ -58,6 +59,8 @@ export interface CollectionView {
   readonly workspaceId: EntityId;
   readonly parentCollectionId: EntityId | null;
   readonly name: string;
+  readonly pathPrefix: string;
+  readonly effectivePath: string;
   readonly headers: readonly RequestField[];
   /** Contains the enabled root-to-current header overlay for presentation. */
   readonly effectiveHeaders: readonly RequestField[];
@@ -70,8 +73,10 @@ export interface RequestView {
   readonly parentCollectionId: EntityId | null;
   readonly name: string;
   readonly method: HttpMethod;
-  readonly targetMode: "absolute";
+  readonly targetMode: "absolute" | "composed";
   readonly targetUrl: string;
+  /** Shows the currently inherited target components before interpolation. */
+  readonly inheritedTarget: string;
   readonly queryMode: "structured";
   readonly query: readonly RequestField[];
   readonly headers: readonly RequestField[];
@@ -99,6 +104,7 @@ export interface RequestRevisionView extends RequestRevisionSummary {
 
 export interface RequestExecutionInput {
   readonly method: HttpMethod;
+  readonly targetMode?: "absolute" | "composed";
   readonly targetUrl: string;
   readonly query: readonly RequestField[];
   readonly headers: readonly RequestField[];
@@ -110,6 +116,8 @@ export interface RequestExecutionInput {
 export interface ExecutionRequestSnapshot extends RequestExecutionInput {
   readonly workspaceId: EntityId;
   readonly requestId?: EntityId;
+  readonly targetMode: "absolute" | "composed";
+  readonly targetComponents?: readonly string[];
   readonly bodyBytes?: Uint8Array;
   readonly preRequestScript: string;
   readonly postResponseScript: string;
@@ -136,7 +144,7 @@ interface RequestRow {
   readonly parent_collection_id: Uint8Array | null;
   readonly name: string;
   readonly method: HttpMethod;
-  readonly target_mode: "absolute";
+  readonly target_mode: "absolute" | "composed";
   readonly target_url: string;
   readonly query_mode: "structured";
   readonly query_json: string;
@@ -152,8 +160,9 @@ interface RequestRow {
 interface RevisionContent {
   readonly name?: string;
   readonly method: HttpMethod;
-  readonly targetMode: "absolute";
+  readonly targetMode: "absolute" | "composed";
   readonly targetUrl: string;
+  readonly effectiveTargetComponents?: readonly string[];
   readonly queryMode: "structured";
   readonly query: readonly RequestField[];
   readonly headers: readonly RequestField[];
@@ -171,6 +180,7 @@ interface CollectionRow {
   readonly name: string;
   readonly profile_revision: number | null;
   readonly headers_json: string | null;
+  readonly path_prefix: string | null;
   readonly order_revision: number;
 }
 
@@ -574,9 +584,11 @@ export class RequestService {
     expectedRevision: number,
     name: string,
     headers: readonly RequestField[],
+    pathPrefix = "",
   ): Promise<CollectionView> {
     const normalizedName = normalizeName(name);
     const normalizedHeaders = validateHeaders(headers);
+    const normalizedPathPrefix = validateCollectionTargetTemplate(pathPrefix);
     const headersJson = JSON.stringify(normalizedHeaders);
     return this.#database.transaction().execute(async (transaction) => {
       const row = await this.#collectionRow(transaction, collectionId);
@@ -590,7 +602,8 @@ export class RequestService {
       }
       const nameChanged = row.name !== normalizedName;
       const headersChanged = (row.headers_json ?? "[]") !== headersJson;
-      if (!nameChanged && !headersChanged) {
+      const pathChanged = (row.path_prefix ?? "") !== normalizedPathPrefix;
+      if (!nameChanged && !headersChanged && !pathChanged) {
         return this.#collectionView(transaction, row);
       }
       const revision = currentRevision + 1;
@@ -602,6 +615,7 @@ export class RequestService {
             collection_id: idToBytes(collectionId),
             revision,
             headers_json: headersJson,
+            path_prefix: normalizedPathPrefix,
             updated_by: idToBytes(userId),
             updated_at: now,
           })
@@ -620,6 +634,7 @@ export class RequestService {
           .set({
             revision,
             headers_json: headersJson,
+            path_prefix: normalizedPathPrefix,
             updated_by: idToBytes(userId),
             updated_at: now,
           })
@@ -644,11 +659,23 @@ export class RequestService {
         type: "collection.updated",
         actorUserId: userId,
         workspaceId,
-        data: { collectionId, revision, nameChanged, headersChanged },
+        data: {
+          collectionId,
+          revision,
+          nameChanged,
+          headersChanged,
+          pathChanged,
+        },
       });
       return {
         ...mapCollection(row),
         name: normalizedName,
+        pathPrefix: normalizedPathPrefix,
+        effectivePath: await this.#resolveCollectionPath(
+          transaction,
+          row.parent_collection_id,
+          normalizedPathPrefix,
+        ),
         headers: normalizedHeaders,
         effectiveHeaders: await this.#resolveHeaders(
           transaction,
@@ -746,6 +773,7 @@ export class RequestService {
       expectedRevision,
       row.name,
       headers,
+      row.path_prefix ?? "",
     );
   }
 
@@ -762,9 +790,11 @@ export class RequestService {
     body: string,
     preRequestScript = "",
     postResponseScript = "",
+    targetMode: "absolute" | "composed" = "absolute",
   ): Promise<RequestView> {
     const content = normalizeExecutionInput({
       method,
+      targetMode,
       targetUrl,
       query,
       headers,
@@ -808,7 +838,7 @@ export class RequestService {
           request_id: idToBytes(requestId),
           draft_revision: 0,
           method: content.method,
-          target_mode: "absolute",
+          target_mode: content.targetMode,
           target_url: content.targetUrl,
           query_mode: "structured",
           query_json: JSON.stringify(content.query),
@@ -844,8 +874,24 @@ export class RequestService {
         parentCollectionId,
         name: normalizedName,
         method: content.method,
-        targetMode: "absolute",
+        targetMode: content.targetMode,
         targetUrl: content.targetUrl,
+        inheritedTarget:
+          content.targetMode === "composed"
+            ? joinTargetComponents(
+                (
+                  await this.#targetComponents(
+                    transaction,
+                    idToBytes(workspaceId),
+                    parentCollectionId === null
+                      ? null
+                      : idToBytes(parentCollectionId),
+                    content.targetMode,
+                    content.targetUrl,
+                  )
+                ).slice(0, -1),
+              )
+            : "",
         queryMode: "structured",
         query: content.query,
         headers: content.headers,
@@ -1038,6 +1084,7 @@ export class RequestService {
       content.body,
       content.preRequestScript,
       content.postResponseScript,
+      content.targetMode,
     );
   }
 
@@ -1072,6 +1119,11 @@ export class RequestService {
         workspaceId,
         parentCollectionId,
       );
+      const duplicatePosition = await this.#nextPosition(
+        transaction,
+        workspaceId,
+        parentCollectionId,
+      );
       const orderRevision =
         siblings.reduce(
           (revision, sibling) => Math.max(revision, sibling.orderRevision),
@@ -1086,7 +1138,10 @@ export class RequestService {
           workspace_id: source.workspace_id,
           parent_collection_id: source.parent_collection_id,
           kind: "request",
-          position: sourceIndex + 1,
+          // Existing siblings were moved into a temporary high range above.
+          // Allocate the duplicate at a fresh high position too; writing the
+          // final contiguous order below must never collide with a live row.
+          position: duplicatePosition,
           name: normalizedName,
           order_revision: orderRevision,
           created_at: now,
@@ -1157,10 +1212,12 @@ export class RequestService {
     body: string,
     preRequestScript = "",
     postResponseScript = "",
+    targetMode: "absolute" | "composed" = "absolute",
   ): Promise<RequestView> {
     const normalizedName = normalizeName(name);
     const content = normalizeExecutionInput({
       method,
+      targetMode,
       targetUrl,
       query,
       headers,
@@ -1180,6 +1237,7 @@ export class RequestService {
       if (
         row.name === normalizedName &&
         row.method === content.method &&
+        row.target_mode === content.targetMode &&
         row.target_url === content.targetUrl &&
         row.query_json === queryJson &&
         row.headers_json === headersJson &&
@@ -1199,6 +1257,7 @@ export class RequestService {
         .updateTable("request_drafts")
         .set({
           method: content.method,
+          target_mode: content.targetMode,
           target_url: content.targetUrl,
           query_json: queryJson,
           headers_json: headersJson,
@@ -1221,7 +1280,22 @@ export class RequestService {
         ...(await this.#requestView(transaction, row)),
         name: normalizedName,
         method: content.method,
+        targetMode: content.targetMode,
         targetUrl: content.targetUrl,
+        inheritedTarget:
+          content.targetMode === "composed"
+            ? joinTargetComponents(
+                (
+                  await this.#targetComponents(
+                    transaction,
+                    row.workspace_id,
+                    row.parent_collection_id,
+                    content.targetMode,
+                    content.targetUrl,
+                  )
+                ).slice(0, -1),
+              )
+            : "",
         query: content.query,
         headers: content.headers,
         body: content.body,
@@ -1235,6 +1309,7 @@ export class RequestService {
           ...row,
           name: normalizedName,
           method: content.method,
+          target_mode: content.targetMode,
           target_url: content.targetUrl,
           query_json: queryJson,
           headers_json: headersJson,
@@ -1318,7 +1393,18 @@ export class RequestService {
         request.parentCollectionId,
         requestId,
       );
-      const executionRequest = { ...request, headers: resolvedHeaders };
+      const targetComponents = await this.#targetComponents(
+        transaction,
+        row.workspace_id,
+        row.parent_collection_id,
+        request.targetMode,
+        request.targetUrl,
+      );
+      const executionRequest: ExecutionRequestSnapshot = {
+        ...request,
+        headers: resolvedHeaders,
+        targetComponents,
+      };
       const eagerlyComposed =
         request.preRequestScript === "" && request.postResponseScript === ""
           ? composeWithVariables(
@@ -1332,6 +1418,7 @@ export class RequestService {
         userId,
         "execution",
         resolvedHeaders,
+        targetComponents,
       );
       const executionId = createEntityId();
       const createdAt = Date.now();
@@ -1412,7 +1499,11 @@ export class RequestService {
         workspaceId,
         requestId,
         method: content.method,
+        targetMode: content.targetMode,
         targetUrl: content.targetUrl,
+        targetComponents: content.effectiveTargetComponents ?? [
+          content.targetUrl,
+        ],
         query: content.query,
         headers: effectiveHeaders,
         body: content.body,
@@ -1506,6 +1597,13 @@ export class RequestService {
         parentCollectionId === null ? null : idToBytes(parentCollectionId),
         localRequest.headers,
       );
+      const targetComponents = await this.#targetComponents(
+        transaction,
+        idToBytes(workspaceId),
+        parentCollectionId === null ? null : idToBytes(parentCollectionId),
+        localRequest.targetMode,
+        localRequest.targetUrl,
+      );
       const variableProfile = await this.#variables.effectiveProfile(
         transaction,
         sessionId,
@@ -1513,7 +1611,11 @@ export class RequestService {
         parentCollectionId,
         null,
       );
-      const executionRequest = { ...localRequest, headers: resolvedHeaders };
+      const executionRequest: ExecutionRequestSnapshot = {
+        ...localRequest,
+        headers: resolvedHeaders,
+        targetComponents,
+      };
       const eagerlyComposed =
         localRequest.preRequestScript === "" &&
         localRequest.postResponseScript === ""
@@ -1586,6 +1688,7 @@ export class RequestService {
     userId: EntityId,
     creationReason: "manual_save" | "execution",
     effectiveHeaders?: readonly RequestField[],
+    effectiveTargetComponents?: readonly string[],
   ): Promise<EntityId> {
     const resolvedHeaders =
       effectiveHeaders ??
@@ -1595,7 +1698,18 @@ export class RequestService {
         row.parent_collection_id,
         JSON.parse(row.headers_json) as RequestField[],
       ));
-    const content = JSON.stringify(revisionContent(row, resolvedHeaders));
+    const targetComponents =
+      effectiveTargetComponents ??
+      (await this.#targetComponents(
+        transaction,
+        row.workspace_id,
+        row.parent_collection_id,
+        row.target_mode,
+        row.target_url,
+      ));
+    const content = JSON.stringify(
+      revisionContent(row, resolvedHeaders, targetComponents),
+    );
     const fingerprint = createHash("sha256").update(content).digest("hex");
     const latest = await transaction
       .selectFrom("request_revisions")
@@ -1740,6 +1854,7 @@ export class RequestService {
         "node.name",
         "profile.revision as profile_revision",
         "profile.headers_json",
+        "profile.path_prefix",
         "node.order_revision",
       ])
       .where("node.id", "=", idToBytes(collectionId))
@@ -1759,6 +1874,11 @@ export class RequestService {
     const collection = mapCollection(row);
     return {
       ...collection,
+      effectivePath: await this.#resolveCollectionPath(
+        database,
+        row.parent_collection_id,
+        collection.pathPrefix,
+      ),
       effectiveHeaders: await this.#resolveHeaders(
         database,
         row.workspace_id,
@@ -1768,13 +1888,98 @@ export class RequestService {
     };
   }
 
+  /** Returns a request's absolute component or composed root-to-leaf parts. */
+  async #targetComponents(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    workspaceId: Uint8Array,
+    parentCollectionId: Uint8Array | null,
+    targetMode: "absolute" | "composed",
+    requestTarget: string,
+  ): Promise<readonly string[]> {
+    if (targetMode === "absolute") return [requestTarget];
+    const workspace = await database
+      .selectFrom("workspaces")
+      .select("base_url_template")
+      .where("id", "=", workspaceId)
+      .executeTakeFirst();
+    if (workspace === undefined) {
+      throw new ResourceNotFoundError("Workspace not found");
+    }
+    return [
+      workspace.base_url_template,
+      ...(await this.#collectionPathParts(database, parentCollectionId)),
+      requestTarget,
+    ];
+  }
+
+  /** Resolves local collection prefixes in deterministic root-to-leaf order. */
+  async #collectionPathParts(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    collectionId: Uint8Array | null,
+  ): Promise<string[]> {
+    const parts: string[] = [];
+    const visited = new Set<string>();
+    let currentId = collectionId;
+    while (currentId !== null) {
+      const key = Buffer.from(currentId).toString("hex");
+      if (visited.has(key) || visited.size >= 64) {
+        throw new Error("Collection hierarchy is cyclic or too deep");
+      }
+      visited.add(key);
+      const row = await database
+        .selectFrom("workspace_tree_nodes as node")
+        .leftJoin(
+          "collection_profiles as profile",
+          "profile.collection_id",
+          "node.id",
+        )
+        .select(["node.parent_collection_id", "profile.path_prefix"])
+        .where("node.id", "=", currentId)
+        .where("node.kind", "=", "collection")
+        .executeTakeFirst();
+      if (row === undefined) {
+        throw new ResourceNotFoundError("Parent collection not found");
+      }
+      parts.unshift(row.path_prefix ?? "");
+      currentId = row.parent_collection_id;
+    }
+    return parts;
+  }
+
+  /** Joins collection target components for an effective-prefix view. */
+  async #resolveCollectionPath(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    parentCollectionId: Uint8Array | null,
+    localPath: string,
+  ): Promise<string> {
+    return joinTargetComponents([
+      ...(await this.#collectionPathParts(database, parentCollectionId)),
+      localPath,
+    ]);
+  }
+
   /** Builds a request view with effective collection headers kept read-only. */
   async #requestView(
     database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
     row: RequestRow,
   ): Promise<RequestView> {
+    const request = mapRequest(row);
     return {
-      ...mapRequest(row),
+      ...request,
+      inheritedTarget:
+        request.targetMode === "composed"
+          ? joinTargetComponents(
+              (
+                await this.#targetComponents(
+                  database,
+                  row.workspace_id,
+                  row.parent_collection_id,
+                  request.targetMode,
+                  "",
+                )
+              ).slice(0, -1),
+            )
+          : "",
       inheritedHeaders: await this.#resolveHeaders(
         database,
         row.workspace_id,
@@ -2189,6 +2394,71 @@ function validateTargetTemplate(value: string): string {
   return validateTargetUrl(value);
 }
 
+/** Accepts an absolute base template or a path contributed by a collection. */
+function validateCollectionTargetTemplate(value: string): string {
+  return value.includes("://")
+    ? validateBaseUrlTemplate(value)
+    : validatePathTemplate(value);
+}
+
+/** Validates a composed-request path template without URL data. */
+function validatePathTemplate(value: string): string {
+  if (
+    value.length > 8192 ||
+    value.includes("?") ||
+    value.includes("#") ||
+    value.includes("\\") ||
+    value.includes("://") ||
+    value.startsWith("//") ||
+    containsControlCharacter(value) ||
+    /%(?![\dA-Fa-f]{2})/u.test(value)
+  ) {
+    throw new Error("Path template is invalid");
+  }
+  return value;
+}
+
+/** Detects prohibited ASCII controls without embedding them in a regexp. */
+function containsControlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 31 || codePoint === 127;
+  });
+}
+
+/** Validates one persisted immutable target component defensively. */
+function validateTargetComponentSnapshot(value: string): string {
+  if (typeof value !== "string" || value.length > 8192) {
+    throw new Error("Revision target component is invalid");
+  }
+  return value;
+}
+
+/** Joins non-empty target components with one slash at each boundary. */
+export function joinTargetComponents(components: readonly string[]): string {
+  const nonEmpty = components.filter((component) => component !== "");
+  return nonEmpty.reduce((joined, component, index) => {
+    if (index === 0) return component;
+    return `${joined.replace(/\/+$/u, "")}/${component.replace(/^\/+/u, "")}`;
+  }, "");
+}
+
+/** Requires the first resolved component to establish an absolute target. */
+function composeResolvedTargetComponents(
+  components: readonly string[],
+): string {
+  const nonEmpty = components.filter((component) => component !== "");
+  const base = nonEmpty[0];
+  if (base === undefined) {
+    throw new Error("Composed target has no absolute base URL");
+  }
+  validateTargetUrl(base);
+  for (const path of nonEmpty.slice(1)) {
+    validatePathTemplate(path);
+  }
+  return validateTargetUrl(joinTargetComponents(nonEmpty));
+}
+
 /** Accepts one method from the request editor's supported HTTP method set. */
 function validateMethod(value: string): HttpMethod {
   switch (value) {
@@ -2282,15 +2552,21 @@ function validateScript(value: string): string {
 }
 
 /** Normalizes and validates content shared by saved and temporary executions. */
-function normalizeExecutionInput(
-  input: RequestExecutionInput,
-): RequestExecutionInput & {
+function normalizeExecutionInput(input: RequestExecutionInput): Omit<
+  RequestExecutionInput,
+  "targetMode"
+> & {
+  readonly targetMode: "absolute" | "composed";
   readonly preRequestScript: string;
   readonly postResponseScript: string;
 } {
   return {
     method: validateMethod(input.method),
-    targetUrl: validateTargetTemplate(input.targetUrl),
+    targetMode: input.targetMode ?? "absolute",
+    targetUrl:
+      (input.targetMode ?? "absolute") === "composed"
+        ? validatePathTemplate(input.targetUrl)
+        : validateTargetTemplate(input.targetUrl),
     query: validateQuery(input.query),
     headers: validateHeaders(input.headers),
     body: validateBody(input.body),
@@ -2315,8 +2591,17 @@ export function composeWithVariables(
       references.set(item.variableId, item);
     }
   };
-  const target = resolver.interpolate(request.targetUrl);
-  retain(target.secretReferences);
+  const targetParts = (request.targetComponents ?? [request.targetUrl]).map(
+    (component) => resolver.interpolate(component),
+  );
+  for (const component of targetParts) retain(component.secretReferences);
+  const targetValue =
+    request.targetMode === "composed"
+      ? composeResolvedTargetComponents(
+          targetParts.map((component) => component.value),
+        )
+      : (targetParts[0]?.value ?? "");
+  const targetSecret = targetParts.some((component) => component.secret);
   const query = request.query.map((field) => {
     if (!field.enabled) {
       return { materialized: field, persisted: field };
@@ -2344,7 +2629,8 @@ export function composeWithVariables(
   if (body !== null) retain(body.secretReferences);
   const materialized: ExecutionRequestSnapshot = {
     ...request,
-    targetUrl: validateTargetUrl(target.value),
+    targetMode: "absolute",
+    targetUrl: validateTargetUrl(targetValue),
     query: validateQuery(query.map((field) => field.materialized)),
     headers: validateHeaders(headers.map((field) => field.materialized)),
     body: body === null ? "" : validateBody(body.value),
@@ -2353,7 +2639,8 @@ export function composeWithVariables(
     request: materialized,
     persisted: {
       method: materialized.method,
-      targetUrl: target.secret ? "[secret]" : materialized.targetUrl,
+      targetMode: "absolute",
+      targetUrl: targetSecret ? "[secret]" : materialized.targetUrl,
       query: query.map((field) => field.persisted),
       headers: headers.map((field) => field.persisted),
       body:
@@ -2376,7 +2663,7 @@ function mapRequest(row: {
   readonly parent_collection_id: Uint8Array | null;
   readonly name: string;
   readonly method: HttpMethod;
-  readonly target_mode: "absolute";
+  readonly target_mode: "absolute" | "composed";
   readonly target_url: string;
   readonly query_mode: "structured";
   readonly query_json: string;
@@ -2385,7 +2672,7 @@ function mapRequest(row: {
   readonly pre_request_script: string;
   readonly post_response_script: string;
   readonly draft_revision: number;
-}): Omit<RequestView, "inheritedHeaders"> {
+}): Omit<RequestView, "inheritedHeaders" | "inheritedTarget"> {
   return {
     requestId: bytesToId(row.request_id),
     workspaceId: bytesToId(row.workspace_id),
@@ -2411,6 +2698,7 @@ function mapRequest(row: {
 function revisionContent(
   row: RequestRow,
   effectiveHeaders: readonly RequestField[],
+  effectiveTargetComponents: readonly string[],
 ): RevisionContent {
   const request = mapRequest(row);
   return {
@@ -2418,6 +2706,7 @@ function revisionContent(
     method: request.method,
     targetMode: request.targetMode,
     targetUrl: request.targetUrl,
+    effectiveTargetComponents,
     queryMode: request.queryMode,
     query: request.query,
     headers: effectiveHeaders,
@@ -2433,6 +2722,7 @@ function parseRevisionContent(value: string): RevisionContent {
   const parsed = JSON.parse(value) as Partial<RevisionContent>;
   const normalized = normalizeExecutionInput({
     method: validateMethod(parsed.method ?? ""),
+    targetMode: parsed.targetMode ?? "absolute",
     targetUrl: parsed.targetUrl ?? "",
     query: parsed.query ?? [],
     headers: parsed.headers ?? [],
@@ -2443,8 +2733,15 @@ function parseRevisionContent(value: string): RevisionContent {
   return {
     ...(parsed.name === undefined ? {} : { name: normalizeName(parsed.name) }),
     method: normalized.method,
-    targetMode: "absolute",
+    targetMode: normalized.targetMode,
     targetUrl: normalized.targetUrl,
+    ...(parsed.effectiveTargetComponents === undefined
+      ? {}
+      : {
+          effectiveTargetComponents: parsed.effectiveTargetComponents.map(
+            validateTargetComponentSnapshot,
+          ),
+        }),
     queryMode: "structured",
     query: normalized.query,
     headers: normalized.headers,
@@ -2473,7 +2770,14 @@ function revisionRequestView(
     ...current,
     name: content.name ?? current.name,
     method: content.method,
+    targetMode: content.targetMode,
     targetUrl: content.targetUrl,
+    inheritedTarget:
+      content.targetMode === "composed"
+        ? joinTargetComponents(
+            (content.effectiveTargetComponents ?? []).slice(0, -1),
+          )
+        : "",
     query: content.query,
     headers: localHeaders,
     inheritedHeaders:
@@ -2496,7 +2800,8 @@ function mapCollection(row: {
   readonly name: string;
   readonly profile_revision: number | null;
   readonly headers_json: string | null;
-}): Omit<CollectionView, "effectiveHeaders"> {
+  readonly path_prefix: string | null;
+}): Omit<CollectionView, "effectiveHeaders" | "effectivePath"> {
   return {
     collectionId: bytesToId(row.id),
     workspaceId: bytesToId(row.workspace_id),
@@ -2505,6 +2810,7 @@ function mapCollection(row: {
         ? null
         : bytesToId(row.parent_collection_id),
     name: row.name,
+    pathPrefix: row.path_prefix ?? "",
     headers: JSON.parse(row.headers_json ?? "[]") as RequestField[],
     revision: row.profile_revision ?? 0,
   };

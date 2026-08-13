@@ -6,7 +6,16 @@ import {
   ref,
   watch,
 } from "vue";
-import { Asterisk, History, Lock, Play, Save, Trash2 } from "@lucide/vue";
+import {
+  Asterisk,
+  Globe2,
+  History,
+  Lock,
+  Play,
+  Route,
+  Save,
+  Trash2,
+} from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -59,6 +68,7 @@ const props = withDefaults(
     execution: ExecutionView | null;
     tabId: string | null;
     temporary: boolean;
+    inheritedTarget?: string;
     inheritedHeaders: readonly RequestField[];
     requestVariableProfile?: VariableProfileView | null;
     variablePreviews?: readonly VariablePreview[];
@@ -69,6 +79,7 @@ const props = withDefaults(
     viewingRevision?: RequestRevisionView | null;
   }>(),
   {
+    inheritedTarget: "",
     variablePreviews: () => [],
     requestVariableProfile: null,
     previewContextKey: null,
@@ -107,6 +118,10 @@ const methodOptions = methods.map((option) => ({
   value: option,
   label: option,
 }));
+const targetModeOptions = computed(() => [
+  { value: "composed", label: t("request.targetModes.composed") },
+  { value: "absolute", label: t("request.targetModes.absolute") },
+]);
 const requestTabs = [
   "query",
   "headers",
@@ -118,6 +133,7 @@ const requestTabs = [
 ] as const;
 const name = ref("");
 const method = ref<HttpMethod>("GET");
+const targetMode = ref<"absolute" | "composed">("composed");
 const targetUrl = ref("");
 const query = ref<RequestField[]>([]);
 const headers = ref<RequestField[]>([]);
@@ -143,6 +159,7 @@ watch(
     const source = revision?.request ?? draft;
     name.value = source?.name ?? "";
     method.value = source?.method ?? "GET";
+    targetMode.value = source?.targetMode ?? "composed";
     targetUrl.value = source?.targetUrl ?? "";
     query.value = editableRequestFields(source?.query ?? [], true);
     headers.value = editableRequestFields(source?.headers ?? [], true);
@@ -167,7 +184,26 @@ watch(
   },
   { immediate: true },
 );
-const validTarget = computed(() => isValidTargetTemplate(targetUrl.value));
+const validTarget = computed(() =>
+  targetMode.value === "composed"
+    ? isValidPathTemplate(targetUrl.value) &&
+      isValidComposedPrefix(props.inheritedTarget)
+    : isValidTargetTemplate(targetUrl.value),
+);
+const displayedInheritedTarget = computed(() => {
+  if (props.inheritedTarget === "" || targetUrl.value === "") {
+    return props.inheritedTarget;
+  }
+  if (targetUrl.value.startsWith("/")) {
+    return props.inheritedTarget.replace(/\/+$/u, "");
+  }
+  return props.inheritedTarget.endsWith("/")
+    ? props.inheritedTarget
+    : `${props.inheritedTarget}/`;
+});
+const inheritedTargetWidth = computed(
+  () => `${Math.max(displayedInheritedTarget.value.length, 1) + 4}ch`,
+);
 const queryCount = computed(() => meaningfulRequestFields(query.value).length);
 const headerCount = computed(
   () =>
@@ -176,6 +212,7 @@ const headerCount = computed(
 );
 const referencedVariableNames = computed(() =>
   collectTemplateVariableNames([
+    ...(targetMode.value === "composed" ? [props.inheritedTarget] : []),
     targetUrl.value,
     ...query.value.map((field) => field.value),
     ...headers.value.map((field) => field.value),
@@ -229,6 +266,27 @@ function isValidTargetTemplate(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Requires an inherited chain to begin with a literal or variable URL base. */
+function isValidComposedPrefix(value: string): boolean {
+  return (
+    value.startsWith("http://") ||
+    value.startsWith("https://") ||
+    value.startsWith("<<")
+  );
+}
+
+/** Accepts path-only composed target templates before backend interpolation. */
+function isValidPathTemplate(value: string): boolean {
+  return (
+    value.length <= 8192 &&
+    !value.includes("?") &&
+    !value.includes("#") &&
+    !value.includes("\\") &&
+    !value.includes("://") &&
+    !value.startsWith("//")
+  );
 }
 
 /** Debounces metadata lookup while preserving uninterrupted request editing. */
@@ -303,6 +361,7 @@ function currentDraft(): RequestDraftInput {
   return {
     name: name.value,
     method: method.value,
+    targetMode: targetMode.value,
     targetUrl: targetUrl.value,
     query: meaningfulRequestFields(query.value),
     headers: meaningfulRequestFields(headers.value),
@@ -317,6 +376,7 @@ function emitChange(): void {
   emit("change", {
     name: name.value,
     method: method.value,
+    targetMode: targetMode.value,
     targetUrl: targetUrl.value,
     query: meaningfulRequestFields(query.value),
     headers: meaningfulRequestFields(headers.value),
@@ -330,6 +390,14 @@ function emitChange(): void {
 function selectMethod(value: string): void {
   method.value = value as HttpMethod;
   emitChange();
+}
+
+/** Applies a target mode and publishes it with the current draft. */
+function selectTargetMode(value: string): void {
+  if (value === "absolute" || value === "composed") {
+    targetMode.value = value;
+    emitChange();
+  }
 }
 
 /** Returns the translated label for a request settings tab. */
@@ -527,12 +595,69 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               <span class="method-option">{{ option.label }}</span>
             </template>
           </SelectMenu>
+          <SelectMenu
+            class="target-mode-picker"
+            :model-value="targetMode"
+            :options="targetModeOptions"
+            :label="t('request.targetMode')"
+            :disabled="editorDisabled"
+            @update:model-value="selectTargetMode"
+          >
+            <template #selected="{ option }">
+              <Globe2
+                v-if="option?.value === 'absolute'"
+                :size="17"
+                aria-hidden="true"
+              />
+              <Route v-else :size="17" aria-hidden="true" />
+            </template>
+            <template #option="{ option }">
+              <span class="target-mode-option">
+                <Globe2
+                  v-if="option.value === 'absolute'"
+                  :size="17"
+                  aria-hidden="true"
+                />
+                <Route v-else :size="17" aria-hidden="true" />
+                <span>{{ option.label }}</span>
+              </span>
+            </template>
+          </SelectMenu>
+          <div v-if="targetMode === 'composed'" class="composed-target-inputs">
+            <TemplateTextControl
+              :model-value="displayedInheritedTarget"
+              class="url-template-input inherited-target-input"
+              :style="{ width: inheritedTargetWidth }"
+              font="mono"
+              :previews="variablePreviews"
+              :aria-label="t('request.inheritedTarget')"
+              readonly
+              inputmode="url"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <TemplateTextControl
+              v-model="targetUrl"
+              class="url-template-input request-path-input"
+              font="mono"
+              :previews="variablePreviews"
+              :aria-label="t('request.requestPath')"
+              :placeholder="t('request.requestPathPlaceholder')"
+              inputmode="url"
+              autocomplete="off"
+              spellcheck="false"
+              :disabled="editorDisabled"
+              @input="emitChange"
+            />
+          </div>
           <TemplateTextControl
+            v-else
             v-model="targetUrl"
             class="url-template-input"
             font="mono"
             :previews="variablePreviews"
             :aria-label="t('request.targetUrl')"
+            :placeholder="t('request.targetUrlPlaceholder')"
             inputmode="url"
             autocomplete="off"
             spellcheck="false"

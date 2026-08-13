@@ -91,4 +91,112 @@ describe("SqliteDatabase migrations", () => {
       await rm(rootPath, { recursive: true, force: true });
     }
   });
+
+  it("preserves scripts when upgrading the legacy request draft layout", async () => {
+    const rootPath = await mkdtemp(
+      join(tmpdir(), "apinteract-composed-target-migration-"),
+    );
+    const databasePath = join(rootPath, "apinteract.sqlite3");
+    const backupDirectory = join(rootPath, "backups");
+
+    try {
+      const current = await SqliteDatabase.open(databasePath, backupDirectory);
+      await current.close();
+      const driver = new BetterSqlite3(databasePath);
+      const userId = Buffer.alloc(16, 1);
+      const workspaceId = Buffer.alloc(16, 2);
+      const requestId = Buffer.alloc(16, 3);
+      const now = Date.now();
+      driver
+        .prepare(
+          "INSERT INTO users VALUES (?, 'active', 'script-migration-user', 'Script Migration User', 0, ?, NULL)",
+        )
+        .run(userId, now);
+      driver
+        .prepare(
+          "INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, 'Workspace', ?, ?)",
+        )
+        .run(workspaceId, userId, now);
+      driver
+        .prepare(
+          "INSERT INTO workspace_tree_nodes VALUES (?, ?, NULL, 'request', 0, 'Existing request', 0, ?)",
+        )
+        .run(requestId, workspaceId, now);
+      driver
+        .prepare(
+          `INSERT INTO request_drafts (
+            request_id, draft_revision, method, target_mode, target_url,
+            query_mode, query_json, headers_json, body_text,
+            pre_request_script, post_response_script, updated_by, updated_at
+          ) VALUES (?, 4, 'POST', 'absolute', 'https://example.test/legacy',
+            'structured', '[]', '[]', 'legacy body', ?, ?, ?, ?)`,
+        )
+        .run(
+          requestId,
+          'asdk.log.info("before");',
+          'asdk.test("after", () => {});',
+          userId,
+          now,
+        );
+
+      driver.pragma("foreign_keys = OFF");
+      driver.exec(`
+        CREATE TABLE request_drafts_legacy (
+          request_id BLOB PRIMARY KEY REFERENCES workspace_tree_nodes(id) ON DELETE CASCADE,
+          draft_revision INTEGER NOT NULL CHECK(draft_revision >= 0),
+          method TEXT NOT NULL CHECK(method IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS')),
+          target_mode TEXT NOT NULL CHECK(target_mode = 'absolute'),
+          target_url TEXT NOT NULL,
+          query_mode TEXT NOT NULL CHECK(query_mode = 'structured'),
+          query_json TEXT NOT NULL,
+          headers_json TEXT NOT NULL,
+          body_text TEXT NOT NULL,
+          updated_by BLOB NOT NULL REFERENCES users(id),
+          updated_at INTEGER NOT NULL,
+          pre_request_script TEXT NOT NULL DEFAULT '',
+          post_response_script TEXT NOT NULL DEFAULT ''
+        ) STRICT;
+        INSERT INTO request_drafts_legacy (
+          request_id, draft_revision, method, target_mode, target_url,
+          query_mode, query_json, headers_json, body_text, updated_by,
+          updated_at, pre_request_script, post_response_script
+        )
+        SELECT
+          request_id, draft_revision, method, target_mode, target_url,
+          query_mode, query_json, headers_json, body_text, updated_by,
+          updated_at, pre_request_script, post_response_script
+        FROM request_drafts;
+        DROP TABLE request_drafts;
+        ALTER TABLE request_drafts_legacy RENAME TO request_drafts;
+        ALTER TABLE workspaces DROP COLUMN base_url_template;
+        ALTER TABLE collection_profiles DROP COLUMN path_prefix;
+        DELETE FROM schema_migrations WHERE id = '0011_composed_targets';
+      `);
+      driver.pragma("foreign_keys = ON");
+      driver.close();
+
+      const migrated = await SqliteDatabase.open(databasePath, backupDirectory);
+      const draft = await migrated.db
+        .selectFrom("request_drafts")
+        .select([
+          "target_mode",
+          "target_url",
+          "pre_request_script",
+          "post_response_script",
+          "updated_by",
+        ])
+        .where("request_id", "=", requestId)
+        .executeTakeFirstOrThrow();
+      expect(draft).toEqual({
+        target_mode: "absolute",
+        target_url: "https://example.test/legacy",
+        pre_request_script: 'asdk.log.info("before");',
+        post_response_script: 'asdk.test("after", () => {});',
+        updated_by: userId,
+      });
+      await migrated.close();
+    } finally {
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
 });

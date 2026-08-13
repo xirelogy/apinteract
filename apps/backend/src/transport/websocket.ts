@@ -179,6 +179,7 @@ async function dispatch(
         requireInteger(command.payload.expectedRevision, "expectedRevision"),
         requireString(command.payload.name, "name"),
         requireRequestFields(command.payload.headers, "headers"),
+        requireOptionalString(command.payload.baseUrl, "baseUrl"),
       );
     case "workspace.delete":
       return application.workspaces.delete(
@@ -236,6 +237,7 @@ async function dispatch(
         requireInteger(command.payload.expectedRevision, "expectedRevision"),
         requireString(command.payload.name, "name"),
         requireRequestFields(command.payload.headers, "headers"),
+        requireOptionalString(command.payload.pathPrefix, "pathPrefix"),
       );
     case "collection.headers.update":
       return application.requests.updateCollectionHeaders(
@@ -326,7 +328,7 @@ async function dispatch(
         optionalString(command.payload.parentCollectionId),
         requireString(command.payload.name, "name"),
         requireMethod(command.payload.method),
-        requireString(command.payload.targetUrl, "targetUrl"),
+        requireStringAllowEmpty(command.payload.targetUrl, "targetUrl"),
         requireRequestFields(command.payload.query, "query"),
         requireRequestFields(command.payload.headers, "headers"),
         requireBody(command.payload.body),
@@ -335,6 +337,7 @@ async function dispatch(
           command.payload.postResponseScript,
           "postResponseScript",
         ),
+        requireTargetMode(command.payload.targetMode),
       );
     case "request.get":
       return application.requests.get(
@@ -387,7 +390,7 @@ async function dispatch(
         ),
         requireString(command.payload.name, "name"),
         requireMethod(command.payload.method),
-        requireString(command.payload.targetUrl, "targetUrl"),
+        requireStringAllowEmpty(command.payload.targetUrl, "targetUrl"),
         requireRequestFields(command.payload.query, "query"),
         requireRequestFields(command.payload.headers, "headers"),
         requireBody(command.payload.body),
@@ -396,6 +399,7 @@ async function dispatch(
           command.payload.postResponseScript,
           "postResponseScript",
         ),
+        requireTargetMode(command.payload.targetMode),
       );
     case "request.delete":
       return application.requests.delete(
@@ -639,6 +643,28 @@ function requireMethod(value: unknown): HttpMethod {
   throw new CommandError("validation_failed", "method is not supported.");
 }
 
+/** Requires an explicit saved-request target interpretation. */
+function requireTargetMode(value: unknown): "absolute" | "composed" {
+  if (value === "absolute" || value === "composed") return value;
+  throw new CommandError(
+    "validation_failed",
+    "targetMode must be absolute or composed.",
+  );
+}
+
+/** Accepts a string field while treating omission as a compatibility blank. */
+function requireOptionalString(value: unknown, name: string): string {
+  return value === undefined ? "" : requireStringAllowEmpty(value, name);
+}
+
+/** Requires a string field whose empty value has domain meaning. */
+function requireStringAllowEmpty(value: unknown, name: string): string {
+  if (typeof value !== "string") {
+    throw new CommandError("validation_failed", `${name} must be a string.`);
+  }
+  return value;
+}
+
 /** Validates the shape of editable query or header field arrays. */
 function requireRequestFields(value: unknown, name: string): RequestField[] {
   if (!Array.isArray(value)) {
@@ -800,7 +826,8 @@ function requireExecutionInput(value: unknown): RequestExecutionInput {
   const request = value as Record<string, unknown>;
   return {
     method: requireMethod(request.method),
-    targetUrl: requireString(request.targetUrl, "targetUrl"),
+    targetMode: requireTargetMode(request.targetMode),
+    targetUrl: requireStringAllowEmpty(request.targetUrl, "targetUrl"),
     query: requireRequestFields(request.query, "query"),
     headers: requireRequestFields(request.headers, "headers"),
     body: requireBody(request.body),

@@ -313,6 +313,8 @@ export interface components {
         workspaceId: components["schemas"]["WorkspaceId"];
         expectedRevision: number;
         name: string;
+        /** @description Absolute HTTP URL template used as the root of composed request targets; blank disables composition until configured. */
+        baseUrl: string;
         headers: components["schemas"]["RequestField"][];
       };
     } & {
@@ -420,6 +422,8 @@ export interface components {
         collectionId: components["schemas"]["CollectionId"];
         expectedRevision: number;
         name: string;
+        /** @description An absolute HTTP(S) URL template when this collection is the first non-empty target component, or a path template appended to an earlier component. */
+        pathPrefix: string;
         headers: components["schemas"]["RequestField"][];
       };
     } & {
@@ -612,7 +616,9 @@ export interface components {
         parentCollectionId: components["schemas"]["CollectionId"] | null;
         name: string;
         method: components["schemas"]["HttpMethod"];
-        /** @description Absolute HTTP URL template validated after variable interpolation. */
+        /** @enum {string} */
+        targetMode: "absolute" | "composed";
+        /** @description Absolute URL template or composed request-local path. */
         targetUrl: string;
         query: components["schemas"]["RequestField"][];
         headers: components["schemas"]["RequestField"][];
@@ -720,7 +726,9 @@ export interface components {
         expectedDraftRevision: number;
         name: string;
         method: components["schemas"]["HttpMethod"];
-        /** @description Absolute HTTP URL template validated after variable interpolation. */
+        /** @enum {string} */
+        targetMode: "absolute" | "composed";
+        /** @description Absolute URL template or composed request-local path. */
         targetUrl: string;
         query: components["schemas"]["RequestField"][];
         headers: components["schemas"]["RequestField"][];
@@ -840,6 +848,7 @@ export interface components {
       name: string;
       /** @enum {string} */
       role: "owner" | "editor" | "viewer";
+      baseUrl: string;
       headers: components["schemas"]["RequestField"][];
       revision: number;
     };
@@ -977,6 +986,10 @@ export interface components {
       workspaceId: components["schemas"]["WorkspaceId"];
       parentCollectionId: components["schemas"]["CollectionId"] | null;
       name: string;
+      /** @description An absolute HTTP(S) URL template when this collection is the first non-empty target component, or a path template appended to an earlier component. */
+      pathPrefix: string;
+      /** @description Root-to-current collection target prefix. It may include an absolute URL established by the first non-empty collection component. */
+      effectivePath: string;
       headers: components["schemas"]["RequestField"][];
       /** @description Effective enabled headers after applying ancestor and local collection profiles. */
       effectiveHeaders: components["schemas"]["RequestField"][];
@@ -988,10 +1001,12 @@ export interface components {
       parentCollectionId: components["schemas"]["CollectionId"] | null;
       name: string;
       method: components["schemas"]["HttpMethod"];
-      /** @constant */
-      targetMode: "absolute";
-      /** @description Absolute HTTP URL template validated after variable interpolation. */
+      /** @enum {string} */
+      targetMode: "absolute" | "composed";
+      /** @description Absolute URL template in absolute mode, or a path-only template in composed mode. */
       targetUrl: string;
+      /** @description Current composed workspace and collection target prefix before the request-local path. */
+      inheritedTarget: string;
       /** @constant */
       queryMode: "structured";
       query: components["schemas"]["RequestField"][];
@@ -1069,7 +1084,9 @@ export interface components {
     };
     RequestExecutionInput: {
       method: components["schemas"]["HttpMethod"];
-      /** @description Absolute HTTP URL template validated after variable interpolation. */
+      /** @enum {string} */
+      targetMode: "absolute" | "composed";
+      /** @description Absolute URL template or composed request-local path. */
       targetUrl: string;
       query: components["schemas"]["RequestField"][];
       headers: components["schemas"]["RequestField"][];

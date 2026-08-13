@@ -16,6 +16,8 @@ This directory contains the public documentation for APInteract.
   lifecycle, and domain-specific extension contracts.
 - [Scripting](scripting/README.md): write pre-request and post-response
   JavaScript scripts and understand their available helpers and limits.
+- [Request targets](requests/README.md): compose request URLs from workspace
+  base URLs, nested collection paths, variables, and request-local paths.
 - [All-in-one deployment](../deploy/aio/README.md): source-built container
   operation, storage, configuration, and verification.
 

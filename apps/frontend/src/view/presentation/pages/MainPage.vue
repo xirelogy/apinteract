@@ -119,6 +119,12 @@ const displayedInheritedHeaders = computed(
     activeTab.value?.inheritedHeaders ??
     [],
 );
+const displayedInheritedTarget = computed(
+  () =>
+    activeTab.value?.viewingRevision?.request.inheritedTarget ??
+    activeTab.value?.inheritedTarget ??
+    "",
+);
 const variablePreviewContextKey = computed(() =>
   [
     selectedWorkspaceId.value ?? "",
@@ -479,6 +485,7 @@ async function downloadExecutionBody(executionId: string): Promise<void> {
 /** Saves every editable property for the selected collection. */
 async function saveCollectionProperties(
   name: string,
+  pathPrefix: string,
   headers: readonly RequestField[],
   variables: readonly VariableWrite[],
 ): Promise<void> {
@@ -496,6 +503,7 @@ async function saveCollectionProperties(
     collection.collectionId,
     collection.revision,
     name,
+    pathPrefix,
     headers,
     profile.revision,
     variables,
@@ -506,6 +514,7 @@ async function saveCollectionProperties(
 /** Saves every editable property for the selected workspace. */
 async function saveWorkspaceProperties(
   name: string,
+  baseUrl: string,
   headers: readonly RequestField[],
   variables: readonly VariableWrite[],
 ): Promise<void> {
@@ -523,6 +532,7 @@ async function saveWorkspaceProperties(
     workspace.workspaceId,
     workspace.revision,
     name,
+    baseUrl,
     headers,
     profile.revision,
     variables,
@@ -720,6 +730,7 @@ function discardRequestTab(): void {
           :execution="activeTab?.execution ?? null"
           :tab-id="activeTab?.tabId ?? null"
           :temporary="activeTab?.request === null"
+          :inherited-target="displayedInheritedTarget"
           :inherited-headers="displayedInheritedHeaders"
           :request-variable-profile="requestVariableProfile"
           :variable-previews="variablePreviews"
