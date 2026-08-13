@@ -1034,6 +1034,34 @@ export interface components {
       scriptLogs: components["schemas"]["ScriptLogEntry"][];
       scriptTests: components["schemas"]["ScriptTestResult"][];
       scriptError?: components["schemas"]["ScriptPhaseError"];
+      outgoingRequest?: components["schemas"]["OutgoingRequestView"];
+    };
+    /** @description Secret-redacted representation of the materialized request handed to the proxy. It is absent when execution fails before proxy dispatch. */
+    OutgoingRequestView: {
+      method: components["schemas"]["HttpMethod"];
+      url: components["schemas"]["InspectableRequestValue"];
+      headers: components["schemas"]["InspectableRequestHeader"][];
+      body: components["schemas"]["InspectableRequestBody"];
+    };
+    InspectableRequestValue: {
+      value: string;
+      redacted: boolean;
+    };
+    InspectableRequestHeader: {
+      name: string;
+      value: string;
+      redacted: boolean;
+      /** @description Whether the value is simulated from final transport semantics rather than supplied as a proxy header field. */
+      derived: boolean;
+    };
+    InspectableRequestBody: {
+      value: string;
+      /** @enum {string} */
+      encoding: "utf8" | "base64";
+      byteLength: number;
+      redacted: boolean;
+      /** @description Whether the displayed value is only a bounded prefix of the outgoing body. */
+      truncated: boolean;
     };
     HeaderField: {
       name: string;

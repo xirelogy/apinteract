@@ -18,7 +18,7 @@ const emit = defineEmits<{
 }>();
 const { t } = useI18n();
 
-type ResponseDetailTab = "headers" | "raw" | "scripts";
+type ResponseDetailTab = "request" | "headers" | "raw" | "scripts";
 const selectedTab = ref<ResponseDetailTab>("raw");
 
 type ScriptLog = ExecutionView["scriptLogs"][number];
@@ -108,9 +108,19 @@ const visibleDetailTabs = computed<readonly ResponseDetailTab[]>(() => {
   const execution = props.execution;
   if (execution === null) return [];
   if (execution.error === undefined || execution.state === "running") {
-    return ["raw", "headers", "scripts"];
+    return [
+      ...(execution.outgoingRequest === undefined
+        ? ([] as const)
+        : (["request"] as const)),
+      "raw",
+      "headers",
+      "scripts",
+    ];
   }
   return [
+    ...(execution.outgoingRequest === undefined
+      ? ([] as const)
+      : (["request"] as const)),
     ...(hasResponseHead.value ? (["raw", "headers"] as const) : ([] as const)),
     ...(scriptResultCards.value.length > 0
       ? (["scripts"] as const)
@@ -224,6 +234,13 @@ function formatScriptLocation(error: ScriptError): string {
     >
       <TabsList class="response-tabs" :label="t('response.details')">
         <TabsTrigger
+          v-if="visibleDetailTabs.includes('request')"
+          class="tab-button"
+          value="request"
+        >
+          {{ t("response.request") }}
+        </TabsTrigger>
+        <TabsTrigger
           v-if="visibleDetailTabs.includes('raw')"
           class="tab-button"
           value="raw"
@@ -247,6 +264,62 @@ function formatScriptLocation(error: ScriptError): string {
           <span class="tab-count">{{ scriptResultCards.length }}</span>
         </TabsTrigger>
       </TabsList>
+      <TabsPanel
+        v-if="visibleDetailTabs.includes('request')"
+        value="request"
+        class="response-content outgoing-request"
+      >
+        <div v-if="execution.outgoingRequest" class="outgoing-request-content">
+          <div class="outgoing-request-line">
+            <strong>{{ execution.outgoingRequest.method }}</strong>
+            <code>{{ execution.outgoingRequest.url.value }}</code>
+          </div>
+          <section>
+            <h3>{{ t("response.requestHeaders") }}</h3>
+            <div
+              v-for="(header, index) in execution.outgoingRequest.headers"
+              :key="`${index}-${header.name}`"
+              class="header-row"
+            >
+              <span>
+                {{ header.name }}
+                <small v-if="header.derived" class="derived-header-badge">
+                  {{ t("response.derivedHeader") }}
+                </small>
+              </span>
+              <span>{{ header.value }}</span>
+            </div>
+            <div
+              v-if="execution.outgoingRequest.headers.length === 0"
+              class="outgoing-request-empty"
+            >
+              {{ t("response.noRequestHeaders") }}
+            </div>
+          </section>
+          <section>
+            <h3>
+              {{ t("response.requestBody") }}
+              <small>
+                {{ formatBytes(execution.outgoingRequest.body.byteLength) }}
+                <template
+                  v-if="execution.outgoingRequest.body.encoding === 'base64'"
+                >
+                  · {{ t("response.base64Encoded") }}
+                </template>
+                <template v-if="execution.outgoingRequest.body.truncated">
+                  · {{ t("response.previewTruncated") }}
+                </template>
+              </small>
+            </h3>
+            <pre class="request-body-preview">{{
+              execution.outgoingRequest.body.value || t("response.emptyBody")
+            }}</pre>
+          </section>
+          <small class="outgoing-request-note">
+            {{ t("response.secretRedactionNote") }}
+          </small>
+        </div>
+      </TabsPanel>
       <TabsPanel
         v-if="visibleDetailTabs.includes('headers')"
         value="headers"

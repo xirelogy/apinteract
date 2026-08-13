@@ -2601,6 +2601,68 @@
           },
           "scriptError": {
             "$ref": "#/components/schemas/ScriptPhaseError"
+          },
+          "outgoingRequest": {
+            "$ref": "#/components/schemas/OutgoingRequestView"
+          }
+        }
+      },
+      "OutgoingRequestView": {
+        "type": "object",
+        "description": "Secret-redacted representation of the materialized request handed to the proxy. It is absent when execution fails before proxy dispatch.",
+        "additionalProperties": false,
+        "required": ["method", "url", "headers", "body"],
+        "properties": {
+          "method": { "$ref": "#/components/schemas/HttpMethod" },
+          "url": { "$ref": "#/components/schemas/InspectableRequestValue" },
+          "headers": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/InspectableRequestHeader" }
+          },
+          "body": { "$ref": "#/components/schemas/InspectableRequestBody" }
+        }
+      },
+      "InspectableRequestValue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["value", "redacted"],
+        "properties": {
+          "value": { "type": "string" },
+          "redacted": { "type": "boolean" }
+        }
+      },
+      "InspectableRequestHeader": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "value", "redacted", "derived"],
+        "properties": {
+          "name": { "type": "string" },
+          "value": { "type": "string" },
+          "redacted": { "type": "boolean" },
+          "derived": {
+            "type": "boolean",
+            "description": "Whether the value is simulated from final transport semantics rather than supplied as a proxy header field."
+          }
+        }
+      },
+      "InspectableRequestBody": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "value",
+          "encoding",
+          "byteLength",
+          "redacted",
+          "truncated"
+        ],
+        "properties": {
+          "value": { "type": "string", "maxLength": 262144 },
+          "encoding": { "type": "string", "enum": ["utf8", "base64"] },
+          "byteLength": { "type": "integer", "minimum": 0 },
+          "redacted": { "type": "boolean" },
+          "truncated": {
+            "type": "boolean",
+            "description": "Whether the displayed value is only a bounded prefix of the outgoing body."
           }
         }
       },

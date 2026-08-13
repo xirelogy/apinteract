@@ -56,13 +56,26 @@ describe("ExecutionService shutdown", () => {
         workspaces,
         audit,
       );
+      const variables = new VariableService(
+        database.db,
+        workspaces,
+        environments,
+        audit,
+      );
       const requests = new RequestService(
         database.db,
         workspaces,
-        new VariableService(database.db, workspaces, environments, audit),
+        variables,
         audit,
       );
       const workspace = await workspaces.create(userId, "Workspace");
+      await variables.update(userId, "workspace", workspace.workspaceId, 0, [
+        {
+          name: "test-host",
+          kind: "value",
+          value: "https://example.test",
+        },
+      ]);
       const request = await requests.createRequest(
         userId,
         workspace.workspaceId,
@@ -185,28 +198,50 @@ describe("ExecutionService shutdown", () => {
         workspaces,
         audit,
       );
+      const variables = new VariableService(
+        database.db,
+        workspaces,
+        environments,
+        audit,
+      );
       const requests = new RequestService(
         database.db,
         workspaces,
-        new VariableService(database.db, workspaces, environments, audit),
+        variables,
         audit,
       );
       const workspace = await workspaces.create(userId, "Workspace");
+      await variables.update(userId, "workspace", workspace.workspaceId, 0, [
+        {
+          name: "test-host",
+          kind: "value",
+          value: "https://example.test",
+        },
+        { name: "token", kind: "secret", value: "top-secret" },
+      ]);
       const request = await requests.createRequest(
         userId,
         workspace.workspaceId,
         null,
         "Scripted request",
         "GET",
-        "https://example.test/scripted",
+        "<<test-host>>/test",
         [],
-        [],
-        "",
+        [
+          {
+            name: "Authorization",
+            value: "Bearer <<token>>",
+            enabled: true,
+          },
+        ],
+        '{"token":"<<token>>"}',
         `
           asdk.request.setMethod("POST");
           asdk.request.headers.set("X-Scripted", "yes");
           asdk.local.set("prepared", "yes");
-          asdk.log.info("prepared request");
+          asdk.log.info("prepared request", {
+            url: asdk.request.url.get(),
+          });
         `,
         `
           asdk.test("response body", () => {
@@ -214,11 +249,15 @@ describe("ExecutionService shutdown", () => {
             asdk.assert.match(asdk.response.body.text(), /created/);
             asdk.assert.equal(asdk.local.get("prepared"), "yes");
           });
-          asdk.log.info("checked response");
+          asdk.log.info("checked response", {
+            url: asdk.request.url.get(),
+          });
         `,
       );
       const responseBody = Buffer.from('{"created":true}');
       let sentMethod = "";
+      let sentUrl = "";
+      let sentBody: Uint8Array = new Uint8Array();
       let sentHeaders: readonly {
         readonly name: string;
         readonly value: string;
@@ -229,7 +268,7 @@ describe("ExecutionService shutdown", () => {
           method: string,
           url: string,
           headers: readonly { readonly name: string; readonly value: string }[],
-          _body: Buffer,
+          body: Buffer,
           sink: {
             responseHead(value: unknown): Promise<void>;
             body(value: Buffer): Promise<void>;
@@ -239,8 +278,12 @@ describe("ExecutionService shutdown", () => {
           if (url.endsWith("/unavailable")) {
             throw new Error("The proxy is unavailable");
           }
-          sentMethod = method;
-          sentHeaders = headers;
+          if (url === "https://example.test/test") {
+            sentMethod = method;
+            sentUrl = url;
+            sentHeaders = headers;
+            sentBody = body;
+          }
           await sink.responseHead({
             type: "response_head",
             status: 201,
@@ -315,20 +358,71 @@ describe("ExecutionService shutdown", () => {
       await executions.close();
 
       expect(sentMethod).toBe("POST");
+      expect(sentUrl).toBe("https://example.test/test");
+      expect(Buffer.from(sentBody).toString("utf8")).toBe(
+        '{"token":"top-secret"}',
+      );
+      expect(sentHeaders).toContainEqual({
+        name: "Authorization",
+        value: "Bearer top-secret",
+      });
       expect(sentHeaders).toContainEqual({ name: "X-Scripted", value: "yes" });
+      expect(sentHeaders).toContainEqual({
+        name: "User-Agent",
+        value: "APInteract/0.0.0",
+      });
       const terminal = events.at(-1);
       expect(terminal?.type).toBe("execution.completed");
       expect(terminal?.payload).toMatchObject({
+        outgoingRequest: {
+          method: "POST",
+          url: { value: "https://example.test/test", redacted: false },
+          headers: [
+            {
+              name: "Host",
+              value: "example.test",
+              redacted: false,
+              derived: true,
+            },
+            {
+              name: "Authorization",
+              value: "[secret]",
+              redacted: true,
+              derived: false,
+            },
+            {
+              name: "X-Scripted",
+              value: "yes",
+              redacted: false,
+              derived: false,
+            },
+            {
+              name: "User-Agent",
+              value: "APInteract/0.0.0",
+              redacted: false,
+              derived: false,
+            },
+          ],
+          body: {
+            value: "[secret]",
+            encoding: "utf8",
+            byteLength: 22,
+            redacted: true,
+            truncated: false,
+          },
+        },
         scriptLogs: [
           {
             sequence: 1,
             phase: "pre-request",
             message: "prepared request",
+            fields: { url: "<<test-host>>/test" },
           },
           {
             sequence: 3,
             phase: "post-response",
             message: "checked response",
+            fields: { url: "https://example.test/test" },
           },
         ],
         scriptTests: [{ sequence: 2, name: "response body", status: "passed" }],

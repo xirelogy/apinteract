@@ -9,6 +9,72 @@ import type { ExecutionView } from "../src/model/contracts/backend";
 import ResponsePanel from "../src/view/presentation/features/ResponsePanel.vue";
 
 describe("ResponsePanel body transfer", () => {
+  it("shows the materialized outgoing request in its own result tab", async () => {
+    const execution: ExecutionView = {
+      executionId: "019fa8be-a510-76b9-b73b-69f4c7af7874",
+      state: "completed",
+      status: 200,
+      bodyComplete: true,
+      bodyBytes: 2,
+      createdAt: "2026-07-28T00:00:00.000Z",
+      completedAt: "2026-07-28T00:00:01.000Z",
+      outgoingRequest: {
+        method: "POST",
+        url: { value: "https://example.test/items?id=1", redacted: false },
+        headers: [
+          {
+            name: "Host",
+            value: "example.test",
+            redacted: false,
+            derived: true,
+          },
+          {
+            name: "content-type",
+            value: "application/json",
+            redacted: false,
+            derived: false,
+          },
+          {
+            name: "authorization",
+            value: "[secret]",
+            redacted: true,
+            derived: false,
+          },
+        ],
+        body: {
+          value: '{"name":"test"}',
+          encoding: "utf8",
+          byteLength: 15,
+          redacted: false,
+          truncated: false,
+        },
+      },
+      scriptLogs: [],
+      scriptTests: [],
+    };
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(ResponsePanel, {
+      props: { execution },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text() === "Request")
+      ?.trigger("click");
+    const request = wrapper.get(".outgoing-request-content");
+    expect(request.text()).toContain("POST");
+    expect(request.text()).toContain("https://example.test/items?id=1");
+    expect(request.text()).toContain("authorization");
+    expect(request.text()).toContain("[secret]");
+    expect(request.text()).toContain("Host derived");
+    expect(request.text()).toContain('{"name":"test"}');
+  });
+
   it("keeps non-previewable bytes downloadable through an emitted action", async () => {
     const execution: ExecutionView = {
       executionId: "019fa8be-a510-76b9-b73b-69f4c7af7875",

@@ -118,6 +118,8 @@ export interface ExecutionRequestSnapshot extends RequestExecutionInput {
 export interface PreparedExecution {
   readonly executionId: EntityId;
   readonly revisionId?: EntityId;
+  /** Retains templates solely for sensitivity-aware inspection after materialization. */
+  readonly templateRequest: ExecutionRequestSnapshot;
   readonly request: ExecutionRequestSnapshot;
   readonly variables: readonly ResolvedVariable[];
   readonly variableSources: ReadonlyMap<string, VariablePreviewSource>;
@@ -1377,6 +1379,7 @@ export class RequestService {
       return {
         executionId,
         revisionId,
+        templateRequest: executionRequest,
         request: eagerlyComposed?.request ?? executionRequest,
         variables: variableProfile.variables,
         variableSources: variableProfile.sources,
@@ -1471,6 +1474,7 @@ export class RequestService {
       return {
         executionId,
         revisionId,
+        templateRequest: request,
         request: eagerlyComposed?.request ?? request,
         variables: variableProfile.variables,
         variableSources: variableProfile.sources,
@@ -1564,6 +1568,7 @@ export class RequestService {
       });
       return {
         executionId,
+        templateRequest: executionRequest,
         request: eagerlyComposed?.request ?? executionRequest,
         variables: variableProfile.variables,
         variableSources: variableProfile.sources,

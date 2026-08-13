@@ -22,10 +22,12 @@ import { composeWithVariables } from "../requests/request-service.js";
 import { ScriptService } from "../scripting/script-service.js";
 import {
   ScriptExecutionError,
+  type ScriptRequest,
   type ScriptTestResult,
 } from "../scripting/script-types.js";
 import type { WorkspaceService } from "../workspaces/workspace-service.js";
 import { ResourceNotFoundError } from "../workspaces/workspace-service.js";
+import { DEFAULT_BACKEND_USER_AGENT } from "../version.js";
 import {
   executionRequestFromScript,
   postResponseScriptView,
@@ -40,6 +42,8 @@ import {
 
 type ResponseHead = ProxyComponents["schemas"]["ResponseHead"];
 type ResponseComplete = ProxyComponents["schemas"]["ResponseComplete"];
+/** Maximum characters retained in the WebSocket-safe outgoing body preview. */
+const OUTGOING_BODY_PREVIEW_CHARACTERS = 262_144;
 
 export interface ExecutionEvent {
   readonly type:
@@ -72,9 +76,32 @@ export interface ExecutionView {
     readonly message: string;
     readonly errors: readonly [];
   };
+  readonly outgoingRequest?: OutgoingRequestView;
   readonly scriptLogs: readonly PhasedScriptLog[];
   readonly scriptTests: readonly ScriptTestResult[];
   readonly scriptError?: ScriptPhaseError;
+}
+
+/** Secret-safe representation of the materialized request handed to the proxy. */
+export interface OutgoingRequestView {
+  readonly method: string;
+  readonly url: {
+    readonly value: string;
+    readonly redacted: boolean;
+  };
+  readonly headers: readonly {
+    readonly name: string;
+    readonly value: string;
+    readonly redacted: boolean;
+    readonly derived: boolean;
+  }[];
+  readonly body: {
+    readonly value: string;
+    readonly encoding: "utf8" | "base64";
+    readonly byteLength: number;
+    readonly redacted: boolean;
+    readonly truncated: boolean;
+  };
 }
 
 export interface ExecutionBody {
@@ -283,6 +310,7 @@ export class ExecutionService {
     const writer = this.#blobs.createWriter();
     let head: ResponseHead | undefined;
     let working = prepared;
+    let outgoingRequest: OutgoingRequestView | undefined;
     let local: Readonly<Record<string, string>> = {};
     let scripts: ScriptSummary = { logs: [], tests: [] };
     try {
@@ -305,12 +333,14 @@ export class ExecutionService {
             })),
             tests: [],
           };
+          const scriptedRequest = executionRequestFromScript(
+            prepared.request,
+            result.request,
+          );
           working = {
             ...prepared,
-            request: executionRequestFromScript(
-              prepared.request,
-              result.request,
-            ),
+            templateRequest: scriptedRequest,
+            request: scriptedRequest,
           };
         } catch (cause) {
           scripts = {
@@ -320,11 +350,17 @@ export class ExecutionService {
           throw cause;
         }
       }
+      working = {
+        ...working,
+        templateRequest: withDefaultUserAgent(working.templateRequest),
+        request: withDefaultUserAgent(working.request),
+      };
       if (!working.materialized) {
         const templateRequest = working.request;
         const composed = composeWithVariables(templateRequest, resolver);
         working = {
           ...working,
+          templateRequest,
           request: composed.request,
           postScriptRequest: postResponseScriptView(
             templateRequest,
@@ -348,6 +384,15 @@ export class ExecutionService {
           .where("id", "=", idToBytes(prepared.executionId))
           .execute();
       }
+      outgoingRequest = outgoingRequestView(
+        working.postScriptRequest ??
+          postResponseScriptView(
+            working.templateRequest,
+            working.request,
+            resolver,
+          ),
+        working.request,
+      );
       // Sink callbacks are awaited by ProxyClient, so filesystem writes apply
       // backpressure to the proxy response stream.
       await this.#proxy.execute(
@@ -394,13 +439,23 @@ export class ExecutionService {
               value,
               local,
               scripts,
+              outgoingRequest,
               publish,
             );
           },
         },
       );
     } catch (cause) {
-      await this.#fail(working, userId, writer, head, cause, scripts, publish);
+      await this.#fail(
+        working,
+        userId,
+        writer,
+        head,
+        cause,
+        scripts,
+        outgoingRequest,
+        publish,
+      );
     }
   }
 
@@ -413,6 +468,7 @@ export class ExecutionService {
     complete: ResponseComplete,
     local: Readonly<Record<string, string>>,
     scripts: ScriptSummary,
+    outgoingRequest: OutgoingRequestView | undefined,
     publish: (event: ExecutionEvent) => void,
   ): Promise<void> {
     if (head === undefined) {
@@ -522,6 +578,7 @@ export class ExecutionService {
       true,
       null,
       scripts,
+      outgoingRequest,
     );
     publish({
       type: "execution.completed",
@@ -538,6 +595,7 @@ export class ExecutionService {
     head: ResponseHead | undefined,
     cause: unknown,
     scripts: ScriptSummary,
+    outgoingRequest: OutgoingRequestView | undefined,
     publish: (event: ExecutionEvent) => void,
   ): Promise<void> {
     let blob: StoredBlob | undefined;
@@ -557,6 +615,7 @@ export class ExecutionService {
       false,
       error,
       scripts,
+      outgoingRequest,
     );
     publish({
       type: "execution.failed",
@@ -574,6 +633,7 @@ export class ExecutionService {
     bodyComplete: boolean,
     error: { readonly code: string; readonly message: string } | null,
     scripts: ScriptSummary,
+    outgoingRequest: OutgoingRequestView | undefined,
   ): Promise<ExecutionView> {
     const completedAt = Date.now();
     // The file is committed before this transaction. Blob metadata, its
@@ -658,11 +718,93 @@ export class ExecutionService {
       createdAt: new Date(prepared.createdAt).toISOString(),
       completedAt: new Date(completedAt).toISOString(),
       ...(error === null ? {} : { error: { ...error, errors: [] as const } }),
+      ...(outgoingRequest === undefined ? {} : { outgoingRequest }),
       scriptLogs: scripts.logs,
       scriptTests: scripts.tests,
       ...(scripts.error === undefined ? {} : { scriptError: scripts.error }),
     };
   }
+}
+
+/** Converts a sensitivity-aware script view into a user-inspectable request. */
+function outgoingRequestView(
+  request: ScriptRequest,
+  materialized: PreparedExecution["request"],
+): OutgoingRequestView {
+  const bodyBytes =
+    materialized.bodyBytes === undefined
+      ? Buffer.from(materialized.body, "utf8")
+      : Buffer.from(materialized.bodyBytes);
+  const bodyRedacted = request.body.sensitive || !request.body.readable;
+  const bodyValue =
+    materialized.bodyBytes === undefined
+      ? materialized.body
+      : bodyBytes.toString("base64");
+  return {
+    method: materialized.method,
+    url: {
+      value:
+        request.url.readable && request.url.value !== undefined
+          ? request.url.value
+          : "[secret]",
+      redacted: request.url.sensitive || !request.url.readable,
+    },
+    headers: [
+      {
+        name: "Host",
+        value: request.url.sensitive
+          ? "[secret]"
+          : new URL(materialized.targetUrl).host,
+        redacted: request.url.sensitive,
+        derived: true,
+      },
+      ...request.headers.flatMap((header, index) => {
+        if (materialized.headers[index]?.enabled !== true) return [];
+        return [
+          {
+            name: header.name,
+            value:
+              header.readable && header.value !== undefined
+                ? header.value
+                : "[secret]",
+            redacted: header.sensitive || !header.readable,
+            derived: false,
+          },
+        ];
+      }),
+    ],
+    body: {
+      value: bodyRedacted
+        ? "[secret]"
+        : bodyValue.slice(0, OUTGOING_BODY_PREVIEW_CHARACTERS),
+      encoding:
+        materialized.bodyBytes === undefined ? "utf8" : ("base64" as const),
+      byteLength: bodyBytes.byteLength,
+      redacted: bodyRedacted,
+      truncated:
+        !bodyRedacted && bodyValue.length > OUTGOING_BODY_PREVIEW_CHARACTERS,
+    },
+  };
+}
+
+/** Adds the product User-Agent unless an enabled request field already supplies one. */
+function withDefaultUserAgent(
+  request: PreparedExecution["request"],
+): PreparedExecution["request"] {
+  if (
+    request.headers.some(
+      (header) => header.enabled && header.name.toLowerCase() === "user-agent",
+    )
+  ) {
+    return request;
+  }
+  return {
+    ...request,
+    headers: [
+      ...request.headers,
+      { name: "User-Agent", value: DEFAULT_BACKEND_USER_AGENT, enabled: true },
+    ],
+  };
 }
 
 /** Attaches private host diagnostics to a user-safe script execution error. */
