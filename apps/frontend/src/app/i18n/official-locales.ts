@@ -45,8 +45,6 @@ const zhHansMessages = {
   },
   workspace: {
     baseUrl: "基础 URL",
-    baseUrlHint: "组合请求会将此 URL 与集合路径和请求路径拼接。",
-    baseUrlPlaceholder: "https://api.example.com",
     collections: "集合",
     create: "创建工作区",
     createRequest: "创建请求",
@@ -95,9 +93,6 @@ const zhHansMessages = {
     headersDescription: "启用的请求头将应用于此集合及其后代中的请求。",
     name: "集合名称",
     pathPrefix: "目标前缀",
-    pathPrefixHint:
-      "若这是首个非空目标组成部分，可使用绝对 URL；否则请使用路径。当前有效前缀：{path}",
-    pathPrefixPlaceholder: "/v1/resources 或 https://api.example.com",
     new: "新建集合",
     newRequest: "新建请求",
     newSubcollection: "新建子集合",
@@ -404,8 +399,6 @@ const zhHantMessages = {
   },
   workspace: {
     baseUrl: "基礎 URL",
-    baseUrlHint: "組合請求會將此 URL 與集合路徑和請求路徑串接。",
-    baseUrlPlaceholder: "https://api.example.com",
     collections: "集合",
     create: "建立工作區",
     createRequest: "建立請求",
@@ -453,9 +446,6 @@ const zhHantMessages = {
     headersDescription: "啟用的標頭會套用到此集合及其後代中的請求。",
     name: "集合名稱",
     pathPrefix: "目標前綴",
-    pathPrefixHint:
-      "若這是首個非空目標組成部分，可使用絕對 URL；否則請使用路徑。目前有效前綴：{path}",
-    pathPrefixPlaceholder: "/v1/resources 或 https://api.example.com",
     new: "新增集合",
     newRequest: "新增請求",
     newSubcollection: "新增子集合",

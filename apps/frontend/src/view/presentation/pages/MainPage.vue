@@ -131,7 +131,9 @@ const variablePreviewContextKey = computed(() =>
     selectedEnvironmentId.value ?? "",
     collectionPropertiesOpen.value
       ? (selectedCollectionId.value ?? "collection-properties")
-      : "request-editor",
+      : workspacePropertiesOpen.value
+        ? (selectedWorkspaceId.value ?? "workspace-properties")
+        : "request-editor",
     activeTab.value?.request?.requestId ?? "",
     activeTab.value?.request?.parentCollectionId ??
       activeTab.value?.pendingParentCollectionId ??
@@ -828,9 +830,16 @@ function discardRequestTab(): void {
       v-if="workspaceProperties"
       :workspace="workspaceProperties.workspace"
       :variable-profile="workspaceProperties.variableProfile"
+      :variable-previews="variablePreviews"
       :can-edit="canEditWorkspace"
       :can-delete="canDeleteWorkspace"
       :busy="busy"
+      @preview="
+        controller.previewVariables($event, {
+          parentCollectionId: null,
+          requestId: null,
+        })
+      "
       @close="workspacePropertiesOpen = false"
       @save="saveWorkspaceProperties"
       @delete="deleteWorkspace"

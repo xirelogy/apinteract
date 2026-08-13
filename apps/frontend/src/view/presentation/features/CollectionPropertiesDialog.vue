@@ -69,8 +69,23 @@ const headers = ref<RequestField[]>(
 );
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
+const displayedInheritedTarget = computed(() => {
+  if (props.collection.inheritedTarget === "" || pathPrefix.value === "") {
+    return props.collection.inheritedTarget;
+  }
+  if (pathPrefix.value.startsWith("/")) {
+    return props.collection.inheritedTarget.replace(/\/+$/u, "");
+  }
+  return props.collection.inheritedTarget.endsWith("/")
+    ? props.collection.inheritedTarget
+    : `${props.collection.inheritedTarget}/`;
+});
+const inheritedTargetWidth = computed(
+  () => `${Math.max(displayedInheritedTarget.value.length, 1) + 4}ch`,
+);
 const referencedVariableNames = computed(() =>
   collectTemplateVariableNames([
+    props.collection.inheritedTarget,
     pathPrefix.value,
     ...headers.value.map((header) => header.value),
   ]),
@@ -227,24 +242,32 @@ function save(): void {
         <FormField
           v-slot="{ controlId, describedBy, invalid }"
           :label="t('collection.pathPrefix')"
-          :hint="
-            t('collection.pathPrefixHint', {
-              path: collection.effectivePath || '/',
-            })
-          "
         >
-          <TemplateTextControl
-            :id="controlId"
-            v-model="pathPrefix"
-            :previews="variablePreviews"
-            :aria-describedby="describedBy"
-            :aria-label="t('collection.pathPrefix')"
-            :invalid="invalid"
-            :placeholder="t('collection.pathPrefixPlaceholder')"
-            autocomplete="off"
-            spellcheck="false"
-            :disabled="busy || !canEdit"
-          />
+          <div class="composed-target-inputs">
+            <TemplateTextControl
+              :model-value="displayedInheritedTarget"
+              class="inherited-target-input"
+              :style="{ width: inheritedTargetWidth }"
+              font="mono"
+              :previews="variablePreviews"
+              :aria-label="t('request.inheritedTarget')"
+              readonly
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <TemplateTextControl
+              :id="controlId"
+              v-model="pathPrefix"
+              :previews="variablePreviews"
+              :aria-describedby="describedBy"
+              :aria-label="t('collection.pathPrefix')"
+              :invalid="invalid"
+              font="mono"
+              autocomplete="off"
+              spellcheck="false"
+              :disabled="busy || !canEdit"
+            />
+          </div>
         </FormField>
         <TabsRoot v-model="activeSection" class="collection-properties-tabs">
           <TabsList

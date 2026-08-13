@@ -2390,6 +2390,7 @@
           "parentCollectionId",
           "name",
           "pathPrefix",
+          "inheritedTarget",
           "effectivePath",
           "headers",
           "effectiveHeaders",
@@ -2419,6 +2420,10 @@
             "type": "string",
             "maxLength": 8192,
             "description": "An absolute HTTP(S) URL template when this collection is the first non-empty target component, or a path template appended to an earlier component."
+          },
+          "inheritedTarget": {
+            "type": "string",
+            "description": "Current composed workspace and ancestor-collection target prefix before this collection's local component."
           },
           "effectivePath": {
             "type": "string",

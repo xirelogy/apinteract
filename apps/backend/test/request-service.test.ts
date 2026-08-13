@@ -839,13 +839,16 @@ describe("RequestService draft updates", () => {
         [],
         "https://api.example.test/root/v2",
       );
-      await requests.updateCollection(
+      const updatedChild = await requests.updateCollection(
         userId,
         child.nodeId,
         childView.revision,
         childView.name,
         [],
         "/users",
+      );
+      expect(updatedChild.inheritedTarget).toBe(
+        "https://api.example.test/root/v2",
       );
       const current = await requests.prepareExecution(
         userId,

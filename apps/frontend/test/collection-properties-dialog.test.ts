@@ -76,6 +76,7 @@ describe("CollectionPropertiesDialog", () => {
           parentCollectionId: null,
           name: "Examples",
           pathPrefix: "https://<<host>>",
+          inheritedTarget: "https://<<parent_host>>/root",
           effectivePath: "https://<<host>>",
           headers: [
             { name: "Authorization", value: "Bearer <<token>>", enabled: true },
@@ -92,6 +93,22 @@ describe("CollectionPropertiesDialog", () => {
           variables: [],
         },
         variablePreviews: [
+          {
+            name: "parent_host",
+            status: "resolved",
+            declaredKind: "value",
+            effectiveKind: "value",
+            aliasTarget: null,
+            value: "parent.example.test",
+            secretVersion: null,
+            diagnostic: null,
+            source: {
+              scope: "workspace",
+              scopeId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
+              scopeName: "Workspace",
+              revision: 1,
+            },
+          },
           {
             name: "host",
             status: "resolved",
@@ -132,8 +149,18 @@ describe("CollectionPropertiesDialog", () => {
     });
 
     await vi.advanceTimersByTimeAsync(150);
-    expect(wrapper.emitted("preview")).toEqual([[["host", "token"]]]);
-    expect(wrapper.findAll('[data-preview-status="resolved"]')).toHaveLength(2);
+    expect(wrapper.emitted("preview")).toEqual([
+      [["parent_host", "host", "token"]],
+    ]);
+    expect(wrapper.findAll('[data-preview-status="resolved"]')).toHaveLength(3);
+    const inheritedPrefix = wrapper.get<HTMLInputElement>(
+      'input[aria-label="Inherited target"]',
+    );
+    expect(inheritedPrefix.element.value).toBe("https://<<parent_host>>/root/");
+    expect(inheritedPrefix.attributes("readonly")).toBeDefined();
+    expect(
+      wrapper.get(".inherited-target-input").attributes("style"),
+    ).toContain("width: 33ch");
     const targetPrefix = wrapper.get<HTMLInputElement>(
       'input[aria-label="Target prefix"]',
     );
@@ -163,6 +190,7 @@ describe("CollectionPropertiesDialog", () => {
           parentCollectionId: null,
           name: "Examples",
           pathPrefix: "",
+          inheritedTarget: "",
           effectivePath: "",
           headers: [],
           effectiveHeaders: [],
@@ -272,6 +300,7 @@ describe("CollectionPropertiesDialog", () => {
           parentCollectionId: null,
           name: "Examples",
           pathPrefix: "",
+          inheritedTarget: "",
           effectivePath: "",
           headers: [],
           effectiveHeaders: [],
@@ -316,6 +345,77 @@ describe("CollectionPropertiesDialog", () => {
 });
 
 describe("WorkspacePropertiesDialog", () => {
+  it("previews variables in the workspace base URL", async () => {
+    vi.useFakeTimers();
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const workspaceId = "019fa8be-a510-76b9-b73b-69f4c7af7876";
+    const wrapper = mount(WorkspacePropertiesDialog, {
+      attachTo: document.body,
+      props: {
+        workspace: {
+          workspaceId,
+          name: "Platform",
+          role: "owner",
+          baseUrl: "https://<<host>>",
+          headers: [],
+          revision: 0,
+        },
+        variableProfile: {
+          workspaceId,
+          scopeKind: "workspace",
+          scopeId: workspaceId,
+          scopeName: "Platform",
+          revision: 0,
+          variables: [],
+        },
+        variablePreviews: [
+          {
+            name: "host",
+            status: "resolved",
+            declaredKind: "value",
+            effectiveKind: "value",
+            aliasTarget: null,
+            value: "api.example.test",
+            secretVersion: null,
+            diagnostic: null,
+            source: {
+              scope: "workspace",
+              scopeId: workspaceId,
+              scopeName: "Platform",
+              revision: 1,
+            },
+          },
+        ],
+        canEdit: true,
+        canDelete: true,
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await vi.advanceTimersByTimeAsync(150);
+    expect(wrapper.emitted("preview")).toEqual([[["host"]]]);
+    expect(
+      wrapper.get('[data-variable-name="host"]').attributes(),
+    ).toHaveProperty("data-preview-status", "resolved");
+    const baseUrl = wrapper.get<HTMLInputElement>(
+      'input[aria-label="Base URL"]',
+    );
+    baseUrl.element.setSelectionRange(11, 11);
+    await baseUrl.trigger("focus");
+    await baseUrl.trigger("keyup");
+    expect(wrapper.get('[role="tooltip"]').text()).toContain(
+      "api.example.test",
+    );
+
+    wrapper.unmount();
+    vi.useRealTimers();
+  });
+
   it("edits root common headers and variables together", async () => {
     const i18n = createI18n({
       legacy: false,
@@ -342,6 +442,7 @@ describe("WorkspacePropertiesDialog", () => {
           revision: 0,
           variables: [],
         },
+        variablePreviews: [],
         canEdit: true,
         canDelete: true,
         busy: false,
@@ -410,6 +511,7 @@ describe("WorkspacePropertiesDialog", () => {
           revision: 0,
           variables: [],
         },
+        variablePreviews: [],
         canEdit: true,
         canDelete: true,
         busy: false,

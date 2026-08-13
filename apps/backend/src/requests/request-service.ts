@@ -60,6 +60,7 @@ export interface CollectionView {
   readonly parentCollectionId: EntityId | null;
   readonly name: string;
   readonly pathPrefix: string;
+  readonly inheritedTarget: string;
   readonly effectivePath: string;
   readonly headers: readonly RequestField[];
   /** Contains the enabled root-to-current header overlay for presentation. */
@@ -671,6 +672,11 @@ export class RequestService {
         ...mapCollection(row),
         name: normalizedName,
         pathPrefix: normalizedPathPrefix,
+        inheritedTarget: await this.#resolveInheritedTarget(
+          transaction,
+          row.workspace_id,
+          row.parent_collection_id,
+        ),
         effectivePath: await this.#resolveCollectionPath(
           transaction,
           row.parent_collection_id,
@@ -1874,6 +1880,11 @@ export class RequestService {
     const collection = mapCollection(row);
     return {
       ...collection,
+      inheritedTarget: await this.#resolveInheritedTarget(
+        database,
+        row.workspace_id,
+        row.parent_collection_id,
+      ),
       effectivePath: await this.#resolveCollectionPath(
         database,
         row.parent_collection_id,
@@ -1958,6 +1969,25 @@ export class RequestService {
     ]);
   }
 
+  /** Joins the workspace and ancestor targets before one local component. */
+  async #resolveInheritedTarget(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    workspaceId: Uint8Array,
+    parentCollectionId: Uint8Array | null,
+  ): Promise<string> {
+    return joinTargetComponents(
+      (
+        await this.#targetComponents(
+          database,
+          workspaceId,
+          parentCollectionId,
+          "composed",
+          "",
+        )
+      ).slice(0, -1),
+    );
+  }
+
   /** Builds a request view with effective collection headers kept read-only. */
   async #requestView(
     database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
@@ -1968,16 +1998,10 @@ export class RequestService {
       ...request,
       inheritedTarget:
         request.targetMode === "composed"
-          ? joinTargetComponents(
-              (
-                await this.#targetComponents(
-                  database,
-                  row.workspace_id,
-                  row.parent_collection_id,
-                  request.targetMode,
-                  "",
-                )
-              ).slice(0, -1),
+          ? await this.#resolveInheritedTarget(
+              database,
+              row.workspace_id,
+              row.parent_collection_id,
             )
           : "",
       inheritedHeaders: await this.#resolveHeaders(
@@ -2801,7 +2825,10 @@ function mapCollection(row: {
   readonly profile_revision: number | null;
   readonly headers_json: string | null;
   readonly path_prefix: string | null;
-}): Omit<CollectionView, "effectiveHeaders" | "effectivePath"> {
+}): Omit<
+  CollectionView,
+  "inheritedTarget" | "effectiveHeaders" | "effectivePath"
+> {
   return {
     collectionId: bytesToId(row.id),
     workspaceId: bytesToId(row.workspace_id),

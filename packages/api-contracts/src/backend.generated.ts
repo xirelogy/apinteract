@@ -988,6 +988,8 @@ export interface components {
       name: string;
       /** @description An absolute HTTP(S) URL template when this collection is the first non-empty target component, or a path template appended to an earlier component. */
       pathPrefix: string;
+      /** @description Current composed workspace and ancestor-collection target prefix before this collection's local component. */
+      inheritedTarget: string;
       /** @description Root-to-current collection target prefix. It may include an absolute URL established by the first non-empty collection component. */
       effectivePath: string;
       headers: components["schemas"]["RequestField"][];
