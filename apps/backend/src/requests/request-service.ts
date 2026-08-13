@@ -63,6 +63,8 @@ export interface CollectionView {
   readonly inheritedTarget: string;
   readonly effectivePath: string;
   readonly headers: readonly RequestField[];
+  /** Contains effective workspace and ancestor headers before local overrides. */
+  readonly inheritedHeaders: readonly RequestField[];
   /** Contains the enabled root-to-current header overlay for presentation. */
   readonly effectiveHeaders: readonly RequestField[];
   readonly revision: number;
@@ -668,6 +670,12 @@ export class RequestService {
           pathChanged,
         },
       });
+      const inheritedHeaders = await this.#resolveHeaders(
+        transaction,
+        row.workspace_id,
+        row.parent_collection_id,
+        [],
+      );
       return {
         ...mapCollection(row),
         name: normalizedName,
@@ -683,12 +691,11 @@ export class RequestService {
           normalizedPathPrefix,
         ),
         headers: normalizedHeaders,
-        effectiveHeaders: await this.#resolveHeaders(
-          transaction,
-          row.workspace_id,
-          row.parent_collection_id,
+        inheritedHeaders,
+        effectiveHeaders: resolveHeaderLayers([
+          inheritedHeaders,
           normalizedHeaders,
-        ),
+        ]),
         revision,
       };
     });
@@ -1878,6 +1885,12 @@ export class RequestService {
     row: CollectionRow,
   ): Promise<CollectionView> {
     const collection = mapCollection(row);
+    const inheritedHeaders = await this.#resolveHeaders(
+      database,
+      row.workspace_id,
+      row.parent_collection_id,
+      [],
+    );
     return {
       ...collection,
       inheritedTarget: await this.#resolveInheritedTarget(
@@ -1890,12 +1903,11 @@ export class RequestService {
         row.parent_collection_id,
         collection.pathPrefix,
       ),
-      effectiveHeaders: await this.#resolveHeaders(
-        database,
-        row.workspace_id,
-        row.parent_collection_id,
+      inheritedHeaders,
+      effectiveHeaders: resolveHeaderLayers([
+        inheritedHeaders,
         collection.headers,
-      ),
+      ]),
     };
   }
 
@@ -2827,7 +2839,10 @@ function mapCollection(row: {
   readonly path_prefix: string | null;
 }): Omit<
   CollectionView,
-  "inheritedTarget" | "effectiveHeaders" | "effectivePath"
+  | "inheritedTarget"
+  | "inheritedHeaders"
+  | "effectiveHeaders"
+  | "effectivePath"
 > {
   return {
     collectionId: bytesToId(row.id),

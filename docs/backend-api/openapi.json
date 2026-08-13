@@ -2393,6 +2393,7 @@
           "inheritedTarget",
           "effectivePath",
           "headers",
+          "inheritedHeaders",
           "effectiveHeaders",
           "revision"
         ],
@@ -2431,6 +2432,13 @@
           },
           "headers": {
             "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestField"
+            }
+          },
+          "inheritedHeaders": {
+            "type": "array",
+            "description": "Effective enabled headers inherited from the workspace and ancestor collections before this collection's local overrides.",
             "items": {
               "$ref": "#/components/schemas/RequestField"
             }

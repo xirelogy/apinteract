@@ -81,6 +81,13 @@ describe("CollectionPropertiesDialog", () => {
           headers: [
             { name: "Authorization", value: "Bearer <<token>>", enabled: true },
           ],
+          inheritedHeaders: [
+            {
+              name: "X-Parent-Host",
+              value: "<<parent_host>>",
+              enabled: true,
+            },
+          ],
           effectiveHeaders: [],
           revision: 0,
         },
@@ -152,7 +159,20 @@ describe("CollectionPropertiesDialog", () => {
     expect(wrapper.emitted("preview")).toEqual([
       [["parent_host", "host", "token"]],
     ]);
-    expect(wrapper.findAll('[data-preview-status="resolved"]')).toHaveLength(3);
+    expect(wrapper.findAll('[data-preview-status="resolved"]')).toHaveLength(4);
+    const inheritedHeader = wrapper.get(".inherited-header-row");
+    expect(
+      inheritedHeader.get<HTMLInputElement>(
+        'input[aria-label="Inherited header name 1"]',
+      ).element.value,
+    ).toBe("X-Parent-Host");
+    expect(
+      inheritedHeader.get('input[aria-label="Inherited header name 1"]')
+        .attributes("disabled"),
+    ).toBeDefined();
+    expect(inheritedHeader.get('[role="img"]').attributes("aria-label")).toBe(
+      "Inherited",
+    );
     const inheritedPrefix = wrapper.get<HTMLInputElement>(
       'input[aria-label="Inherited target"]',
     );
@@ -193,6 +213,7 @@ describe("CollectionPropertiesDialog", () => {
           inheritedTarget: "",
           effectivePath: "",
           headers: [],
+          inheritedHeaders: [],
           effectiveHeaders: [],
           revision: 0,
         },
@@ -222,6 +243,11 @@ describe("CollectionPropertiesDialog", () => {
     expect(
       wrapper.get(".request-field-row .new-row-marker").element.tagName,
     ).toBe("SPAN");
+    expect(
+      wrapper
+        .get('input[aria-label="Header value 1"]')
+        .element.closest(".field-template-input"),
+    ).not.toBeNull();
     await collectionHeader.setValue("X-Team");
     expect(
       wrapper
@@ -303,6 +329,7 @@ describe("CollectionPropertiesDialog", () => {
           inheritedTarget: "",
           effectivePath: "",
           headers: [],
+          inheritedHeaders: [],
           effectiveHeaders: [],
           revision: 3,
         },

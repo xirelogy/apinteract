@@ -993,6 +993,8 @@ export interface components {
       /** @description Root-to-current collection target prefix. It may include an absolute URL established by the first non-empty collection component. */
       effectivePath: string;
       headers: components["schemas"]["RequestField"][];
+      /** @description Effective enabled headers inherited from the workspace and ancestor collections before this collection's local overrides. */
+      inheritedHeaders: components["schemas"]["RequestField"][];
       /** @description Effective enabled headers after applying ancestor and local collection profiles. */
       effectiveHeaders: components["schemas"]["RequestField"][];
       revision: number;

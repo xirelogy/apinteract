@@ -176,6 +176,12 @@ describe("collection header inheritance", () => {
       await expect(
         requests.getCollection(userId, leaf.nodeId),
       ).resolves.toMatchObject({
+        inheritedHeaders: [
+          { name: "X-Workspace", value: "workspace", enabled: true },
+          { name: "X-Root", value: "root", enabled: true },
+          { name: "x-shared", value: "child-1", enabled: true },
+          { name: "X-SHARED", value: "child-2", enabled: true },
+        ],
         effectiveHeaders: [
           { name: "X-Workspace", value: "workspace", enabled: true },
           { name: "X-Root", value: "root", enabled: true },

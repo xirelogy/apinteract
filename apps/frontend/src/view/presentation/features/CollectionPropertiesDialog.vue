@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Asterisk, Trash2, X } from "@lucide/vue";
+import { Asterisk, Lock, Trash2, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -87,6 +87,7 @@ const referencedVariableNames = computed(() =>
   collectTemplateVariableNames([
     props.collection.inheritedTarget,
     pathPrefix.value,
+    ...props.collection.inheritedHeaders.map((header) => header.value),
     ...headers.value.map((header) => header.value),
   ]),
 );
@@ -290,6 +291,49 @@ function save(): void {
                 <span></span>
               </div>
               <div
+                v-for="(header, index) in collection.inheritedHeaders"
+                :key="`inherited-${index}`"
+                class="request-field-row inherited-header-row"
+              >
+                <CheckboxControl
+                  :model-value="header.enabled"
+                  visually-hidden-label
+                  :label="
+                    t('request.inheritedHeaderEnabled', { index: index + 1 })
+                  "
+                  disabled
+                />
+                <TextInput
+                  :model-value="header.name"
+                  class="field-cell-input"
+                  density="compact"
+                  font="mono"
+                  :aria-label="
+                    t('request.inheritedHeaderName', { index: index + 1 })
+                  "
+                  disabled
+                />
+                <TemplateTextControl
+                  :model-value="header.value"
+                  class="field-template-input"
+                  density="compact"
+                  font="mono"
+                  :previews="variablePreviews"
+                  :aria-label="
+                    t('request.inheritedHeaderValue', { index: index + 1 })
+                  "
+                  readonly
+                />
+                <span
+                  class="inherited-header-indicator"
+                  role="img"
+                  :aria-label="t('request.inherited')"
+                  :title="t('request.inherited')"
+                >
+                  <Lock :size="14" aria-hidden="true" />
+                </span>
+              </div>
+              <div
                 v-for="(header, index) in headers"
                 :key="index"
                 class="request-field-row"
@@ -326,7 +370,7 @@ function save(): void {
                 />
                 <TemplateTextControl
                   v-model="header.value"
-                  class="field-cell-input"
+                  class="field-template-input"
                   density="compact"
                   font="mono"
                   :previews="variablePreviews"
