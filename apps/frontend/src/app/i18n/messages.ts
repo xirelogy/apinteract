@@ -238,6 +238,19 @@ export const enUsMessages = {
     variables: "Manage request variables",
     untitled: "Untitled request",
     unsavedChanges: "Unsaved changes",
+    versions: {
+      currentDraft: "Current draft",
+      empty: "Save or send this request to create its first version.",
+      execution: "Executed version",
+      manual_save: "Saved version",
+      name: "Version name",
+      namePlaceholder: "Name this version",
+      readOnly:
+        "You are viewing an immutable version. Switch to Current draft to edit.",
+      restore: "Restore as current",
+      saveName: "Save name",
+      title: "Versions",
+    },
     discard: {
       keepEditing: "Keep editing",
       message: "Unsaved changes to {name} will be lost.",

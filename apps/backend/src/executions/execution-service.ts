@@ -137,6 +137,25 @@ export class ExecutionService {
     });
   }
 
+  /** Starts asynchronous execution from one immutable request revision. */
+  async startRevision(
+    userId: EntityId,
+    sessionId: EntityId,
+    requestId: EntityId,
+    revisionId: EntityId,
+    publish: (event: ExecutionEvent) => void,
+  ): Promise<ExecutionView> {
+    return this.#beginStart(async () => {
+      const prepared = await this.#requests.prepareRevisionExecution(
+        userId,
+        sessionId,
+        requestId,
+        revisionId,
+      );
+      return this.#startPrepared(prepared, userId, publish);
+    });
+  }
+
   /** Starts a workspace-owned execution without saving a reusable request. */
   async startTemporary(
     userId: EntityId,

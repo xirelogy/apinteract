@@ -6,13 +6,15 @@ import {
   ref,
   watch,
 } from "vue";
-import { Asterisk, Lock, Play, Save, Trash2 } from "@lucide/vue";
+import { Asterisk, History, Lock, Play, Save, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
   ExecutionView,
   HttpMethod,
   RequestField,
+  RequestRevisionSummary,
+  RequestRevisionView,
   RequestView,
   VariableProfileView,
   VariablePreview,
@@ -63,12 +65,16 @@ const props = withDefaults(
     previewContextKey?: string | null;
     busy: boolean;
     canEdit?: boolean;
+    revisions?: readonly RequestRevisionSummary[];
+    viewingRevision?: RequestRevisionView | null;
   }>(),
   {
     variablePreviews: () => [],
     requestVariableProfile: null,
     previewContextKey: null,
     canEdit: true,
+    revisions: () => [],
+    viewingRevision: null,
   },
 );
 const { t } = useI18n();
@@ -81,6 +87,11 @@ const emit = defineEmits<{
   preview: [names: readonly string[]];
   loadVariables: [];
   saveVariables: [variables: readonly VariableWrite[]];
+  loadRevisions: [];
+  selectRevision: [revisionId: string | null];
+  nameRevision: [revisionId: string, name: string | null];
+  restoreRevision: [revisionId: string];
+  executeRevision: [revisionId: string];
 }>();
 
 const methods: readonly HttpMethod[] = [
@@ -103,6 +114,7 @@ const requestTabs = [
   "preRequest",
   "postResponse",
   "variables",
+  "versions",
 ] as const;
 const name = ref("");
 const method = ref<HttpMethod>("GET");
@@ -113,6 +125,7 @@ const body = ref("");
 const preRequestScript = ref("");
 const postResponseScript = ref("");
 const activeTab = ref<(typeof requestTabs)[number]>("query");
+const versionName = ref("");
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 const requestVariableCount = ref<number | null>(null);
 const workbench = ref<HTMLElement | null>(null);
@@ -125,16 +138,24 @@ const paneStyle = computed(() => ({
 }));
 
 watch(
-  () => props.draft,
-  (draft) => {
-    name.value = draft?.name ?? "";
-    method.value = draft?.method ?? "GET";
-    targetUrl.value = draft?.targetUrl ?? "";
-    query.value = editableRequestFields(draft?.query ?? [], true);
-    headers.value = editableRequestFields(draft?.headers ?? [], true);
-    body.value = draft?.body ?? "";
-    preRequestScript.value = draft?.preRequestScript ?? "";
-    postResponseScript.value = draft?.postResponseScript ?? "";
+  [() => props.draft, () => props.viewingRevision],
+  ([draft, revision]) => {
+    const source = revision?.request ?? draft;
+    name.value = source?.name ?? "";
+    method.value = source?.method ?? "GET";
+    targetUrl.value = source?.targetUrl ?? "";
+    query.value = editableRequestFields(source?.query ?? [], true);
+    headers.value = editableRequestFields(source?.headers ?? [], true);
+    body.value = source?.body ?? "";
+    preRequestScript.value = source?.preRequestScript ?? "";
+    postResponseScript.value = source?.postResponseScript ?? "";
+  },
+  { immediate: true },
+);
+watch(
+  () => props.viewingRevision,
+  (revision) => {
+    versionName.value = revision?.name ?? "";
   },
   { immediate: true },
 );
@@ -185,6 +206,8 @@ watch(
       profileScopeId !== requestId
     ) {
       emit("loadVariables");
+    } else if (tab === "versions" && requestId !== undefined) {
+      emit("loadRevisions");
     }
   },
 );
@@ -219,7 +242,13 @@ function scheduleVariablePreview(): void {
   }, 150);
 }
 const canSave = computed(
-  () => validTarget.value && (props.temporary || name.value.trim() !== ""),
+  () =>
+    props.viewingRevision === null &&
+    validTarget.value &&
+    (props.temporary || name.value.trim() !== ""),
+);
+const editorDisabled = computed(
+  () => props.busy || props.viewingRevision !== null,
 );
 const draftRevisionLabel = computed(() =>
   props.temporary
@@ -259,7 +288,7 @@ const fieldReorder = useRowReorder({
     activeFields()[index] !== undefined &&
     !isBlankRequestField(activeFields()[index]!),
   move: moveActiveField,
-  isDisabled: () => props.busy,
+  isDisabled: () => editorDisabled.value,
 });
 
 /** Publishes a field edit and materializes the next trailing blank row. */
@@ -317,9 +346,33 @@ function requestTabLabel(tab: (typeof requestTabs)[number]): string {
   if (tab === "preRequest") {
     return t("scripting.preRequest");
   }
+  if (tab === "versions") {
+    return t("request.versions.title");
+  }
   return tab === "postResponse"
     ? t("scripting.postResponse")
     : t("environment.variables");
+}
+
+/** Persists a trimmed version name or removes the current one when blank. */
+function saveVersionName(): void {
+  const revisionId = props.viewingRevision?.revisionId;
+  if (revisionId !== undefined) {
+    emit("nameRevision", revisionId, versionName.value.trim() || null);
+  }
+}
+
+/** Formats one immutable revision timestamp in the current locale. */
+function revisionDate(revision: RequestRevisionSummary): string {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(revision.createdAt));
+}
+
+/** Returns a user name or the localized automatic revision reason. */
+function revisionLabel(revision: RequestRevisionSummary): string {
+  return revision.name ?? t(`request.versions.${revision.creationReason}`);
 }
 
 /** Returns the translated singular label for the active structured field. */
@@ -426,7 +479,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               v-model="name"
               class="request-name-input"
               :aria-label="t('request.name')"
-              :disabled="busy"
+              :disabled="editorDisabled"
               @input="emitChange"
             />
             <span class="draft-revision">
@@ -447,7 +500,11 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
             <ButtonControl
               variant="primary"
               :disabled="busy || !validTarget"
-              @click="emit('execute', currentDraft())"
+              @click="
+                viewingRevision === null
+                  ? emit('execute', currentDraft())
+                  : emit('executeRevision', viewingRevision.revisionId)
+              "
             >
               <template #leading>
                 <Play :size="16" aria-hidden="true" />
@@ -463,7 +520,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
             :model-value="method"
             :options="methodOptions"
             :label="t('request.httpMethod')"
-            :disabled="busy"
+            :disabled="editorDisabled"
             @update:model-value="selectMethod"
           >
             <template #option="{ option }">
@@ -479,7 +536,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
             inputmode="url"
             autocomplete="off"
             spellcheck="false"
-            :disabled="busy"
+            :disabled="editorDisabled"
             @input="emitChange"
           />
         </div>
@@ -585,7 +642,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                     index: index + 1,
                   })
                 "
-                :disabled="busy"
+                :disabled="editorDisabled"
                 @change="emitChange"
               />
               <TextInput
@@ -610,7 +667,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 "
                 autocomplete="off"
                 spellcheck="false"
-                :disabled="busy"
+                :disabled="editorDisabled"
                 @input="updateActiveField"
               />
               <TemplateTextControl
@@ -630,7 +687,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 :placeholder="t('common.fields.value')"
                 autocomplete="off"
                 spellcheck="false"
-                :disabled="busy"
+                :disabled="editorDisabled"
                 @input="updateActiveField"
               />
               <div class="row-actions">
@@ -642,7 +699,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                       index: index + 1,
                     })
                   "
-                  :disabled="busy"
+                  :disabled="editorDisabled"
                   @drag-start="fieldReorder.startDrag($event, index)"
                   @drag-end="fieldReorder.cancelDrag"
                   @move="fieldReorder.moveByKeyboard(index, $event)"
@@ -662,7 +719,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                       kind: activeFieldKind(),
                     })
                   "
-                  :disabled="busy"
+                  :disabled="editorDisabled"
                   @click="removeActiveField(index)"
                 >
                   <Trash2 :size="15" aria-hidden="true" />
@@ -688,7 +745,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               :aria-label="t('request.rawBody')"
               :placeholder="t('request.rawBody')"
               spellcheck="false"
-              :disabled="busy"
+              :disabled="editorDisabled"
               @input="emitChange"
             />
           </TabsPanel>
@@ -710,7 +767,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 v-model="preRequestScript"
                 class="script-source-input"
                 :label="t('scripting.preRequest')"
-                :disabled="busy"
+                :disabled="editorDisabled"
                 @input="emitChange"
               />
             </div>
@@ -737,7 +794,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 v-model="postResponseScript"
                 class="script-source-input"
                 :label="t('scripting.postResponse')"
-                :disabled="busy"
+                :disabled="editorDisabled"
                 @input="emitChange"
               />
             </div>
@@ -777,13 +834,86 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               <div v-if="canEdit" class="request-variable-actions">
                 <ButtonControl
                   variant="primary"
-                  :disabled="busy"
+                  :disabled="editorDisabled"
                   @click="saveVariables"
                 >
                   {{ t("variables.saveRequest") }}
                 </ButtonControl>
               </div>
             </template>
+          </TabsPanel>
+          <TabsPanel
+            v-if="activeTab === 'versions'"
+            value="versions"
+            class="request-versions"
+            :class="{ 'has-selected-version': viewingRevision !== null }"
+          >
+            <div class="request-version-list">
+              <button
+                type="button"
+                class="request-version-card"
+                :class="{ 'is-selected': viewingRevision === null }"
+                @click="emit('selectRevision', null)"
+              >
+                <History :size="16" aria-hidden="true" />
+                <span>
+                  <strong>{{ t("request.versions.currentDraft") }}</strong>
+                  <small>{{ draftRevisionLabel }}</small>
+                </span>
+              </button>
+              <button
+                v-for="revision in revisions"
+                :key="revision.revisionId"
+                type="button"
+                class="request-version-card"
+                :class="{
+                  'is-selected':
+                    viewingRevision?.revisionId === revision.revisionId,
+                }"
+                @click="emit('selectRevision', revision.revisionId)"
+              >
+                <History :size="16" aria-hidden="true" />
+                <span>
+                  <strong>
+                    {{ revisionLabel(revision) }}
+                  </strong>
+                  <small>
+                    {{ revisionDate(revision) }} ·
+                    {{ revision.createdByUsername }}
+                  </small>
+                </span>
+              </button>
+              <p v-if="revisions.length === 0" class="dialog-empty-message">
+                {{ t("request.versions.empty") }}
+              </p>
+            </div>
+            <div v-if="viewingRevision" class="request-version-details">
+              <TextInput
+                v-model="versionName"
+                :aria-label="t('request.versions.name')"
+                :placeholder="t('request.versions.namePlaceholder')"
+                :disabled="busy || !canEdit"
+              />
+              <div class="request-version-actions">
+                <ButtonControl
+                  variant="secondary"
+                  :disabled="busy || !canEdit"
+                  @click="saveVersionName"
+                >
+                  {{ t("request.versions.saveName") }}
+                </ButtonControl>
+                <ButtonControl
+                  variant="secondary"
+                  :disabled="busy || !canEdit"
+                  @click="emit('restoreRevision', viewingRevision.revisionId)"
+                >
+                  {{ t("request.versions.restore") }}
+                </ButtonControl>
+              </div>
+              <p class="resource-dialog-context">
+                {{ t("request.versions.readOnly") }}
+              </p>
+            </div>
           </TabsPanel>
         </TabsRoot>
       </section>

@@ -14,6 +14,96 @@ Object.defineProperty(Range.prototype, "getClientRects", {
 });
 
 describe("RequestEditor", () => {
+  it("switches the whole editor to a read-only immutable version", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const requestId = "019facab-1eee-765f-bd9f-ac2449151bf0";
+    const revisionId = "019facab-1eee-765f-bd9f-ac2449151bf1";
+    const request = {
+      requestId,
+      workspaceId: "019facab-1eee-765f-bd9f-ac2449151bf2",
+      parentCollectionId: null,
+      name: "Current",
+      method: "GET" as const,
+      targetMode: "absolute" as const,
+      targetUrl: "https://example.test/current",
+      queryMode: "structured" as const,
+      query: [],
+      headers: [],
+      inheritedHeaders: [],
+      body: "current",
+      preRequestScript: "",
+      postResponseScript: "",
+      draftRevision: 2,
+    };
+    const summary = {
+      revisionId,
+      requestId,
+      name: "Release",
+      creationReason: "manual_save" as const,
+      createdBy: "019facab-1eee-765f-bd9f-ac2449151bf3",
+      createdByUsername: "alice",
+      createdAt: "2026-08-13T01:00:00.000Z",
+    };
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request,
+        draft: {
+          name: request.name,
+          method: request.method,
+          targetUrl: request.targetUrl,
+          query: [],
+          headers: [],
+          body: request.body,
+          preRequestScript: "",
+          postResponseScript: "",
+        },
+        execution: null,
+        tabId: "version-tab",
+        temporary: false,
+        inheritedHeaders: [],
+        busy: false,
+        revisions: [summary],
+        viewingRevision: {
+          ...summary,
+          request: {
+            ...request,
+            name: "Historical",
+            method: "POST",
+            targetUrl: "https://example.test/historical",
+            body: "historical",
+          },
+        },
+      },
+      global: { plugins: [i18n] },
+    });
+
+    expect(
+      wrapper.get('input[aria-label="Request name"]').element,
+    ).toHaveProperty("value", "Historical");
+    expect(
+      wrapper.get('input[aria-label="Request name"]').attributes("disabled"),
+    ).toBeDefined();
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().includes("Versions"))
+      ?.trigger("click");
+    expect(wrapper.text()).toContain("Release");
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Current draft"))
+      ?.trigger("click");
+    expect(wrapper.emitted("selectRevision")).toEqual([[null]]);
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Send"))
+      ?.trigger("click");
+    expect(wrapper.emitted("executeRevision")).toEqual([[revisionId]]);
+  });
+
   it("resizes the request and response panes by pointer and keyboard", async () => {
     const i18n = createI18n({
       legacy: false,

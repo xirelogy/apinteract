@@ -83,6 +83,20 @@ export interface RequestView {
   readonly draftRevision: number;
 }
 
+export interface RequestRevisionSummary {
+  readonly revisionId: EntityId;
+  readonly requestId: EntityId;
+  readonly name: string | null;
+  readonly creationReason: "manual_save" | "execution";
+  readonly createdBy: EntityId;
+  readonly createdByUsername: string;
+  readonly createdAt: string;
+}
+
+export interface RequestRevisionView extends RequestRevisionSummary {
+  readonly request: RequestView;
+}
+
 export interface RequestExecutionInput {
   readonly method: HttpMethod;
   readonly targetUrl: string;
@@ -130,6 +144,21 @@ interface RequestRow {
   readonly post_response_script: string;
   readonly draft_revision: number;
   readonly order_revision: number;
+}
+
+/** Stores restorable request-owned content alongside execution-effective headers. */
+interface RevisionContent {
+  readonly name?: string;
+  readonly method: HttpMethod;
+  readonly targetMode: "absolute";
+  readonly targetUrl: string;
+  readonly queryMode: "structured";
+  readonly query: readonly RequestField[];
+  readonly headers: readonly RequestField[];
+  readonly localHeaders?: readonly RequestField[];
+  readonly body: string;
+  readonly preRequestScript: string;
+  readonly postResponseScript: string;
 }
 
 /** Represents the persistence projection required to build a collection view. */
@@ -795,6 +824,12 @@ export class RequestService {
         workspaceId,
         data: { requestId, parentCollectionId },
       });
+      await this.#ensureRevision(
+        transaction,
+        await this.#requestRow(transaction, requestId),
+        userId,
+        "manual_save",
+      );
       const inheritedHeaders = await this.#resolveHeaders(
         transaction,
         idToBytes(workspaceId),
@@ -830,6 +865,178 @@ export class RequestService {
       bytesToId(row.workspace_id),
     );
     return this.#requestView(this.#database, row);
+  }
+
+  /** Lists immutable request revisions newest first with optional user names. */
+  async listRevisions(
+    userId: EntityId,
+    requestId: EntityId,
+  ): Promise<readonly RequestRevisionSummary[]> {
+    const request = await this.#requestRow(this.#database, requestId);
+    await this.#workspaces.requireCanRead(
+      this.#database,
+      userId,
+      bytesToId(request.workspace_id),
+    );
+    const rows = await this.#database
+      .selectFrom("request_revisions as revision")
+      .innerJoin("users as creator", "creator.id", "revision.created_by")
+      .leftJoin(
+        "request_versions as version",
+        "version.revision_id",
+        "revision.id",
+      )
+      .select([
+        "revision.id",
+        "revision.creation_reason",
+        "revision.created_by",
+        "revision.created_at",
+        "creator.username",
+        "version.name",
+      ])
+      .where("revision.request_id", "=", idToBytes(requestId))
+      .orderBy("revision.created_at", "desc")
+      .orderBy("revision.id", "desc")
+      .execute();
+    return rows.map((row) => ({
+      revisionId: bytesToId(row.id),
+      requestId,
+      name: row.name,
+      creationReason: row.creation_reason,
+      createdBy: bytesToId(row.created_by),
+      createdByUsername: row.username,
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+  }
+
+  /** Loads one immutable revision as a read-only request projection. */
+  async getRevision(
+    userId: EntityId,
+    requestId: EntityId,
+    revisionId: EntityId,
+  ): Promise<RequestRevisionView> {
+    const row = await this.#requestRow(this.#database, requestId);
+    await this.#workspaces.requireCanRead(
+      this.#database,
+      userId,
+      bytesToId(row.workspace_id),
+    );
+    const revision = await this.#revisionRow(
+      this.#database,
+      requestId,
+      revisionId,
+    );
+    const content = parseRevisionContent(revision.content_json);
+    const [summary] = await this.#revisionSummaries([revisionId], requestId);
+    if (summary === undefined) {
+      throw new ResourceNotFoundError("Request revision not found");
+    }
+    return {
+      ...summary,
+      request: revisionRequestView(row, content),
+    };
+  }
+
+  /** Adds, changes, or removes the user-facing name for one revision. */
+  async nameRevision(
+    userId: EntityId,
+    requestId: EntityId,
+    revisionId: EntityId,
+    name: string | null,
+  ): Promise<RequestRevisionSummary> {
+    return this.#database.transaction().execute(async (transaction) => {
+      const request = await this.#requestRow(transaction, requestId);
+      const workspaceId = bytesToId(request.workspace_id);
+      await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
+      await this.#revisionRow(transaction, requestId, revisionId);
+      const existing = await transaction
+        .selectFrom("request_versions")
+        .select(["id", "created_by", "created_at"])
+        .where("revision_id", "=", idToBytes(revisionId))
+        .executeTakeFirst();
+      if (name === null) {
+        if (existing !== undefined) {
+          await transaction
+            .deleteFrom("request_versions")
+            .where("id", "=", existing.id)
+            .execute();
+        }
+      } else {
+        const normalizedName = normalizeName(name);
+        const now = Date.now();
+        if (existing === undefined) {
+          await transaction
+            .insertInto("request_versions")
+            .values({
+              id: idToBytes(createEntityId()),
+              request_id: idToBytes(requestId),
+              revision_id: idToBytes(revisionId),
+              name: normalizedName,
+              name_key: normalizedName.toLocaleLowerCase("en-US"),
+              created_by: idToBytes(userId),
+              created_at: now,
+              updated_by: idToBytes(userId),
+              updated_at: now,
+            })
+            .execute();
+        } else {
+          await transaction
+            .updateTable("request_versions")
+            .set({
+              name: normalizedName,
+              name_key: normalizedName.toLocaleLowerCase("en-US"),
+              updated_by: idToBytes(userId),
+              updated_at: now,
+            })
+            .where("id", "=", existing.id)
+            .executeTakeFirstOrThrow();
+        }
+      }
+      await this.#audit.record(transaction, {
+        type: "request.revision_named",
+        actorUserId: userId,
+        workspaceId,
+        data: { requestId, revisionId, named: name !== null },
+      });
+      const [summary] = await this.#revisionSummaries(
+        [revisionId],
+        requestId,
+        transaction,
+      );
+      if (summary === undefined) {
+        throw new ResourceNotFoundError("Request revision not found");
+      }
+      return summary;
+    });
+  }
+
+  /** Copies immutable revision content into the current mutable draft. */
+  async restoreRevision(
+    userId: EntityId,
+    requestId: EntityId,
+    revisionId: EntityId,
+    expectedDraftRevision: number,
+  ): Promise<RequestView> {
+    const revision = await this.#revisionRow(
+      this.#database,
+      requestId,
+      revisionId,
+    );
+    const content = parseRevisionContent(revision.content_json);
+    const current = await this.get(userId, requestId);
+    return this.update(
+      userId,
+      requestId,
+      expectedDraftRevision,
+      content.name ?? current.name,
+      content.method,
+      content.targetUrl,
+      content.query,
+      content.localHeaders ?? current.headers,
+      content.body,
+      content.preRequestScript,
+      content.postResponseScript,
+    );
   }
 
   /** Duplicates a saved request beside its source without copying history. */
@@ -978,6 +1185,7 @@ export class RequestService {
         row.pre_request_script === content.preRequestScript &&
         row.post_response_script === content.postResponseScript
       ) {
+        await this.#ensureRevision(transaction, row, userId, "manual_save");
         return this.#requestView(transaction, row);
       }
       await transaction
@@ -1007,7 +1215,7 @@ export class RequestService {
         workspaceId,
         data: { requestId, draftRevision: expectedDraftRevision + 1 },
       });
-      return {
+      const updatedView = {
         ...(await this.#requestView(transaction, row)),
         name: normalizedName,
         method: content.method,
@@ -1019,6 +1227,24 @@ export class RequestService {
         postResponseScript: content.postResponseScript,
         draftRevision: expectedDraftRevision + 1,
       };
+      await this.#ensureRevision(
+        transaction,
+        {
+          ...row,
+          name: normalizedName,
+          method: content.method,
+          target_url: content.targetUrl,
+          query_json: queryJson,
+          headers_json: headersJson,
+          body_text: content.body,
+          pre_request_script: content.preRequestScript,
+          post_response_script: content.postResponseScript,
+          draft_revision: expectedDraftRevision + 1,
+        },
+        userId,
+        "manual_save",
+      );
+      return updatedView;
     });
   }
 
@@ -1098,38 +1324,13 @@ export class RequestService {
               new VariableResolver(variableProfile.variables),
             )
           : undefined;
-      const content = JSON.stringify({
-        method: request.method,
-        targetMode: request.targetMode,
-        targetUrl: request.targetUrl,
-        queryMode: request.queryMode,
-        query: request.query,
-        headers: resolvedHeaders,
-        body: request.body,
-        preRequestScript: request.preRequestScript,
-        postResponseScript: request.postResponseScript,
-      });
-      const fingerprint = createHash("sha256").update(content).digest("hex");
-      const latest = await transaction
-        .selectFrom("request_revisions")
-        .select(["id", "content_fingerprint"])
-        .where("request_id", "=", idToBytes(requestId))
-        .orderBy("created_at", "desc")
-        .orderBy("id", "desc")
-        .executeTakeFirst();
-      // Reuse an identical latest snapshot so repeated executions do not create
-      // empty history entries. A changed draft gets a new immutable revision.
-      const revisionId =
-        latest?.content_fingerprint === fingerprint
-          ? bytesToId(latest.id)
-          : await this.#createRevision(
-              transaction,
-              requestId,
-              userId,
-              content,
-              fingerprint,
-              latest === undefined ? null : bytesToId(latest.id),
-            );
+      const revisionId = await this.#ensureRevision(
+        transaction,
+        row,
+        userId,
+        "execution",
+        resolvedHeaders,
+      );
       const executionId = createEntityId();
       const createdAt = Date.now();
       await transaction
@@ -1177,6 +1378,100 @@ export class RequestService {
         executionId,
         revisionId,
         request: eagerlyComposed?.request ?? executionRequest,
+        variables: variableProfile.variables,
+        variableSources: variableProfile.sources,
+        variableEvidence: variableProfile.evidence,
+        materialized: eagerlyComposed !== undefined,
+        createdAt,
+      };
+    });
+  }
+
+  /** Creates an execution from one immutable revision without changing history. */
+  async prepareRevisionExecution(
+    userId: EntityId,
+    sessionId: EntityId,
+    requestId: EntityId,
+    revisionId: EntityId,
+  ): Promise<PreparedExecution> {
+    return this.#database.transaction().execute(async (transaction) => {
+      const row = await this.#requestRow(transaction, requestId);
+      const workspaceId = bytesToId(row.workspace_id);
+      await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
+      const revision = await this.#revisionRow(
+        transaction,
+        requestId,
+        revisionId,
+      );
+      const content = parseRevisionContent(revision.content_json);
+      const effectiveHeaders = content.headers;
+      const request: ExecutionRequestSnapshot = {
+        workspaceId,
+        requestId,
+        method: content.method,
+        targetUrl: content.targetUrl,
+        query: content.query,
+        headers: effectiveHeaders,
+        body: content.body,
+        preRequestScript: content.preRequestScript,
+        postResponseScript: content.postResponseScript,
+      };
+      const variableProfile = await this.#variables.effectiveProfile(
+        transaction,
+        sessionId,
+        workspaceId,
+        row.parent_collection_id === null
+          ? null
+          : bytesToId(row.parent_collection_id),
+        requestId,
+      );
+      const eagerlyComposed =
+        request.preRequestScript === "" && request.postResponseScript === ""
+          ? composeWithVariables(
+              request,
+              new VariableResolver(variableProfile.variables),
+            )
+          : undefined;
+      const executionId = createEntityId();
+      const createdAt = Date.now();
+      await transaction
+        .insertInto("executions")
+        .values({
+          id: idToBytes(executionId),
+          workspace_id: idToBytes(workspaceId),
+          request_id: idToBytes(requestId),
+          request_revision_id: idToBytes(revisionId),
+          created_by: idToBytes(userId),
+          state: "created",
+          snapshot_json: JSON.stringify({
+            ...(eagerlyComposed?.persisted ?? request),
+            targetMode: "absolute",
+            queryMode: "structured",
+            variableProfiles: variableProfile.evidence,
+            secretReferences: eagerlyComposed?.secretReferences ?? [],
+          }),
+          response_status: null,
+          response_headers_json: null,
+          response_blob_id: null,
+          body_complete: 0,
+          body_bytes: null,
+          body_sha256: null,
+          error_json: null,
+          script_result_json: null,
+          created_at: createdAt,
+          completed_at: null,
+        })
+        .execute();
+      await this.#audit.record(transaction, {
+        type: "execution.created",
+        actorUserId: userId,
+        workspaceId,
+        data: { executionId, requestId, revisionId, historical: true },
+      });
+      return {
+        executionId,
+        revisionId,
+        request: eagerlyComposed?.request ?? request,
         variables: variableProfile.variables,
         variableSources: variableProfile.sources,
         variableEvidence: variableProfile.evidence,
@@ -1279,24 +1574,42 @@ export class RequestService {
     });
   }
 
-  /** Persists one immutable execution-triggered request revision. */
-  async #createRevision(
+  /** Reuses matching content or appends one immutable request revision. */
+  async #ensureRevision(
     transaction: Transaction<DatabaseSchema>,
-    requestId: EntityId,
+    row: RequestRow,
     userId: EntityId,
-    content: string,
-    fingerprint: string,
-    parentRevisionId: EntityId | null,
+    creationReason: "manual_save" | "execution",
+    effectiveHeaders?: readonly RequestField[],
   ): Promise<EntityId> {
+    const resolvedHeaders =
+      effectiveHeaders ??
+      (await this.#resolveHeaders(
+        transaction,
+        row.workspace_id,
+        row.parent_collection_id,
+        JSON.parse(row.headers_json) as RequestField[],
+      ));
+    const content = JSON.stringify(revisionContent(row, resolvedHeaders));
+    const fingerprint = createHash("sha256").update(content).digest("hex");
+    const latest = await transaction
+      .selectFrom("request_revisions")
+      .select(["id", "content_fingerprint"])
+      .where("request_id", "=", row.request_id)
+      .orderBy("created_at", "desc")
+      .orderBy("id", "desc")
+      .executeTakeFirst();
+    if (latest?.content_fingerprint === fingerprint) {
+      return bytesToId(latest.id);
+    }
     const revisionId = createEntityId();
     await transaction
       .insertInto("request_revisions")
       .values({
         id: idToBytes(revisionId),
-        request_id: idToBytes(requestId),
-        parent_revision_id:
-          parentRevisionId === null ? null : idToBytes(parentRevisionId),
-        creation_reason: "execution",
+        request_id: row.request_id,
+        parent_revision_id: latest === undefined ? null : latest.id,
+        creation_reason: creationReason,
         created_by: idToBytes(userId),
         created_at: Date.now(),
         content_json: content,
@@ -1304,6 +1617,70 @@ export class RequestService {
       })
       .execute();
     return revisionId;
+  }
+
+  /** Loads an immutable revision only when it belongs to the named request. */
+  async #revisionRow(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    requestId: EntityId,
+    revisionId: EntityId,
+  ) {
+    const row = await database
+      .selectFrom("request_revisions")
+      .selectAll()
+      .where("id", "=", idToBytes(revisionId))
+      .where("request_id", "=", idToBytes(requestId))
+      .executeTakeFirst();
+    if (row === undefined) {
+      throw new ResourceNotFoundError("Request revision not found");
+    }
+    return row;
+  }
+
+  /** Loads public summaries for a bounded set of already authorized revisions. */
+  async #revisionSummaries(
+    revisionIds: readonly EntityId[],
+    requestId: EntityId,
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema> = this
+      .#database,
+  ): Promise<readonly RequestRevisionSummary[]> {
+    if (revisionIds.length === 0) return [];
+    const rows = await database
+      .selectFrom("request_revisions as revision")
+      .innerJoin("users as creator", "creator.id", "revision.created_by")
+      .leftJoin(
+        "request_versions as version",
+        "version.revision_id",
+        "revision.id",
+      )
+      .select([
+        "revision.id",
+        "revision.creation_reason",
+        "revision.created_by",
+        "revision.created_at",
+        "creator.username",
+        "version.name",
+      ])
+      .where("revision.request_id", "=", idToBytes(requestId))
+      .where("revision.id", "in", revisionIds.map(idToBytes))
+      .execute();
+    const byId = new Map(rows.map((row) => [bytesToId(row.id), row] as const));
+    return revisionIds.flatMap((revisionId) => {
+      const row = byId.get(revisionId);
+      return row === undefined
+        ? []
+        : [
+            {
+              revisionId,
+              requestId,
+              name: row.name,
+              creationReason: row.creation_reason,
+              createdBy: bytesToId(row.created_by),
+              createdByUsername: row.username,
+              createdAt: new Date(row.created_at).toISOString(),
+            },
+          ];
+    });
   }
 
   /** Loads request draft and tree metadata or raises resource-not-found. */
@@ -2022,6 +2399,87 @@ function mapRequest(row: {
     preRequestScript: row.pre_request_script,
     postResponseScript: row.post_response_script,
     draftRevision: row.draft_revision,
+  };
+}
+
+/** Serializes request-owned revision content plus optional effective headers. */
+function revisionContent(
+  row: RequestRow,
+  effectiveHeaders: readonly RequestField[],
+): RevisionContent {
+  const request = mapRequest(row);
+  return {
+    name: request.name,
+    method: request.method,
+    targetMode: request.targetMode,
+    targetUrl: request.targetUrl,
+    queryMode: request.queryMode,
+    query: request.query,
+    headers: effectiveHeaders,
+    localHeaders: request.headers,
+    body: request.body,
+    preRequestScript: request.preRequestScript,
+    postResponseScript: request.postResponseScript,
+  };
+}
+
+/** Parses and validates persisted revision content at the storage boundary. */
+function parseRevisionContent(value: string): RevisionContent {
+  const parsed = JSON.parse(value) as Partial<RevisionContent>;
+  const normalized = normalizeExecutionInput({
+    method: validateMethod(parsed.method ?? ""),
+    targetUrl: parsed.targetUrl ?? "",
+    query: parsed.query ?? [],
+    headers: parsed.headers ?? [],
+    body: parsed.body ?? "",
+    preRequestScript: parsed.preRequestScript ?? "",
+    postResponseScript: parsed.postResponseScript ?? "",
+  });
+  return {
+    ...(parsed.name === undefined ? {} : { name: normalizeName(parsed.name) }),
+    method: normalized.method,
+    targetMode: "absolute",
+    targetUrl: normalized.targetUrl,
+    queryMode: "structured",
+    query: normalized.query,
+    headers: normalized.headers,
+    ...(parsed.localHeaders === undefined
+      ? {}
+      : { localHeaders: validateHeaders(parsed.localHeaders) }),
+    body: normalized.body,
+    preRequestScript: normalized.preRequestScript,
+    postResponseScript: normalized.postResponseScript,
+  };
+}
+
+/** Projects immutable content onto request identity for read-only editing UI. */
+function revisionRequestView(
+  row: RequestRow,
+  content: RevisionContent,
+): RequestView {
+  const current = mapRequest(row);
+  const localHeaders = content.localHeaders ?? current.headers;
+  const localHeaderNames = new Set(
+    localHeaders
+      .filter((header) => header.enabled)
+      .map((header) => header.name.toLowerCase()),
+  );
+  return {
+    ...current,
+    name: content.name ?? current.name,
+    method: content.method,
+    targetUrl: content.targetUrl,
+    query: content.query,
+    headers: localHeaders,
+    inheritedHeaders:
+      content.localHeaders === undefined
+        ? []
+        : content.headers.filter(
+            (header) => !localHeaderNames.has(header.name.toLowerCase()),
+          ),
+    body: content.body,
+    preRequestScript: content.preRequestScript,
+    postResponseScript: content.postResponseScript,
   };
 }
 

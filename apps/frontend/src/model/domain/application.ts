@@ -4,6 +4,8 @@ import type {
   ExecutionView,
   HttpMethod,
   RequestField,
+  RequestRevisionSummary,
+  RequestRevisionView,
   RequestView,
   TreeNode,
   WorkspaceSummary,
@@ -41,6 +43,8 @@ export interface RequestTab {
   readonly pendingParentCollectionId: string | null;
   readonly inheritedHeaders: readonly RequestField[];
   readonly execution: ExecutionView | null;
+  readonly revisions: readonly RequestRevisionSummary[];
+  readonly viewingRevision: RequestRevisionView | null;
   readonly busy: boolean;
 }
 

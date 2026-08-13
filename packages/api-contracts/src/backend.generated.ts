@@ -147,6 +147,7 @@ export interface components {
     EnvironmentId: components["schemas"]["UuidV7"];
     EnvironmentVariableId: components["schemas"]["UuidV7"];
     RequestId: components["schemas"]["UuidV7"];
+    RevisionId: components["schemas"]["UuidV7"];
     ExecutionId: components["schemas"]["UuidV7"];
     BlobId: components["schemas"]["UuidV7"];
     ProblemCode: string;
@@ -225,10 +226,15 @@ export interface components {
       | components["schemas"]["VariablePreviewCommand"]
       | components["schemas"]["RequestCreateCommand"]
       | components["schemas"]["RequestGetCommand"]
+      | components["schemas"]["RequestRevisionListCommand"]
+      | components["schemas"]["RequestRevisionGetCommand"]
+      | components["schemas"]["RequestRevisionNameCommand"]
+      | components["schemas"]["RequestRevisionRestoreCommand"]
       | components["schemas"]["RequestDuplicateCommand"]
       | components["schemas"]["RequestUpdateCommand"]
       | components["schemas"]["RequestDeleteCommand"]
       | components["schemas"]["ExecutionStartCommand"]
+      | components["schemas"]["ExecutionStartRevisionCommand"]
       | components["schemas"]["ExecutionStartTemporaryCommand"];
     CommandEnvelope: {
       /** @constant */
@@ -649,6 +655,63 @@ export interface components {
        */
       type: "RequestDuplicateCommand";
     };
+    RequestRevisionListCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "request.revision.list";
+      payload?: {
+        requestId: components["schemas"]["RequestId"];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "RequestRevisionListCommand";
+    };
+    RequestRevisionGetCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "request.revision.get";
+      payload?: {
+        requestId: components["schemas"]["RequestId"];
+        revisionId: components["schemas"]["RevisionId"];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "RequestRevisionGetCommand";
+    };
+    RequestRevisionNameCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "request.revision.name";
+      payload?: {
+        requestId: components["schemas"]["RequestId"];
+        revisionId: components["schemas"]["RevisionId"];
+        name: string | null;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "RequestRevisionNameCommand";
+    };
+    RequestRevisionRestoreCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "request.revision.restore";
+      payload?: {
+        requestId: components["schemas"]["RequestId"];
+        revisionId: components["schemas"]["RevisionId"];
+        expectedDraftRevision: number;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "RequestRevisionRestoreCommand";
+    };
     RequestUpdateCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
       type?: "request.update";
@@ -699,6 +762,20 @@ export interface components {
        * @enum {string}
        */
       type: "ExecutionStartCommand";
+    };
+    ExecutionStartRevisionCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "execution.start_revision";
+      payload?: {
+        requestId: components["schemas"]["RequestId"];
+        revisionId: components["schemas"]["RevisionId"];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "ExecutionStartRevisionCommand";
     };
     ExecutionStartTemporaryCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
@@ -925,6 +1002,19 @@ export interface components {
       preRequestScript: string;
       postResponseScript: string;
       draftRevision: number;
+    };
+    RequestRevisionSummary: {
+      revisionId: components["schemas"]["RevisionId"];
+      requestId: components["schemas"]["RequestId"];
+      name: string | null;
+      /** @enum {string} */
+      creationReason: "manual_save" | "execution";
+      createdBy: components["schemas"]["UserId"];
+      createdByUsername: string;
+      createdAt: components["schemas"]["UtcDateTime"];
+    };
+    RequestRevisionView: components["schemas"]["RequestRevisionSummary"] & {
+      request: components["schemas"]["RequestView"];
     };
     ExecutionView: {
       executionId: components["schemas"]["ExecutionId"];

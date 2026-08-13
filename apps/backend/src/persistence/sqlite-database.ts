@@ -16,6 +16,7 @@ const VARIABLE_SCOPES_MIGRATION = "0006_variable_scopes";
 const WORKSPACE_HEADERS_MIGRATION = "0007_workspace_headers";
 const REQUEST_SCRIPTS_MIGRATION = "0008_request_scripts";
 const RESOURCE_DELETION_MIGRATION = "0009_resource_deletion";
+const REQUEST_VERSIONS_MIGRATION = "0010_request_versions";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -325,6 +326,13 @@ export class SqliteDatabase {
     if (resourceDeletionApplied === undefined) {
       this.#migrateResourceDeletion();
     }
+
+    const requestVersionsApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(REQUEST_VERSIONS_MIGRATION);
+    if (requestVersionsApplied === undefined) {
+      this.#migrateRequestVersions();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -361,6 +369,7 @@ export class SqliteDatabase {
       WORKSPACE_HEADERS_MIGRATION,
       REQUEST_SCRIPTS_MIGRATION,
       RESOURCE_DELETION_MIGRATION,
+      REQUEST_VERSIONS_MIGRATION,
     ].some((identifier) => !identifiers.has(identifier));
   }
 
@@ -689,6 +698,29 @@ export class SqliteDatabase {
           ADD COLUMN deleted_at INTEGER;
       `);
       this.#recordMigration(RESOURCE_DELETION_MIGRATION);
+    })();
+  }
+
+  /** Adds user-facing names that point to immutable request revisions. */
+  #migrateRequestVersions(): void {
+    this.#driver.transaction(() => {
+      this.#driver.exec(`
+        CREATE TABLE request_versions (
+          id BLOB PRIMARY KEY CHECK(length(id) = 16),
+          request_id BLOB NOT NULL REFERENCES request_drafts(request_id) ON DELETE CASCADE,
+          revision_id BLOB NOT NULL UNIQUE REFERENCES request_revisions(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          name_key TEXT NOT NULL,
+          created_by BLOB NOT NULL REFERENCES users(id),
+          created_at INTEGER NOT NULL,
+          updated_by BLOB NOT NULL REFERENCES users(id),
+          updated_at INTEGER NOT NULL,
+          UNIQUE(request_id, name_key)
+        ) STRICT;
+        CREATE INDEX request_versions_request
+          ON request_versions(request_id, created_at DESC, id DESC);
+      `);
+      this.#recordMigration(REQUEST_VERSIONS_MIGRATION);
     })();
   }
 

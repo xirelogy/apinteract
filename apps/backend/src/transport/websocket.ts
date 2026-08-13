@@ -341,6 +341,36 @@ async function dispatch(
         userId,
         requireString(command.payload.requestId, "requestId"),
       );
+    case "request.revision.list":
+      return {
+        revisions: await application.requests.listRevisions(
+          userId,
+          requireString(command.payload.requestId, "requestId"),
+        ),
+      };
+    case "request.revision.get":
+      return application.requests.getRevision(
+        userId,
+        requireString(command.payload.requestId, "requestId"),
+        requireString(command.payload.revisionId, "revisionId"),
+      );
+    case "request.revision.name":
+      return application.requests.nameRevision(
+        userId,
+        requireString(command.payload.requestId, "requestId"),
+        requireString(command.payload.revisionId, "revisionId"),
+        optionalString(command.payload.name),
+      );
+    case "request.revision.restore":
+      return application.requests.restoreRevision(
+        userId,
+        requireString(command.payload.requestId, "requestId"),
+        requireString(command.payload.revisionId, "revisionId"),
+        requireInteger(
+          command.payload.expectedDraftRevision,
+          "expectedDraftRevision",
+        ),
+      );
     case "request.duplicate":
       return application.requests.duplicate(
         userId,
@@ -381,6 +411,14 @@ async function dispatch(
         userId,
         identity.sessionId,
         requireString(command.payload.requestId, "requestId"),
+        (event) => publishExecutionEvent(event, publish),
+      );
+    case "execution.start_revision":
+      return application.executions.startRevision(
+        userId,
+        identity.sessionId,
+        requireString(command.payload.requestId, "requestId"),
+        requireString(command.payload.revisionId, "revisionId"),
         (event) => publishExecutionEvent(event, publish),
       );
     case "execution.start_temporary":

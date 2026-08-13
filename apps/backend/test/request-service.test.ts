@@ -569,4 +569,139 @@ describe("RequestService draft updates", () => {
       await rm(rootPath, { recursive: true, force: true });
     }
   });
+
+  it("saves, names, restores, and prepares immutable request revisions", async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), "apinteract-versions-"));
+    const database = await SqliteDatabase.open(
+      join(rootPath, "database.sqlite"),
+    );
+    try {
+      const userId = createEntityId();
+      await database.db
+        .insertInto("users")
+        .values({
+          id: idToBytes(userId),
+          status: "active",
+          username: "version-test",
+          display_name: "Version Test",
+          is_instance_admin: 0,
+          created_at: Date.now(),
+          deleted_at: null,
+        })
+        .execute();
+      const audit = new AuditService(database.db, join(rootPath, "audit"));
+      const workspaces = new WorkspaceService(database.db, audit);
+      const environments = new EnvironmentService(
+        database.db,
+        workspaces,
+        audit,
+      );
+      const variables = new VariableService(
+        database.db,
+        workspaces,
+        environments,
+        audit,
+      );
+      const requests = new RequestService(
+        database.db,
+        workspaces,
+        variables,
+        audit,
+      );
+      const workspace = await workspaces.create(userId, "Workspace");
+      const request = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        null,
+        "Versions",
+        "GET",
+        "https://example.test/first",
+        [],
+        [{ name: "X-Local", value: "first", enabled: true }],
+        "first",
+      );
+      const saved = await requests.update(
+        userId,
+        request.requestId,
+        request.draftRevision,
+        request.name,
+        "POST",
+        "https://example.test/second",
+        [{ name: "page", value: "2", enabled: true }],
+        [{ name: "X-Local", value: "second", enabled: true }],
+        "second",
+      );
+      const [firstRevision] = await requests.listRevisions(
+        userId,
+        request.requestId,
+      );
+      expect(firstRevision).toMatchObject({
+        creationReason: "manual_save",
+        name: null,
+        createdByUsername: "version-test",
+      });
+      if (firstRevision === undefined) throw new Error("Missing revision");
+      await requests.nameRevision(
+        userId,
+        request.requestId,
+        firstRevision.revisionId,
+        "Release candidate",
+      );
+      expect(
+        await requests.getRevision(
+          userId,
+          request.requestId,
+          firstRevision.revisionId,
+        ),
+      ).toMatchObject({
+        name: "Release candidate",
+        request: {
+          method: "POST",
+          targetUrl: "https://example.test/second",
+          body: "second",
+          headers: [{ name: "X-Local", value: "second", enabled: true }],
+        },
+      });
+      const changed = await requests.update(
+        userId,
+        request.requestId,
+        saved.draftRevision,
+        request.name,
+        "DELETE",
+        "https://example.test/third",
+        [],
+        [],
+        "third",
+      );
+      const restored = await requests.restoreRevision(
+        userId,
+        request.requestId,
+        firstRevision.revisionId,
+        changed.draftRevision,
+      );
+      expect(restored).toMatchObject({
+        method: "POST",
+        targetUrl: "https://example.test/second",
+        body: "second",
+      });
+      const prepared = await requests.prepareRevisionExecution(
+        userId,
+        createEntityId(),
+        request.requestId,
+        firstRevision.revisionId,
+      );
+      expect(prepared.revisionId).toBe(firstRevision.revisionId);
+      expect(prepared.request).toMatchObject({
+        method: "POST",
+        targetUrl: "https://example.test/second",
+        body: "second",
+      });
+      expect(
+        await requests.listRevisions(userId, request.requestId),
+      ).toHaveLength(4);
+    } finally {
+      await database.close();
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
 });

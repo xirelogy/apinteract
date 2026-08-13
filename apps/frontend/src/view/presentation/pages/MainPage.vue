@@ -113,6 +113,12 @@ const requestVariableProfile = computed(() => {
     ? profile
     : null;
 });
+const displayedInheritedHeaders = computed(
+  () =>
+    activeTab.value?.viewingRevision?.request.inheritedHeaders ??
+    activeTab.value?.inheritedHeaders ??
+    [],
+);
 const variablePreviewContextKey = computed(() =>
   [
     selectedWorkspaceId.value ?? "",
@@ -339,6 +345,38 @@ async function confirmRequestDeletion(): Promise<void> {
   if (target === null) return;
   await controller.deleteRequest(target.request);
   requestDeleteTarget.value = null;
+}
+
+/** Switches the active request tab to one revision or its current draft. */
+function selectActiveRevision(revisionId: string | null): void {
+  if (activeTab.value !== null) {
+    void controller.selectRequestRevision(activeTab.value.tabId, revisionId);
+  }
+}
+
+/** Names one immutable revision belonging to the active request tab. */
+function nameActiveRevision(revisionId: string, name: string | null): void {
+  if (activeTab.value !== null) {
+    void controller.nameRequestRevision(
+      activeTab.value.tabId,
+      revisionId,
+      name,
+    );
+  }
+}
+
+/** Restores one immutable revision into the active mutable draft. */
+function restoreActiveRevision(revisionId: string): void {
+  if (activeTab.value !== null) {
+    void controller.restoreRequestRevision(activeTab.value.tabId, revisionId);
+  }
+}
+
+/** Executes one immutable revision from the active request tab. */
+function executeActiveRevision(revisionId: string): void {
+  if (activeTab.value !== null) {
+    void controller.executeRequestRevision(activeTab.value.tabId, revisionId);
+  }
 }
 
 /** Releases a request deletion target when its controlled dialog closes. */
@@ -682,12 +720,14 @@ function discardRequestTab(): void {
           :execution="activeTab?.execution ?? null"
           :tab-id="activeTab?.tabId ?? null"
           :temporary="activeTab?.request === null"
-          :inherited-headers="activeTab?.inheritedHeaders ?? []"
+          :inherited-headers="displayedInheritedHeaders"
           :request-variable-profile="requestVariableProfile"
           :variable-previews="variablePreviews"
           :preview-context-key="variablePreviewContextKey"
           :busy="(activeTab?.busy ?? false) || busy"
           :can-edit="canEditWorkspace"
+          :revisions="activeTab?.revisions ?? []"
+          :viewing-revision="activeTab?.viewingRevision ?? null"
           @change="
             activeTab && controller.updateRequestDraft(activeTab.tabId, $event)
           "
@@ -696,6 +736,13 @@ function discardRequestTab(): void {
           @preview="controller.previewVariables($event)"
           @load-variables="editRequestVariables"
           @save-variables="saveRequestVariables"
+          @load-revisions="
+            activeTab && controller.loadRequestRevisions(activeTab.tabId)
+          "
+          @select-revision="selectActiveRevision"
+          @name-revision="nameActiveRevision"
+          @restore-revision="restoreActiveRevision"
+          @execute-revision="executeActiveRevision"
           @download="downloadExecutionBody"
         />
       </div>

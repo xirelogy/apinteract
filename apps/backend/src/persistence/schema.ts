@@ -155,6 +155,18 @@ export interface RequestRevisionTable {
   content_fingerprint: string;
 }
 
+export interface RequestVersionTable {
+  id: BinaryId;
+  request_id: BinaryId;
+  revision_id: BinaryId;
+  name: string;
+  name_key: string;
+  created_by: BinaryId;
+  created_at: number;
+  updated_by: BinaryId;
+  updated_at: number;
+}
+
 export interface ExecutionTable {
   id: BinaryId;
   workspace_id: BinaryId;
@@ -240,6 +252,7 @@ export interface DatabaseSchema {
   session_workspace_environments: SessionWorkspaceEnvironmentTable;
   request_drafts: RequestDraftTable;
   request_revisions: RequestRevisionTable;
+  request_versions: RequestVersionTable;
   executions: ExecutionTable;
   blobs: BlobTable;
   blob_references: BlobReferenceTable;

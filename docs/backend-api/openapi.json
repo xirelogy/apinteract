@@ -386,6 +386,9 @@
       "RequestId": {
         "$ref": "#/components/schemas/UuidV7"
       },
+      "RevisionId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
       "ExecutionId": {
         "$ref": "#/components/schemas/UuidV7"
       },
@@ -630,6 +633,18 @@
             "$ref": "#/components/schemas/RequestGetCommand"
           },
           {
+            "$ref": "#/components/schemas/RequestRevisionListCommand"
+          },
+          {
+            "$ref": "#/components/schemas/RequestRevisionGetCommand"
+          },
+          {
+            "$ref": "#/components/schemas/RequestRevisionNameCommand"
+          },
+          {
+            "$ref": "#/components/schemas/RequestRevisionRestoreCommand"
+          },
+          {
             "$ref": "#/components/schemas/RequestDuplicateCommand"
           },
           {
@@ -640,6 +655,9 @@
           },
           {
             "$ref": "#/components/schemas/ExecutionStartCommand"
+          },
+          {
+            "$ref": "#/components/schemas/ExecutionStartRevisionCommand"
           },
           {
             "$ref": "#/components/schemas/ExecutionStartTemporaryCommand"
@@ -1585,6 +1603,96 @@
           }
         ]
       },
+      "RequestRevisionListCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "request.revision.list" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requestId"],
+                "properties": {
+                  "requestId": { "$ref": "#/components/schemas/RequestId" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RequestRevisionGetCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "request.revision.get" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requestId", "revisionId"],
+                "properties": {
+                  "requestId": { "$ref": "#/components/schemas/RequestId" },
+                  "revisionId": { "$ref": "#/components/schemas/RevisionId" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RequestRevisionNameCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "request.revision.name" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requestId", "revisionId", "name"],
+                "properties": {
+                  "requestId": { "$ref": "#/components/schemas/RequestId" },
+                  "revisionId": { "$ref": "#/components/schemas/RevisionId" },
+                  "name": {
+                    "oneOf": [
+                      { "type": "string", "minLength": 1, "maxLength": 200 },
+                      { "type": "null" }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RequestRevisionRestoreCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "request.revision.restore" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "requestId",
+                  "revisionId",
+                  "expectedDraftRevision"
+                ],
+                "properties": {
+                  "requestId": { "$ref": "#/components/schemas/RequestId" },
+                  "revisionId": { "$ref": "#/components/schemas/RevisionId" },
+                  "expectedDraftRevision": { "type": "integer", "minimum": 0 }
+                }
+              }
+            }
+          }
+        ]
+      },
       "RequestUpdateCommand": {
         "allOf": [
           {
@@ -1709,6 +1817,26 @@
                   "requestId": {
                     "$ref": "#/components/schemas/RequestId"
                   }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ExecutionStartRevisionCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "execution.start_revision" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requestId", "revisionId"],
+                "properties": {
+                  "requestId": { "$ref": "#/components/schemas/RequestId" },
+                  "revisionId": { "$ref": "#/components/schemas/RevisionId" }
                 }
               }
             }
@@ -2363,6 +2491,45 @@
             "minimum": 0
           }
         }
+      },
+      "RequestRevisionSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revisionId",
+          "requestId",
+          "name",
+          "creationReason",
+          "createdBy",
+          "createdByUsername",
+          "createdAt"
+        ],
+        "properties": {
+          "revisionId": { "$ref": "#/components/schemas/RevisionId" },
+          "requestId": { "$ref": "#/components/schemas/RequestId" },
+          "name": {
+            "oneOf": [{ "type": "string" }, { "type": "null" }]
+          },
+          "creationReason": {
+            "type": "string",
+            "enum": ["manual_save", "execution"]
+          },
+          "createdBy": { "$ref": "#/components/schemas/UserId" },
+          "createdByUsername": { "type": "string" },
+          "createdAt": { "$ref": "#/components/schemas/UtcDateTime" }
+        }
+      },
+      "RequestRevisionView": {
+        "allOf": [
+          { "$ref": "#/components/schemas/RequestRevisionSummary" },
+          {
+            "type": "object",
+            "required": ["request"],
+            "properties": {
+              "request": { "$ref": "#/components/schemas/RequestView" }
+            }
+          }
+        ]
       },
       "ExecutionView": {
         "type": "object",

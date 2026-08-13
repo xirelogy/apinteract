@@ -7,6 +7,8 @@ import type {
   EnvironmentView,
   ExecutionView,
   RequestField,
+  RequestRevisionSummary,
+  RequestRevisionView,
   RequestView,
   TreeNode,
   EditableVariableScopeKind,
@@ -644,6 +646,8 @@ export class ApplicationController {
               })) ?? [])
             : [],
       execution: null,
+      revisions: [],
+      viewingRevision: null,
       busy: false,
     };
     store.requestTabs.push(tab);
@@ -790,6 +794,7 @@ export class ApplicationController {
         baseline: cloneDraft(savedDraft),
       }));
       replaceLoadedRequestNode(updated);
+      await this.#refreshRequestRevisions(tabId, updated.requestId);
     });
   }
 
@@ -823,6 +828,8 @@ export class ApplicationController {
         inheritedHeaders: request.inheritedHeaders.map((field) => ({
           ...field,
         })),
+        revisions: [],
+        viewingRevision: null,
       }));
       await this.#reloadCollection(tab.workspaceId, parentCollectionId);
     });
@@ -854,6 +861,113 @@ export class ApplicationController {
         ...current,
         execution,
       }));
+    });
+  }
+
+  /** Loads immutable history for one saved request tab. */
+  async loadRequestRevisions(tabId: string): Promise<void> {
+    const tab = requireTab(tabId);
+    if (tab.request === null) return;
+    await this.#runTab(tabId, () =>
+      this.#refreshRequestRevisions(tabId, tab.request!.requestId),
+    );
+  }
+
+  /** Switches the whole request editor to one immutable revision or the draft. */
+  async selectRequestRevision(
+    tabId: string,
+    revisionId: string | null,
+  ): Promise<void> {
+    const tab = requireTab(tabId);
+    if (tab.request === null) return;
+    if (revisionId === null) {
+      this.#updateTab(tabId, (current) => ({
+        ...current,
+        viewingRevision: null,
+      }));
+      return;
+    }
+    await this.#runTab(tabId, async () => {
+      const revision = await this.#webSocket.command<RequestRevisionView>(
+        "request.revision.get",
+        { requestId: tab.request!.requestId, revisionId },
+      );
+      this.#updateTab(tabId, (current) => ({
+        ...current,
+        viewingRevision: revision,
+      }));
+    });
+  }
+
+  /** Assigns or removes the user-facing name for one immutable revision. */
+  async nameRequestRevision(
+    tabId: string,
+    revisionId: string,
+    name: string | null,
+  ): Promise<void> {
+    const tab = requireTab(tabId);
+    if (tab.request === null) return;
+    await this.#runTab(tabId, async () => {
+      await this.#webSocket.command<RequestRevisionSummary>(
+        "request.revision.name",
+        { requestId: tab.request!.requestId, revisionId, name },
+      );
+      await this.#refreshRequestRevisions(tabId, tab.request!.requestId);
+      if (tab.viewingRevision?.revisionId === revisionId) {
+        const revision = await this.#webSocket.command<RequestRevisionView>(
+          "request.revision.get",
+          { requestId: tab.request!.requestId, revisionId },
+        );
+        this.#updateTab(tabId, (current) => ({
+          ...current,
+          viewingRevision: revision,
+        }));
+      }
+    });
+  }
+
+  /** Restores one immutable revision into the mutable draft and selects it. */
+  async restoreRequestRevision(
+    tabId: string,
+    revisionId: string,
+  ): Promise<void> {
+    const tab = requireTab(tabId);
+    if (tab.request === null) return;
+    await this.#runTab(tabId, async () => {
+      const updated = await this.#webSocket.command<RequestView>(
+        "request.revision.restore",
+        {
+          requestId: tab.request!.requestId,
+          revisionId,
+          expectedDraftRevision: tab.request!.draftRevision,
+        },
+      );
+      const draft = requestToDraft(updated);
+      this.#updateTab(tabId, (current) => ({
+        ...current,
+        request: updated,
+        draft,
+        baseline: cloneDraft(draft),
+        viewingRevision: null,
+      }));
+      replaceLoadedRequestNode(updated);
+      await this.#refreshRequestRevisions(tabId, updated.requestId);
+    });
+  }
+
+  /** Executes an immutable revision without saving or replacing the draft. */
+  async executeRequestRevision(
+    tabId: string,
+    revisionId: string,
+  ): Promise<void> {
+    const tab = requireTab(tabId);
+    if (tab.request === null) return;
+    await this.#runTab(tabId, async () => {
+      const execution = await this.#webSocket.command<ExecutionView>(
+        "execution.start_revision",
+        { requestId: tab.request!.requestId, revisionId },
+      );
+      this.#updateTab(tabId, (current) => ({ ...current, execution }));
     });
   }
 
@@ -907,12 +1021,28 @@ export class ApplicationController {
         ...field,
       })),
       execution: null,
+      revisions: [],
+      viewingRevision: null,
       busy: false,
     };
     store.requestTabs.push(tab);
     store.activeRequestTabId = tab.tabId;
     store.selectedCollectionId = null;
     store.selectedCollection = null;
+  }
+
+  /** Refreshes revision summaries without nesting request-tab busy state. */
+  async #refreshRequestRevisions(
+    tabId: string,
+    requestId: string,
+  ): Promise<void> {
+    const result = await this.#webSocket.command<{
+      revisions: RequestRevisionSummary[];
+    }>("request.revision.list", { requestId });
+    this.#updateTab(tabId, (current) => ({
+      ...current,
+      revisions: result.revisions,
+    }));
   }
 
   /** Replaces one tab through a mutation-safe state projection. */

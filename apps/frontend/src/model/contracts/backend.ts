@@ -21,6 +21,9 @@ export type VariablePreview = components["schemas"]["VariablePreview"];
 export type VariablePreviewResult =
   components["schemas"]["VariablePreviewResult"];
 export type RequestView = components["schemas"]["RequestView"];
+export type RequestRevisionSummary =
+  components["schemas"]["RequestRevisionSummary"];
+export type RequestRevisionView = components["schemas"]["RequestRevisionView"];
 export type HttpMethod = components["schemas"]["HttpMethod"];
 export type RequestField = components["schemas"]["RequestField"];
 export type ExecutionView = components["schemas"]["ExecutionView"];
