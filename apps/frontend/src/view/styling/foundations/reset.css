@@ -32,7 +32,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   color: inherit;
   font: inherit;
   letter-spacing: 0;
