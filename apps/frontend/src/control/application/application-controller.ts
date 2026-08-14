@@ -366,13 +366,14 @@ export class ApplicationController {
   async createEnvironment(
     name: string,
     variables: readonly EnvironmentVariableWrite[],
+    includedEnvironmentIds: readonly string[],
   ): Promise<EnvironmentView> {
     const store = useApplicationStore();
     const workspaceId = requireSelection(store.selectedWorkspaceId);
     return this.#run(async () => {
       const environment = await this.#webSocket.command<EnvironmentView>(
         "environment.create",
-        { workspaceId, name, variables },
+        { workspaceId, name, variables, includedEnvironmentIds },
       );
       await this.#reloadEnvironments(workspaceId);
       store.selectedEnvironment = environment;
@@ -387,13 +388,20 @@ export class ApplicationController {
     expectedRevision: number,
     name: string,
     variables: readonly EnvironmentVariableWrite[],
+    includedEnvironmentIds: readonly string[],
   ): Promise<EnvironmentView> {
     const store = useApplicationStore();
     const workspaceId = requireSelection(store.selectedWorkspaceId);
     return this.#run(async () => {
       const environment = await this.#webSocket.command<EnvironmentView>(
         "environment.update",
-        { environmentId, expectedRevision, name, variables },
+        {
+          environmentId,
+          expectedRevision,
+          name,
+          variables,
+          includedEnvironmentIds,
+        },
       );
       await this.#reloadEnvironments(workspaceId);
       store.selectedEnvironment = environment;

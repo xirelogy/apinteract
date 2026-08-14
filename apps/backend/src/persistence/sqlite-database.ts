@@ -18,6 +18,7 @@ const REQUEST_SCRIPTS_MIGRATION = "0008_request_scripts";
 const RESOURCE_DELETION_MIGRATION = "0009_resource_deletion";
 const REQUEST_VERSIONS_MIGRATION = "0010_request_versions";
 const COMPOSED_TARGETS_MIGRATION = "0011_composed_targets";
+const ENVIRONMENT_COMPOSITION_MIGRATION = "0012_environment_composition";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -341,6 +342,13 @@ export class SqliteDatabase {
     if (composedTargetsApplied === undefined) {
       this.#migrateComposedTargets();
     }
+
+    const environmentCompositionApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(ENVIRONMENT_COMPOSITION_MIGRATION);
+    if (environmentCompositionApplied === undefined) {
+      this.#migrateEnvironmentComposition();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -379,6 +387,7 @@ export class SqliteDatabase {
       RESOURCE_DELETION_MIGRATION,
       REQUEST_VERSIONS_MIGRATION,
       COMPOSED_TARGETS_MIGRATION,
+      ENVIRONMENT_COMPOSITION_MIGRATION,
     ].some((identifier) => !identifiers.has(identifier));
   }
 
@@ -802,6 +811,33 @@ export class SqliteDatabase {
     if (violation !== undefined) {
       throw new Error("Composed target migration violated a foreign key");
     }
+  }
+
+  /** Adds ordered same-workspace inclusion edges for environment composition. */
+  #migrateEnvironmentComposition(): void {
+    this.#driver.transaction(() => {
+      this.#driver.exec(`
+        CREATE UNIQUE INDEX environments_workspace_id
+          ON environments(workspace_id, id);
+
+        CREATE TABLE environment_includes (
+          workspace_id BLOB NOT NULL,
+          environment_id BLOB NOT NULL,
+          included_environment_id BLOB NOT NULL,
+          position INTEGER NOT NULL CHECK(position >= 0),
+          PRIMARY KEY(environment_id, included_environment_id),
+          UNIQUE(environment_id, position),
+          CHECK(environment_id <> included_environment_id),
+          FOREIGN KEY(workspace_id, environment_id)
+            REFERENCES environments(workspace_id, id) ON DELETE CASCADE,
+          FOREIGN KEY(workspace_id, included_environment_id)
+            REFERENCES environments(workspace_id, id) ON DELETE RESTRICT
+        ) WITHOUT ROWID, STRICT;
+        CREATE INDEX environment_includes_included
+          ON environment_includes(included_environment_id, environment_id);
+      `);
+      this.#recordMigration(ENVIRONMENT_COMPOSITION_MIGRATION);
+    })();
   }
 
   /** Records one successfully applied schema migration. */

@@ -263,6 +263,27 @@
   font-size: var(--font-size-sm);
 }
 
+.environment-includes {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.environment-includes .resource-dialog-context {
+  margin: 0 0 var(--space-1);
+}
+
+.environment-include-row,
+.environment-include-picker {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.environment-include-picker {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .variable-field-heading,
 .variable-field-row {
   display: grid;
@@ -1133,16 +1154,18 @@
 }
 
 .request-field-row.is-row-dragging,
-.variable-field-row.is-row-dragging {
+.variable-field-row.is-row-dragging,
+.environment-include-row.is-row-dragging {
   opacity: 0.5;
 }
 
-:where(.request-field-row, .variable-field-row) {
+:where(.request-field-row, .variable-field-row, .environment-include-row) {
   position: relative;
 }
 
 .request-field-row.is-row-drop-before::before,
-.variable-field-row.is-row-drop-before::before {
+.variable-field-row.is-row-drop-before::before,
+.environment-include-row.is-row-drop-before::before {
   position: absolute;
   z-index: 2;
   top: calc(var(--space-1) / 2);

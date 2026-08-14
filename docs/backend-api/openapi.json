@@ -1242,6 +1242,14 @@
                     "items": {
                       "$ref": "#/components/schemas/EnvironmentVariableWrite"
                     }
+                  },
+                  "includedEnvironmentIds": {
+                    "type": "array",
+                    "description": "Ordered included environments from lowest to highest precedence. Omission creates an environment with no includes.",
+                    "items": {
+                      "$ref": "#/components/schemas/EnvironmentId"
+                    },
+                    "uniqueItems": true
                   }
                 }
               }
@@ -1301,6 +1309,14 @@
                     "items": {
                       "$ref": "#/components/schemas/EnvironmentVariableWrite"
                     }
+                  },
+                  "includedEnvironmentIds": {
+                    "type": "array",
+                    "description": "Complete ordered replacement from lowest to highest precedence. Omission preserves the current composition.",
+                    "items": {
+                      "$ref": "#/components/schemas/EnvironmentId"
+                    },
+                    "uniqueItems": true
                   }
                 }
               }
@@ -2399,6 +2415,7 @@
           "workspaceId",
           "name",
           "revision",
+          "includedEnvironments",
           "variables",
           "inheritedVariables"
         ],
@@ -2407,13 +2424,18 @@
           "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
           "name": { "type": "string" },
           "revision": { "type": "integer", "minimum": 0 },
+          "includedEnvironments": {
+            "type": "array",
+            "description": "Directly included environments in low-to-high precedence order.",
+            "items": { "$ref": "#/components/schemas/EnvironmentSummary" }
+          },
           "variables": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/EnvironmentVariableView" }
           },
           "inheritedVariables": {
             "type": "array",
-            "description": "Effective workspace variables before this environment applies its local declarations.",
+            "description": "Effective workspace and included-environment variables before this environment applies its local declarations.",
             "items": { "$ref": "#/components/schemas/InheritedVariableView" }
           }
         }

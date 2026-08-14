@@ -13,8 +13,10 @@ import ActionMenu, {
 } from "@/view/presentation/controls/ActionMenu.vue";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
+import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
+import { useRowReorder } from "@/view/presentation/controls/row-reorder";
 import DialogControl from "@/view/presentation/controls/dialog/DialogControl.vue";
 import ResourceDeleteDialog from "./ResourceDeleteDialog.vue";
 import VariableFieldsEditor from "./VariableFieldsEditor.vue";
@@ -33,12 +35,17 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [environmentId: string | null];
   load: [environmentId: string];
-  create: [name: string, variables: readonly EnvironmentVariableWrite[]];
+  create: [
+    name: string,
+    variables: readonly EnvironmentVariableWrite[],
+    includedEnvironmentIds: readonly string[],
+  ];
   save: [
     environmentId: string,
     revision: number,
     name: string,
     variables: readonly EnvironmentVariableWrite[],
+    includedEnvironmentIds: readonly string[],
   ];
   delete: [environmentId: string, revision: number];
 }>();
@@ -48,6 +55,8 @@ const name = ref("");
 const editingId = ref<string | null>(null);
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 const variableEditorKey = ref(0);
+const includedEnvironmentIds = ref<string[]>([]);
+const includeCandidateId = ref("");
 const deleteConfirmationOpen = ref(false);
 const deletionTarget = ref<{
   readonly environmentId: string;
@@ -72,6 +81,18 @@ const options = computed(() => [
     label: environment.name,
   })),
 ]);
+const availableIncludeOptions = computed(() =>
+  props.environments
+    .filter(
+      (environment) =>
+        environment.environmentId !== editingId.value &&
+        !includedEnvironmentIds.value.includes(environment.environmentId),
+    )
+    .map((environment) => ({
+      value: environment.environmentId,
+      label: environment.name,
+    })),
+);
 const environmentActions = computed<readonly ActionMenuItem[]>(() => {
   const selected = props.environments.find(
     (environment) => environment.environmentId === props.selectedEnvironmentId,
@@ -119,6 +140,10 @@ watch(
     }
     editingId.value = environment.environmentId;
     name.value = environment.name;
+    includedEnvironmentIds.value = environment.includedEnvironments.map(
+      (included) => included.environmentId,
+    );
+    includeCandidateId.value = "";
   },
 );
 
@@ -126,6 +151,8 @@ watch(
 function createEnvironment(): void {
   editingId.value = null;
   name.value = "";
+  includedEnvironmentIds.value = [];
+  includeCandidateId.value = "";
   variableEditorKey.value += 1;
   open.value = true;
 }
@@ -141,6 +168,66 @@ function editEnvironment(environmentId: string): void {
   open.value = true;
   emit("load", environmentId);
 }
+
+/** Returns valid replacements for one included-environment row. */
+function includedEnvironmentOptions(currentId: string) {
+  return props.environments
+    .filter(
+      (environment) =>
+        environment.environmentId !== editingId.value &&
+        (environment.environmentId === currentId ||
+          !includedEnvironmentIds.value.includes(environment.environmentId)),
+    )
+    .map((environment) => ({
+      value: environment.environmentId,
+      label: environment.name,
+    }));
+}
+
+/** Adds the selected environment at the highest included precedence. */
+function addIncludedEnvironment(): void {
+  const candidate = includeCandidateId.value;
+  if (candidate === "" || includedEnvironmentIds.value.includes(candidate)) {
+    return;
+  }
+  includedEnvironmentIds.value.push(candidate);
+  includeCandidateId.value = "";
+}
+
+/** Replaces one include while retaining uniqueness and order. */
+function replaceIncludedEnvironment(
+  index: number,
+  environmentId: string,
+): void {
+  if (
+    environmentId !== "" &&
+    !includedEnvironmentIds.value.some(
+      (candidate, candidateIndex) =>
+        candidateIndex !== index && candidate === environmentId,
+    )
+  ) {
+    includedEnvironmentIds.value[index] = environmentId;
+  }
+}
+
+/** Removes one environment from the composition list. */
+function removeIncludedEnvironment(index: number): void {
+  includedEnvironmentIds.value.splice(index, 1);
+}
+
+/** Moves one environment within the low-to-high precedence list. */
+function moveIncludedEnvironment(fromIndex: number, toIndex: number): void {
+  const [environmentId] = includedEnvironmentIds.value.splice(fromIndex, 1);
+  if (environmentId !== undefined) {
+    includedEnvironmentIds.value.splice(toIndex, 0, environmentId);
+  }
+}
+
+const includeReorder = useRowReorder({
+  canMove: (index) => includedEnvironmentIds.value[index] !== undefined,
+  move: moveIncludedEnvironment,
+  isDisabled: () => props.busy || !props.canEdit,
+});
 
 /** Routes one toolbar menu action without changing the active environment. */
 function selectEnvironmentAction(action: string): void {
@@ -163,7 +250,7 @@ function save(): void {
   const writes = variableEditor.value?.writes() ?? [];
   const environment = props.environment;
   if (editingId.value === null) {
-    emit("create", name.value, writes);
+    emit("create", name.value, writes, includedEnvironmentIds.value);
   } else if (environment?.environmentId === editingId.value) {
     emit(
       "save",
@@ -171,6 +258,7 @@ function save(): void {
       environment.revision,
       name.value,
       writes,
+      includedEnvironmentIds.value,
     );
   }
 }
@@ -290,6 +378,82 @@ function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
             autocomplete="off"
           />
         </label>
+        <section
+          class="environment-includes"
+          aria-labelledby="environment-includes-title"
+        >
+          <h3
+            id="environment-includes-title"
+            class="resource-dialog-section-title"
+          >
+            {{ t("environment.includedEnvironments") }}
+          </h3>
+          <p class="resource-dialog-context">
+            {{ t("environment.includedEnvironmentsDescription") }}
+          </p>
+          <div
+            v-for="(environmentId, index) in includedEnvironmentIds"
+            :key="environmentId"
+            class="environment-include-row"
+            :class="includeReorder.classes(index)"
+            @dragover.stop="includeReorder.updateDropTarget($event, index)"
+            @drop.stop="includeReorder.finishDrop($event)"
+          >
+            <RowReorderHandle
+              :label="
+                t('environment.reorderIncludedEnvironment', {
+                  index: index + 1,
+                })
+              "
+              :disabled="busy || !canEdit"
+              @drag-start="includeReorder.startDrag($event, index)"
+              @drag-end="includeReorder.cancelDrag"
+              @move="includeReorder.moveByKeyboard(index, $event)"
+            />
+            <SelectMenu
+              :model-value="environmentId"
+              :options="includedEnvironmentOptions(environmentId)"
+              :label="
+                t('environment.includedEnvironment', { index: index + 1 })
+              "
+              density="compact"
+              :disabled="busy || !canEdit"
+              @update:model-value="replaceIncludedEnvironment(index, $event)"
+            />
+            <IconButton
+              :label="
+                t('environment.removeIncludedEnvironment', {
+                  index: index + 1,
+                })
+              "
+              size="compact"
+              :disabled="busy || !canEdit"
+              @click="removeIncludedEnvironment(index)"
+            >
+              <X :size="15" aria-hidden="true" />
+            </IconButton>
+          </div>
+          <div
+            v-if="availableIncludeOptions.length > 0"
+            class="environment-include-picker"
+          >
+            <SelectMenu
+              v-model="includeCandidateId"
+              :options="availableIncludeOptions"
+              :label="t('environment.includeEnvironment')"
+              density="compact"
+              :disabled="busy || !canEdit"
+            />
+            <ButtonControl
+              type="button"
+              variant="secondary"
+              :disabled="busy || !canEdit || includeCandidateId === ''"
+              @click="addIncludedEnvironment"
+            >
+              {{ t("environment.includeAction") }}
+            </ButtonControl>
+          </div>
+        </section>
         <h3 class="resource-dialog-section-title">
           {{ t("environment.variables") }}
         </h3>

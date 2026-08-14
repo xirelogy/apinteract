@@ -32,15 +32,16 @@ export interface EnvironmentView {
   readonly workspaceId: EntityId;
   readonly name: string;
   readonly revision: number;
+  readonly includedEnvironments: readonly EnvironmentSummary[];
   readonly variables: readonly EnvironmentVariableView[];
   readonly inheritedVariables: readonly InheritedEnvironmentVariableView[];
 }
 
-/** Describes one workspace variable inherited by an environment profile. */
+/** Describes one lower-precedence variable inherited by an environment. */
 export interface InheritedEnvironmentVariableView {
   readonly variable: EnvironmentVariableView;
   readonly source: {
-    readonly scope: "workspace";
+    readonly scope: "workspace" | "environment";
     readonly scopeId: EntityId;
     readonly scopeName: string;
     readonly revision: number;
@@ -65,6 +66,18 @@ export interface SelectedEnvironmentProfile {
   readonly name: string;
   readonly revision: number;
   readonly variables: readonly ResolvedEnvironmentVariable[];
+  readonly sources: ReadonlyMap<string, SelectedEnvironmentProfileMetadata>;
+  readonly evidence: readonly SelectedEnvironmentProfileMetadata[];
+}
+
+/** Provides a selected composed profile without loading secret plaintext. */
+export interface SelectedRedactedEnvironmentProfile {
+  readonly environmentId: EntityId;
+  readonly name: string;
+  readonly revision: number;
+  readonly variables: readonly EnvironmentVariableView[];
+  readonly sources: ReadonlyMap<string, SelectedEnvironmentProfileMetadata>;
+  readonly evidence: readonly SelectedEnvironmentProfileMetadata[];
 }
 
 /** Identifies a selected environment without loading secret-bearing values. */
@@ -102,6 +115,25 @@ export interface VariablePreviewResult {
 
 /** Raised when an environment profile changed before a submitted mutation. */
 export class EnvironmentConflictError extends Error {}
+
+/** Raised when a proposed inclusion list would make composition cyclic. */
+export class EnvironmentCompositionCycleError extends Error {}
+
+/** Raised when an inclusion list is malformed or references another workspace. */
+export class EnvironmentCompositionInvalidError extends Error {}
+
+/** Raised when an environment cannot be deleted while others include it. */
+export class EnvironmentInUseError extends Error {}
+
+interface NamedEnvironmentVariable {
+  readonly name: string;
+}
+
+interface ComposedEnvironmentProfile<T extends NamedEnvironmentVariable> {
+  readonly variables: readonly T[];
+  readonly sources: ReadonlyMap<string, SelectedEnvironmentProfileMetadata>;
+  readonly evidence: readonly SelectedEnvironmentProfileMetadata[];
+}
 
 /** Owns workspace environments, redacted variables, and session selections. */
 export class EnvironmentService {
@@ -162,6 +194,7 @@ export class EnvironmentService {
     workspaceId: EntityId,
     name: string,
     variables: readonly EnvironmentVariableWrite[],
+    includedEnvironmentIds: readonly EntityId[] = [],
   ): Promise<EnvironmentView> {
     return this.#database.transaction().execute(async (transaction) => {
       await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
@@ -191,11 +224,17 @@ export class EnvironmentService {
         userId,
         variables,
       );
+      await this.#replaceIncludes(
+        transaction,
+        workspaceId,
+        environmentId,
+        includedEnvironmentIds,
+      );
       await this.#audit.record(transaction, {
         type: "environment.created",
         actorUserId: userId,
         workspaceId,
-        data: { environmentId, name: displayName },
+        data: { environmentId, name: displayName, includedEnvironmentIds },
       });
       await this.#recordSecretMutations(
         transaction,
@@ -229,6 +268,7 @@ export class EnvironmentService {
     expectedRevision: number,
     name: string,
     variables: readonly EnvironmentVariableWrite[],
+    includedEnvironmentIds?: readonly EntityId[],
   ): Promise<EnvironmentView> {
     return this.#database.transaction().execute(async (transaction) => {
       const row = await this.#row(transaction, environmentId);
@@ -254,6 +294,14 @@ export class EnvironmentService {
         }
         throw cause;
       }
+      if (includedEnvironmentIds !== undefined) {
+        await this.#replaceIncludes(
+          transaction,
+          workspaceId,
+          environmentId,
+          includedEnvironmentIds,
+        );
+      }
       await transaction
         .updateTable("environments")
         .set({
@@ -269,7 +317,13 @@ export class EnvironmentService {
         type: "environment.updated",
         actorUserId: userId,
         workspaceId,
-        data: { environmentId, revision: expectedRevision + 1 },
+        data: {
+          environmentId,
+          revision: expectedRevision + 1,
+          ...(includedEnvironmentIds === undefined
+            ? {}
+            : { includedEnvironmentIds }),
+        },
       });
       await this.#recordSecretMutations(
         transaction,
@@ -294,6 +348,22 @@ export class EnvironmentService {
       await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
       if (row.revision !== expectedRevision) {
         throw new EnvironmentConflictError("The environment profile changed");
+      }
+      const dependents = await transaction
+        .selectFrom("environment_includes as include")
+        .innerJoin(
+          "environments as environment",
+          "environment.id",
+          "include.environment_id",
+        )
+        .select("environment.name")
+        .where("include.included_environment_id", "=", idToBytes(environmentId))
+        .orderBy("include.environment_id")
+        .execute();
+      if (dependents.length > 0) {
+        throw new EnvironmentInUseError(
+          `The environment is included by ${dependents.map((dependent) => dependent.name).join(", ")}`,
+        );
       }
       const deletedSecrets = await transaction
         .selectFrom("variable_profiles as profile")
@@ -415,12 +485,6 @@ export class EnvironmentService {
       profile.variables.map((variable) => [variable.name, variable] as const),
     );
     const resolver = new VariableResolver(profile);
-    const source: VariablePreviewSource = {
-      scope: "environment",
-      scopeId: profile.environmentId,
-      scopeName: profile.name,
-      revision: profile.revision,
-    };
     return {
       previews: names.map((name) => {
         validateVariableName(name);
@@ -442,7 +506,10 @@ export class EnvironmentService {
           name,
           declaredKind: variable.kind,
           aliasTarget: variable.kind === "alias" ? variable.aliasTarget : null,
-          source,
+          source:
+            profile.sources.get(name) === undefined
+              ? null
+              : environmentPreviewSource(profile.sources.get(name)!),
         };
         if (variable.kind === "unset") {
           return {
@@ -496,12 +563,44 @@ export class EnvironmentService {
       workspaceId,
     );
     if (selected === null) return null;
-    const variables = await this.#variables.resolvedVariables(
+    const composition = await this.#composeEnvironment(
       database,
-      "environment",
+      workspaceId,
       selected.environmentId,
+      (environmentId) =>
+        this.#variables.resolvedVariables(
+          database,
+          "environment",
+          environmentId,
+        ),
     );
-    return { ...selected, variables };
+    return { ...selected, ...composition };
+  }
+
+  /** Loads a selected composed profile with every secret value redacted. */
+  async selectedRedactedProfile(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    sessionId: EntityId,
+    workspaceId: EntityId,
+  ): Promise<SelectedRedactedEnvironmentProfile | null> {
+    const selected = await this.selectedProfileMetadata(
+      database,
+      sessionId,
+      workspaceId,
+    );
+    if (selected === null) return null;
+    const composition = await this.#composeEnvironment(
+      database,
+      workspaceId,
+      selected.environmentId,
+      (environmentId) =>
+        this.#variables.redactedVariables(
+          database,
+          "environment",
+          environmentId,
+        ),
+    );
+    return { ...selected, ...composition };
   }
 
   /** Loads selected-environment identity without reading secret plaintext. */
@@ -530,6 +629,185 @@ export class EnvironmentService {
       name: selected.name,
       revision: selected.revision,
     };
+  }
+
+  /** Replaces and validates one environment's complete ordered include list. */
+  async #replaceIncludes(
+    transaction: Transaction<DatabaseSchema>,
+    workspaceId: EntityId,
+    environmentId: EntityId,
+    includedEnvironmentIds: readonly EntityId[],
+  ): Promise<void> {
+    if (
+      new Set(includedEnvironmentIds).size !== includedEnvironmentIds.length
+    ) {
+      throw new EnvironmentCompositionInvalidError(
+        "An environment can be included only once",
+      );
+    }
+    const environmentRows = await transaction
+      .selectFrom("environments")
+      .select(["id", "name"])
+      .where("workspace_id", "=", idToBytes(workspaceId))
+      .execute();
+    const names = new Map(
+      environmentRows.map((row) => [bytesToId(row.id), row.name] as const),
+    );
+    if (
+      !names.has(environmentId) ||
+      includedEnvironmentIds.some((includedId) => !names.has(includedId))
+    ) {
+      throw new ResourceNotFoundError("Included environment not found");
+    }
+    const edgeRows = await transaction
+      .selectFrom("environment_includes")
+      .select(["environment_id", "included_environment_id"])
+      .where("workspace_id", "=", idToBytes(workspaceId))
+      .orderBy("environment_id")
+      .orderBy("position")
+      .execute();
+    const edges = new Map<EntityId, EntityId[]>();
+    for (const row of edgeRows) {
+      const includingId = bytesToId(row.environment_id);
+      const includedId = bytesToId(row.included_environment_id);
+      const includes = edges.get(includingId) ?? [];
+      includes.push(includedId);
+      edges.set(includingId, includes);
+    }
+    edges.set(environmentId, [...includedEnvironmentIds]);
+    const cycle = findEnvironmentCycle(environmentId, edges);
+    if (cycle !== null) {
+      throw new EnvironmentCompositionCycleError(
+        `Environment composition would be cyclic: ${cycle
+          .map((cycleId) => names.get(cycleId) ?? cycleId)
+          .join(" → ")}`,
+      );
+    }
+    await transaction
+      .deleteFrom("environment_includes")
+      .where("environment_id", "=", idToBytes(environmentId))
+      .execute();
+    if (includedEnvironmentIds.length > 0) {
+      await transaction
+        .insertInto("environment_includes")
+        .values(
+          includedEnvironmentIds.map((includedEnvironmentId, position) => ({
+            workspace_id: idToBytes(workspaceId),
+            environment_id: idToBytes(environmentId),
+            included_environment_id: idToBytes(includedEnvironmentId),
+            position,
+          })),
+        )
+        .execute();
+    }
+  }
+
+  /** Composes one environment graph with deterministic last-writer precedence. */
+  async #composeEnvironment<T extends NamedEnvironmentVariable>(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    workspaceId: EntityId,
+    environmentId: EntityId,
+    loadVariables: (environmentId: EntityId) => Promise<readonly T[]>,
+    includeRootVariables = true,
+  ): Promise<ComposedEnvironmentProfile<T>> {
+    const [environmentRows, edgeRows] = await Promise.all([
+      database
+        .selectFrom("environments")
+        .select(["id", "name", "revision"])
+        .where("workspace_id", "=", idToBytes(workspaceId))
+        .execute(),
+      database
+        .selectFrom("environment_includes")
+        .select(["environment_id", "included_environment_id"])
+        .where("workspace_id", "=", idToBytes(workspaceId))
+        .orderBy("environment_id")
+        .orderBy("position")
+        .execute(),
+    ]);
+    const metadata = new Map<EntityId, SelectedEnvironmentProfileMetadata>(
+      environmentRows.map((row) => {
+        const id = bytesToId(row.id);
+        return [
+          id,
+          { environmentId: id, name: row.name, revision: row.revision },
+        ];
+      }),
+    );
+    if (!metadata.has(environmentId)) {
+      throw new ResourceNotFoundError("Environment not found");
+    }
+    const edges = new Map<EntityId, EntityId[]>();
+    for (const row of edgeRows) {
+      const includingId = bytesToId(row.environment_id);
+      const includedId = bytesToId(row.included_environment_id);
+      const includes = edges.get(includingId) ?? [];
+      includes.push(includedId);
+      edges.set(includingId, includes);
+    }
+    const cache = new Map<EntityId, ComposedEnvironmentProfile<T>>();
+    const stack: EntityId[] = [];
+
+    const resolve = async (
+      currentId: EntityId,
+    ): Promise<ComposedEnvironmentProfile<T>> => {
+      const cached = cache.get(currentId);
+      if (cached !== undefined) return cached;
+      const cycleStart = stack.indexOf(currentId);
+      if (cycleStart >= 0) {
+        const cycle = [...stack.slice(cycleStart), currentId];
+        throw new EnvironmentCompositionCycleError(
+          `Stored environment composition is cyclic: ${cycle
+            .map((cycleId) => metadata.get(cycleId)?.name ?? cycleId)
+            .join(" → ")}`,
+        );
+      }
+      const current = metadata.get(currentId);
+      if (current === undefined) {
+        throw new ResourceNotFoundError("Included environment not found");
+      }
+      stack.push(currentId);
+      try {
+        const variables = new Map<string, T>();
+        const sources = new Map<string, SelectedEnvironmentProfileMetadata>();
+        const evidence: SelectedEnvironmentProfileMetadata[] = [];
+        for (const includedId of edges.get(currentId) ?? []) {
+          mergeComposedProfile(
+            variables,
+            sources,
+            evidence,
+            await resolve(includedId),
+          );
+        }
+        for (const variable of await loadVariables(currentId)) {
+          variables.set(variable.name, variable);
+          sources.set(variable.name, current);
+        }
+        mergeEnvironmentEvidence(evidence, [current]);
+        const result = {
+          variables: [...variables.values()],
+          sources,
+          evidence,
+        } satisfies ComposedEnvironmentProfile<T>;
+        cache.set(currentId, result);
+        return result;
+      } finally {
+        stack.pop();
+      }
+    };
+
+    if (includeRootVariables) return resolve(environmentId);
+    const variables = new Map<string, T>();
+    const sources = new Map<string, SelectedEnvironmentProfileMetadata>();
+    const evidence: SelectedEnvironmentProfileMetadata[] = [];
+    for (const includedId of edges.get(environmentId) ?? []) {
+      mergeComposedProfile(
+        variables,
+        sources,
+        evidence,
+        await resolve(includedId),
+      );
+    }
+    return { variables: [...variables.values()], sources, evidence };
   }
 
   /** Records allowlisted secret lifecycle metadata without secret plaintext. */
@@ -582,47 +860,165 @@ export class EnvironmentService {
       workspaceId,
       name: environment.name,
       revision: environment.revision,
+      includedEnvironments: await this.#directIncludes(database, environmentId),
       variables: await this.#variables.redactedVariables(
         database,
         "environment",
         environmentId,
       ),
-      inheritedVariables: await this.#workspaceInheritedVariables(
+      inheritedVariables: await this.#inheritedVariables(
         database,
         workspaceId,
+        environmentId,
       ),
     };
   }
 
-  /** Returns the redacted workspace variables inherited by an environment. */
-  async #workspaceInheritedVariables(
+  /** Returns effective redacted workspace and included-environment variables. */
+  async #inheritedVariables(
     database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
     workspaceId: EntityId,
+    environmentId: EntityId,
   ): Promise<readonly InheritedEnvironmentVariableView[]> {
     const metadata = await this.#variables.metadata(
       database,
       "workspace",
       workspaceId,
     );
-    if (metadata === null) return [];
     const workspace = await database
       .selectFrom("workspaces")
       .select("name")
       .where("id", "=", idToBytes(workspaceId))
       .executeTakeFirstOrThrow();
-    const source = {
-      scope: "workspace" as const,
-      scopeId: workspaceId,
-      scopeName: workspace.name,
-      revision: metadata.revision,
-    };
-    const variables = await this.#variables.redactedVariables(
+    const inherited = new Map<string, InheritedEnvironmentVariableView>();
+    if (metadata !== null) {
+      const source = {
+        scope: "workspace" as const,
+        scopeId: workspaceId,
+        scopeName: workspace.name,
+        revision: metadata.revision,
+      };
+      const variables = await this.#variables.redactedVariables(
+        database,
+        "workspace",
+        workspaceId,
+      );
+      for (const variable of variables) {
+        inherited.set(variable.name, { variable, source });
+      }
+    }
+    const composition = await this.#composeEnvironment(
       database,
-      "workspace",
       workspaceId,
+      environmentId,
+      (includedEnvironmentId) =>
+        this.#variables.redactedVariables(
+          database,
+          "environment",
+          includedEnvironmentId,
+        ),
+      false,
     );
-    return variables.map((variable) => ({ variable, source }));
+    for (const variable of composition.variables) {
+      const source = composition.sources.get(variable.name);
+      if (source !== undefined) {
+        inherited.set(variable.name, {
+          variable,
+          source: environmentPreviewSource(source),
+        });
+      }
+    }
+    return [...inherited.values()];
   }
+
+  /** Lists direct includes in their low-to-high precedence order. */
+  async #directIncludes(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    environmentId: EntityId,
+  ): Promise<readonly EnvironmentSummary[]> {
+    const rows = await database
+      .selectFrom("environment_includes as include")
+      .innerJoin(
+        "environments as environment",
+        "environment.id",
+        "include.included_environment_id",
+      )
+      .select(["environment.id", "environment.name", "environment.revision"])
+      .where("include.environment_id", "=", idToBytes(environmentId))
+      .orderBy("include.position")
+      .execute();
+    return rows.map((row) => ({
+      environmentId: bytesToId(row.id),
+      name: row.name,
+      revision: row.revision,
+    }));
+  }
+}
+
+/** Converts environment metadata into the shared variable-source contract. */
+function environmentPreviewSource(
+  source: SelectedEnvironmentProfileMetadata,
+): VariablePreviewSource {
+  return {
+    scope: "environment",
+    scopeId: source.environmentId,
+    scopeName: source.name,
+    revision: source.revision,
+  };
+}
+
+/** Merges a composed profile and retains the highest-precedence evidence path. */
+function mergeComposedProfile<T extends NamedEnvironmentVariable>(
+  variables: Map<string, T>,
+  sources: Map<string, SelectedEnvironmentProfileMetadata>,
+  evidence: SelectedEnvironmentProfileMetadata[],
+  profile: ComposedEnvironmentProfile<T>,
+): void {
+  for (const variable of profile.variables) {
+    variables.set(variable.name, variable);
+    const source = profile.sources.get(variable.name);
+    if (source !== undefined) sources.set(variable.name, source);
+  }
+  mergeEnvironmentEvidence(evidence, profile.evidence);
+}
+
+/** Moves repeated diamond dependencies to their last, highest-precedence use. */
+function mergeEnvironmentEvidence(
+  evidence: SelectedEnvironmentProfileMetadata[],
+  incoming: readonly SelectedEnvironmentProfileMetadata[],
+): void {
+  for (const source of incoming) {
+    const existing = evidence.findIndex(
+      (candidate) => candidate.environmentId === source.environmentId,
+    );
+    if (existing >= 0) evidence.splice(existing, 1);
+    evidence.push(source);
+  }
+}
+
+/** Finds the first cycle reachable from one changed environment. */
+function findEnvironmentCycle(
+  environmentId: EntityId,
+  edges: ReadonlyMap<EntityId, readonly EntityId[]>,
+): readonly EntityId[] | null {
+  const stack: EntityId[] = [];
+  const complete = new Set<EntityId>();
+
+  const visit = (currentId: EntityId): readonly EntityId[] | null => {
+    const cycleStart = stack.indexOf(currentId);
+    if (cycleStart >= 0) return [...stack.slice(cycleStart), currentId];
+    if (complete.has(currentId)) return null;
+    stack.push(currentId);
+    for (const includedId of edges.get(currentId) ?? []) {
+      const cycle = visit(includedId);
+      if (cycle !== null) return cycle;
+    }
+    stack.pop();
+    complete.add(currentId);
+    return null;
+  };
+
+  return visit(environmentId);
 }
 
 /** Produces the database-independent case-insensitive environment name key. */

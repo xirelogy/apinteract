@@ -483,6 +483,8 @@ export interface components {
         workspaceId: components["schemas"]["WorkspaceId"];
         name: string;
         variables: components["schemas"]["EnvironmentVariableWrite"][];
+        /** @description Ordered included environments from lowest to highest precedence. Omission creates an environment with no includes. */
+        includedEnvironmentIds?: components["schemas"]["EnvironmentId"][];
       };
     } & {
       /**
@@ -512,6 +514,8 @@ export interface components {
         expectedRevision: number;
         name: string;
         variables: components["schemas"]["EnvironmentVariableWrite"][];
+        /** @description Complete ordered replacement from lowest to highest precedence. Omission preserves the current composition. */
+        includedEnvironmentIds?: components["schemas"]["EnvironmentId"][];
       };
     } & {
       /**
@@ -991,8 +995,10 @@ export interface components {
       workspaceId: components["schemas"]["WorkspaceId"];
       name: string;
       revision: number;
+      /** @description Directly included environments in low-to-high precedence order. */
+      includedEnvironments: components["schemas"]["EnvironmentSummary"][];
       variables: components["schemas"]["EnvironmentVariableView"][];
-      /** @description Effective workspace variables before this environment applies its local declarations. */
+      /** @description Effective workspace and included-environment variables before this environment applies its local declarations. */
       inheritedVariables: components["schemas"]["InheritedVariableView"][];
     };
     CollectionView: {

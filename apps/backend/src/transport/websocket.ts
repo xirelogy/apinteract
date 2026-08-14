@@ -5,7 +5,10 @@ import type { RawData } from "ws";
 import type { Application } from "../bootstrap/application.js";
 import type { BackendConfiguration } from "../config.js";
 import {
+  EnvironmentCompositionCycleError,
+  EnvironmentCompositionInvalidError,
   EnvironmentConflictError,
+  EnvironmentInUseError,
   type EnvironmentVariableWrite,
 } from "../environments/environment-service.js";
 import { VariableResolutionError } from "../environments/variable-resolver.js";
@@ -265,6 +268,10 @@ async function dispatch(
         requireString(command.payload.workspaceId, "workspaceId"),
         requireString(command.payload.name, "name"),
         requireEnvironmentVariables(command.payload.variables),
+        requireOptionalEntityIds(
+          command.payload.includedEnvironmentIds,
+          "includedEnvironmentIds",
+        ),
       );
     case "environment.get":
       return application.environments.get(
@@ -278,6 +285,10 @@ async function dispatch(
         requireInteger(command.payload.expectedRevision, "expectedRevision"),
         requireString(command.payload.name, "name"),
         requireEnvironmentVariables(command.payload.variables),
+        requireOptionalEntityIds(
+          command.payload.includedEnvironmentIds,
+          "includedEnvironmentIds",
+        ),
       );
     case "environment.delete":
       return application.environments.delete(
@@ -483,6 +494,15 @@ function mapCommandError(cause: unknown): CommandError {
   }
   if (cause instanceof EnvironmentConflictError) {
     return new CommandError("environment_conflict", cause.message);
+  }
+  if (cause instanceof EnvironmentCompositionCycleError) {
+    return new CommandError("environment_composition_cycle", cause.message);
+  }
+  if (cause instanceof EnvironmentCompositionInvalidError) {
+    return new CommandError("environment_composition_invalid", cause.message);
+  }
+  if (cause instanceof EnvironmentInUseError) {
+    return new CommandError("environment_in_use", cause.message);
   }
   if (cause instanceof VariableProfileConflictError) {
     return new CommandError("variable_profile_conflict", cause.message);
@@ -758,6 +778,18 @@ function requireEnvironmentVariables(
         );
     }
   });
+}
+
+/** Accepts an optional ordered entity-ID list for additive command fields. */
+function requireOptionalEntityIds(
+  value: unknown,
+  name: string,
+): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new CommandError("validation_failed", `${name} must be an array.`);
+  }
+  return value.map((item) => requireString(item, `${name} item`));
 }
 
 /** Validates an optional request-variable mutation embedded in a request save. */

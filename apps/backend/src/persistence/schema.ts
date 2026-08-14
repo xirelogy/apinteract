@@ -96,6 +96,14 @@ export interface EnvironmentTable {
   updated_at: number;
 }
 
+/** Stores one ordered, same-workspace environment inclusion edge. */
+export interface EnvironmentIncludeTable {
+  workspace_id: BinaryId;
+  environment_id: BinaryId;
+  included_environment_id: BinaryId;
+  position: number;
+}
+
 export interface VariableProfileTable {
   id: BinaryId;
   workspace_id: BinaryId;
@@ -248,6 +256,7 @@ export interface DatabaseSchema {
   workspace_tree_nodes: WorkspaceTreeNodeTable;
   collection_profiles: CollectionProfileTable;
   environments: EnvironmentTable;
+  environment_includes: EnvironmentIncludeTable;
   variable_profiles: VariableProfileTable;
   variables: VariableTable;
   variable_secrets: VariableSecretTable;

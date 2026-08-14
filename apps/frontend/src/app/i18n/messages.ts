@@ -142,6 +142,12 @@ export const enUsMessages = {
       value: "Value",
     },
     label: "Environment",
+    includeAction: "Include",
+    includeEnvironment: "Environment to include",
+    includedEnvironment: "Included environment {index}",
+    includedEnvironments: "Included environments",
+    includedEnvironmentsDescription:
+      "Applied in order. Later environments override earlier environments, and local variables override every included environment.",
     manage: "Manage environments",
     moreActions: "More actions for {name}",
     noValue: "No value",
@@ -160,7 +166,10 @@ export const enUsMessages = {
       unsetVariable: "Variable {name} is unset",
     },
     removeVariable: "Remove variable {index}",
+    removeIncludedEnvironment: "Remove included environment {index}",
     removeVariableTitle: "Remove variable",
+    reorderIncludedEnvironment:
+      "Reorder included environment {index}. Use Alt+Up or Alt+Down.",
     secretClearPendingPlaceholder: "Secret will be cleared on save",
     secretState: {
       empty: "No secret is stored. Enter a value to set one.",

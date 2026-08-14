@@ -555,8 +555,9 @@ async function deleteWorkspace(
 async function createEnvironment(
   name: string,
   variables: readonly EnvironmentVariableWrite[],
+  includedEnvironmentIds: readonly string[],
 ): Promise<void> {
-  await controller.createEnvironment(name, variables);
+  await controller.createEnvironment(name, variables, includedEnvironmentIds);
   environmentManager.value?.finishMutation();
 }
 
@@ -566,8 +567,15 @@ async function updateEnvironment(
   revision: number,
   name: string,
   variables: readonly EnvironmentVariableWrite[],
+  includedEnvironmentIds: readonly string[],
 ): Promise<void> {
-  await controller.updateEnvironment(environmentId, revision, name, variables);
+  await controller.updateEnvironment(
+    environmentId,
+    revision,
+    name,
+    variables,
+    includedEnvironmentIds,
+  );
   environmentManager.value?.finishMutation();
 }
 

@@ -376,10 +376,10 @@ export class VariableService {
     if (workspace === undefined) {
       throw new ResourceNotFoundError("Workspace not found");
     }
-    const layers: VariableLayer[] = [];
+    const lowerLayers: VariableLayer[] = [];
     await this.#appendLayer(
       database,
-      layers,
+      lowerLayers,
       "workspace",
       workspaceId,
       workspace.name,
@@ -389,17 +389,7 @@ export class VariableService {
       sessionId,
       workspaceId,
     );
-    if (environment !== null) {
-      layers.push({
-        source: {
-          scope: "environment",
-          scopeId: environment.environmentId,
-          scopeName: environment.name,
-          revision: environment.revision,
-        },
-        variables: environment.variables,
-      });
-    }
+    const higherLayers: VariableLayer[] = [];
     const collections = await this.#collectionPath(
       database,
       workspaceId,
@@ -408,7 +398,7 @@ export class VariableService {
     for (const collection of collections) {
       await this.#appendLayer(
         database,
-        layers,
+        higherLayers,
         "collection",
         collection.collectionId,
         collection.name,
@@ -417,7 +407,7 @@ export class VariableService {
     if (requestIdentity !== null) {
       await this.#appendLayer(
         database,
-        layers,
+        higherLayers,
         "request",
         requestIdentity.scopeId,
         requestIdentity.scopeName,
@@ -425,20 +415,46 @@ export class VariableService {
     }
     const variables = new Map<string, ResolvedVariable>();
     const sources = new Map<string, VariablePreviewSource>();
-    for (const layer of layers) {
+    const evidence: VariableProfileEvidence[] = [];
+    for (const layer of lowerLayers) {
       for (const variable of layer.variables) {
         variables.set(variable.name, variable);
         sources.set(variable.name, layer.source);
       }
+      evidence.push(variableEvidence(layer.source));
+    }
+    if (environment !== null) {
+      for (const variable of environment.variables) {
+        variables.set(variable.name, variable);
+        const source = environment.sources.get(variable.name);
+        if (source !== undefined) {
+          sources.set(variable.name, {
+            scope: "environment",
+            scopeId: source.environmentId,
+            scopeName: source.name,
+            revision: source.revision,
+          });
+        }
+      }
+      evidence.push(
+        ...environment.evidence.map((source) => ({
+          scope: "environment" as const,
+          scopeId: source.environmentId,
+          revision: source.revision,
+        })),
+      );
+    }
+    for (const layer of higherLayers) {
+      for (const variable of layer.variables) {
+        variables.set(variable.name, variable);
+        sources.set(variable.name, layer.source);
+      }
+      evidence.push(variableEvidence(layer.source));
     }
     return {
       variables: [...variables.values()],
       sources,
-      evidence: layers.map((layer) => ({
-        scope: layer.source.scope,
-        scopeId: layer.source.scopeId,
-        revision: layer.source.revision,
-      })),
+      evidence,
     };
   }
 
@@ -589,32 +605,25 @@ export class VariableService {
       .select("name")
       .where("id", "=", idToBytes(identity.workspaceId))
       .executeTakeFirstOrThrow();
-    const layers: RedactedVariableLayer[] = [];
+    const lowerLayers: RedactedVariableLayer[] = [];
     await this.#appendRedactedLayer(
       database,
-      layers,
+      lowerLayers,
       "workspace",
       identity.workspaceId,
       workspace.name,
     );
 
-    if (sessionId !== null) {
-      const environment = await this.#environments.selectedProfileMetadata(
-        database,
-        sessionId,
-        identity.workspaceId,
-      );
-      if (environment !== null) {
-        await this.#appendRedactedLayer(
-          database,
-          layers,
-          "environment",
-          environment.environmentId,
-          environment.name,
-        );
-      }
-    }
+    const environment =
+      sessionId === null
+        ? null
+        : await this.#environments.selectedRedactedProfile(
+            database,
+            sessionId,
+            identity.workspaceId,
+          );
 
+    const higherLayers: RedactedVariableLayer[] = [];
     const collections = await this.#collectionPath(
       database,
       identity.workspaceId,
@@ -623,7 +632,7 @@ export class VariableService {
     for (const collection of collections) {
       await this.#appendRedactedLayer(
         database,
-        layers,
+        higherLayers,
         "collection",
         collection.collectionId,
         collection.name,
@@ -631,7 +640,28 @@ export class VariableService {
     }
 
     const inherited = new Map<string, InheritedVariableView>();
-    for (const layer of layers) {
+    for (const layer of lowerLayers) {
+      for (const variable of layer.variables) {
+        inherited.set(variable.name, { variable, source: layer.source });
+      }
+    }
+    if (environment !== null) {
+      for (const variable of environment.variables) {
+        const source = environment.sources.get(variable.name);
+        if (source !== undefined) {
+          inherited.set(variable.name, {
+            variable,
+            source: {
+              scope: "environment",
+              scopeId: source.environmentId,
+              scopeName: source.name,
+              revision: source.revision,
+            },
+          });
+        }
+      }
+    }
+    for (const layer of higherLayers) {
       for (const variable of layer.variables) {
         inherited.set(variable.name, { variable, source: layer.source });
       }
@@ -680,4 +710,15 @@ export class VariableService {
       });
     }
   }
+}
+
+/** Converts a variable source into immutable execution-profile evidence. */
+function variableEvidence(
+  source: VariablePreviewSource,
+): VariableProfileEvidence {
+  return {
+    scope: source.scope,
+    scopeId: source.scopeId,
+    revision: source.revision,
+  };
 }
