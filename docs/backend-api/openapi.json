@@ -2884,6 +2884,11 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["override", "append"],
+            "description": "Whether this header-value pair replaces same-name values from older scopes or appends to them."
           }
         }
       }

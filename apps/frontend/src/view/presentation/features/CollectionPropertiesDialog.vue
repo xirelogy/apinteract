@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Asterisk, Lock, Trash2, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
+import { defaultHeaderMergeMode } from "@/app/preferences/header-preferences";
 import type {
   CollectionView,
   RequestField,
@@ -11,6 +12,7 @@ import type {
   VariableWrite,
 } from "@/model/contracts/backend";
 import {
+  createBlankHeaderField,
   editableRequestFields,
   ensureTrailingBlankRequestField,
   isBlankRequestField,
@@ -23,6 +25,7 @@ import ActionMenu, {
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import FormField from "@/view/presentation/controls/FormField.vue";
+import HeaderMergeModeToggle from "@/view/presentation/controls/HeaderMergeModeToggle.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue";
 import TemplateTextControl from "@/view/presentation/controls/TemplateTextControl.vue";
@@ -65,7 +68,11 @@ const name = ref(props.collection.name);
 const pathPrefix = ref(props.collection.pathPrefix);
 const deleteConfirmationOpen = ref(false);
 const headers = ref<RequestField[]>(
-  editableRequestFields(props.collection.headers, props.canEdit),
+  editableRequestFields(
+    props.collection.headers,
+    props.canEdit,
+    createBlankHeaderField,
+  ),
 );
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
@@ -127,19 +134,39 @@ function scheduleVariablePreview(): void {
 /** Removes one common header by its visible ordered position. */
 function removeHeader(index: number): void {
   headers.value.splice(index, 1);
-  ensureTrailingBlankRequestField(headers.value);
+  ensureTrailingBlankRequestField(headers.value, createBlankHeaderField);
 }
 
 /** Materializes the next common-header row after the trailing row is edited. */
 function updateHeader(): void {
-  ensureTrailingBlankRequestField(headers.value);
+  ensureTrailingBlankRequestField(headers.value, createBlankHeaderField);
+}
+
+/** Applies the global default when a common header is given a new name. */
+function updateHeaderName(index: number): void {
+  const header = headers.value[index];
+  if (header !== undefined) {
+    header.mode = defaultHeaderMergeMode(header.name);
+  }
+  updateHeader();
+}
+
+/** Reports whether an enabled local override replaces this inherited pair. */
+function isInheritedHeaderOverridden(inherited: RequestField): boolean {
+  const name = inherited.name.toLowerCase();
+  return headers.value.some(
+    (header) =>
+      header.enabled &&
+      header.name.toLowerCase() === name &&
+      (header.mode ?? "override") === "override",
+  );
 }
 
 /** Moves one common header while preserving the trailing blank entry. */
 function moveHeader(fromIndex: number, toIndex: number): void {
   const [header] = headers.value.splice(fromIndex, 1);
   if (header !== undefined) headers.value.splice(toIndex, 0, header);
-  ensureTrailingBlankRequestField(headers.value);
+  ensureTrailingBlankRequestField(headers.value, createBlankHeaderField);
 }
 
 const headerReorder = useRowReorder({
@@ -294,6 +321,9 @@ function save(): void {
                 v-for="(header, index) in collection.inheritedHeaders"
                 :key="`inherited-${index}`"
                 class="request-field-row inherited-header-row"
+                :class="{
+                  'is-header-overridden': isInheritedHeaderOverridden(header),
+                }"
               >
                 <CheckboxControl
                   :model-value="header.enabled"
@@ -313,22 +343,36 @@ function save(): void {
                   "
                   disabled
                 />
-                <TemplateTextControl
-                  :model-value="header.value"
-                  class="field-template-input"
-                  density="compact"
-                  font="mono"
-                  :previews="variablePreviews"
-                  :aria-label="
-                    t('request.inheritedHeaderValue', { index: index + 1 })
-                  "
-                  readonly
-                />
+                <div class="header-value-field">
+                  <HeaderMergeModeToggle
+                    :model-value="header.mode ?? 'override'"
+                    readonly
+                  />
+                  <TemplateTextControl
+                    :model-value="header.value"
+                    class="field-template-input"
+                    density="compact"
+                    font="mono"
+                    :previews="variablePreviews"
+                    :aria-label="
+                      t('request.inheritedHeaderValue', { index: index + 1 })
+                    "
+                    readonly
+                  />
+                </div>
                 <span
                   class="inherited-header-indicator"
                   role="img"
-                  :aria-label="t('request.inherited')"
-                  :title="t('request.inherited')"
+                  :aria-label="
+                    isInheritedHeaderOverridden(header)
+                      ? t('request.inheritedHeaderOverridden')
+                      : t('request.inherited')
+                  "
+                  :title="
+                    isInheritedHeaderOverridden(header)
+                      ? t('request.inheritedHeaderOverridden')
+                      : t('request.inherited')
+                  "
                 >
                   <Lock :size="14" aria-hidden="true" />
                 </span>
@@ -366,20 +410,27 @@ function save(): void {
                   autocomplete="off"
                   spellcheck="false"
                   :disabled="busy || !canEdit"
-                  @input="updateHeader"
+                  @input="updateHeaderName(index)"
                 />
-                <TemplateTextControl
-                  v-model="header.value"
-                  class="field-template-input"
-                  density="compact"
-                  font="mono"
-                  :previews="variablePreviews"
-                  :aria-label="t('request.headerValue', { index: index + 1 })"
-                  autocomplete="off"
-                  spellcheck="false"
-                  :disabled="busy || !canEdit"
-                  @input="updateHeader"
-                />
+                <div class="header-value-field">
+                  <HeaderMergeModeToggle
+                    :model-value="header.mode ?? 'override'"
+                    :disabled="busy || !canEdit"
+                    @update:model-value="header.mode = $event"
+                  />
+                  <TemplateTextControl
+                    v-model="header.value"
+                    class="field-template-input"
+                    density="compact"
+                    font="mono"
+                    :previews="variablePreviews"
+                    :aria-label="t('request.headerValue', { index: index + 1 })"
+                    autocomplete="off"
+                    spellcheck="false"
+                    :disabled="busy || !canEdit"
+                    @input="updateHeader"
+                  />
+                </div>
                 <div class="row-actions">
                   <RowReorderHandle
                     v-if="!isBlankRequestField(header)"

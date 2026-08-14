@@ -56,6 +56,7 @@ afterEach(() => {
     );
   }
   document.body.replaceChildren();
+  window.localStorage.clear();
 });
 
 describe("AppHeader", () => {
@@ -98,10 +99,28 @@ describe("AppHeader", () => {
     const optionsDialog = wrapper.get(".account-options-dialog");
     expect(optionsDialog.attributes()).toHaveProperty("open");
     expect(optionsDialog.get("h2").text()).toBe("Options");
-    expect(optionsDialog.get("label").text()).toBe("Language");
+    const optionTabs = optionsDialog.findAll('[role="tab"]');
+    expect(optionTabs.map((tab) => tab.text())).toEqual([
+      "General",
+      "Defaults",
+    ]);
+    expect(optionTabs[0]?.attributes("aria-selected")).toBe("true");
+    expect(optionsDialog.findAll("label").map((label) => label.text())).toEqual(
+      ["Language", "Headers that append by default"],
+    );
+    await optionTabs[1]?.trigger("click");
+    expect(optionTabs[1]?.attributes("aria-selected")).toBe("true");
+    const appendingHeaders = optionsDialog.get("textarea");
+    expect(appendingHeaders.element).toHaveProperty("value", "Cookie");
+    await appendingHeaders.setValue("Cookie\nX-List");
 
     await optionsDialog.get(".primary-button").trigger("click");
     expect(optionsDialog.attributes()).not.toHaveProperty("open");
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("apinteract.appendingHeaders") ?? "[]",
+      ),
+    ).toEqual(["Cookie", "X-List"]);
     await accountTrigger.trigger("click");
     await flushPromises();
     menuItems = [

@@ -52,6 +52,8 @@ export interface RequestField {
   readonly name: string;
   readonly value: string;
   readonly enabled: boolean;
+  /** Controls whether this header retains or replaces same-name ancestor values. */
+  readonly mode?: "override" | "append";
 }
 
 export interface CollectionView {
@@ -170,6 +172,7 @@ interface RevisionContent {
   readonly query: readonly RequestField[];
   readonly headers: readonly RequestField[];
   readonly localHeaders?: readonly RequestField[];
+  readonly inheritedHeaders?: readonly RequestField[];
   readonly body: string;
   readonly preRequestScript: string;
   readonly postResponseScript: string;
@@ -1703,14 +1706,17 @@ export class RequestService {
     effectiveHeaders?: readonly RequestField[],
     effectiveTargetComponents?: readonly string[],
   ): Promise<EntityId> {
+    const localHeaders = validateHeaders(
+      JSON.parse(row.headers_json) as RequestField[],
+    );
+    const inheritedHeaders = await this.#resolveHeaders(
+      transaction,
+      row.workspace_id,
+      row.parent_collection_id,
+      [],
+    );
     const resolvedHeaders =
-      effectiveHeaders ??
-      (await this.#resolveHeaders(
-        transaction,
-        row.workspace_id,
-        row.parent_collection_id,
-        JSON.parse(row.headers_json) as RequestField[],
-      ));
+      effectiveHeaders ?? resolveHeaderLayers([inheritedHeaders, localHeaders]);
     const targetComponents =
       effectiveTargetComponents ??
       (await this.#targetComponents(
@@ -1721,7 +1727,7 @@ export class RequestService {
         row.target_url,
       ));
     const content = JSON.stringify(
-      revisionContent(row, resolvedHeaders, targetComponents),
+      revisionContent(row, resolvedHeaders, inheritedHeaders, targetComponents),
     );
     const fingerprint = createHash("sha256").update(content).digest("hex");
     const latest = await transaction
@@ -2544,7 +2550,10 @@ function validateHeaders(fields: readonly RequestField[]): RequestField[] {
     if (
       typeof field.name !== "string" ||
       typeof field.value !== "string" ||
-      typeof field.enabled !== "boolean"
+      typeof field.enabled !== "boolean" ||
+      (field.mode !== undefined &&
+        field.mode !== "override" &&
+        field.mode !== "append")
     ) {
       throw new Error("Header fields are invalid");
     }
@@ -2556,7 +2565,12 @@ function validateHeaders(fields: readonly RequestField[]): RequestField[] {
     ) {
       throw new Error(`Header ${field.name || "(empty)"} is not allowed`);
     }
-    return { name: field.name, value: field.value, enabled: field.enabled };
+    return {
+      name: field.name,
+      value: field.value,
+      enabled: field.enabled,
+      mode: field.mode ?? "override",
+    };
   });
 }
 
@@ -2734,6 +2748,7 @@ function mapRequest(row: {
 function revisionContent(
   row: RequestRow,
   effectiveHeaders: readonly RequestField[],
+  inheritedHeaders: readonly RequestField[],
   effectiveTargetComponents: readonly string[],
 ): RevisionContent {
   const request = mapRequest(row);
@@ -2747,6 +2762,7 @@ function revisionContent(
     query: request.query,
     headers: effectiveHeaders,
     localHeaders: request.headers,
+    inheritedHeaders,
     body: request.body,
     preRequestScript: request.preRequestScript,
     postResponseScript: request.postResponseScript,
@@ -2784,6 +2800,9 @@ function parseRevisionContent(value: string): RevisionContent {
     ...(parsed.localHeaders === undefined
       ? {}
       : { localHeaders: validateHeaders(parsed.localHeaders) }),
+    ...(parsed.inheritedHeaders === undefined
+      ? {}
+      : { inheritedHeaders: validateHeaders(parsed.inheritedHeaders) }),
     body: normalized.body,
     preRequestScript: normalized.preRequestScript,
     postResponseScript: normalized.postResponseScript,
@@ -2817,11 +2836,12 @@ function revisionRequestView(
     query: content.query,
     headers: localHeaders,
     inheritedHeaders:
-      content.localHeaders === undefined
+      content.inheritedHeaders ??
+      (content.localHeaders === undefined
         ? []
         : content.headers.filter(
             (header) => !localHeaderNames.has(header.name.toLowerCase()),
-          ),
+          )),
     body: content.body,
     preRequestScript: content.preRequestScript,
     postResponseScript: content.postResponseScript,
@@ -2839,10 +2859,7 @@ function mapCollection(row: {
   readonly path_prefix: string | null;
 }): Omit<
   CollectionView,
-  | "inheritedTarget"
-  | "inheritedHeaders"
-  | "effectiveHeaders"
-  | "effectivePath"
+  "inheritedTarget" | "inheritedHeaders" | "effectiveHeaders" | "effectivePath"
 > {
   return {
     collectionId: bytesToId(row.id),
@@ -2858,7 +2875,7 @@ function mapCollection(row: {
   };
 }
 
-/** Resolves enabled header groups with nearer layers replacing farther ones. */
+/** Resolves enabled header groups according to each layer's persisted merge modes. */
 export function resolveHeaderLayers(
   layers: readonly (readonly RequestField[])[],
 ): RequestField[] {
@@ -2875,7 +2892,9 @@ export function resolveHeaderLayers(
       groups.set(key, group);
     }
     for (const [key, group] of groups) {
-      resolved = resolved.filter((field) => field.name.toLowerCase() !== key);
+      if (group.some((field) => (field.mode ?? "override") === "override")) {
+        resolved = resolved.filter((field) => field.name.toLowerCase() !== key);
+      }
       resolved.push(...group);
     }
   }

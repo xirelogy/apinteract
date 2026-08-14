@@ -42,6 +42,13 @@ const zhHansMessages = {
     offline: "离线",
     openNavigator: "打开工作区导航",
     options: "选项",
+    optionsSections: {
+      general: "常规",
+      defaults: "默认值",
+    },
+    appendingHeaders: "默认追加的请求头",
+    appendingHeadersInvalid:
+      "请输入有效的 HTTP 请求头名称，并使用逗号或换行分隔。",
   },
   workspace: {
     baseUrl: "基础 URL",
@@ -195,6 +202,11 @@ const zhHansMessages = {
     duplicateUnsavedTitle: "复制已保存的版本？",
     enableField: "启用第 {index} 个{kind}字段",
     headerField: "请求头",
+    headerMode: {
+      override: "覆盖继承值",
+      append: "追加到继承值",
+      change: "请求头继承方式：{mode}。点击可切换。",
+    },
     headerName: "第 {index} 个请求头名称",
     headerValue: "第 {index} 个请求头值",
     headers: "请求头",
@@ -203,6 +215,7 @@ const zhHansMessages = {
     inheritedHeaderEnabled: "继承的第 {index} 个请求头已启用",
     inheritedHeaderName: "继承的第 {index} 个请求头名称",
     inheritedHeaderValue: "继承的第 {index} 个请求头值",
+    inheritedHeaderOverridden: "已被当前作用域覆盖",
     name: "请求名称",
     moreActions: "{name} 的更多操作",
     newTemporary: "新建临时请求",
@@ -395,6 +408,13 @@ const zhHantMessages = {
     offline: "離線",
     openNavigator: "開啟工作區導覽",
     options: "選項",
+    optionsSections: {
+      general: "一般",
+      defaults: "預設值",
+    },
+    appendingHeaders: "預設附加的標頭",
+    appendingHeadersInvalid:
+      "請輸入有效的 HTTP 標頭名稱，並使用逗號或換行分隔。",
   },
   workspace: {
     baseUrl: "基礎 URL",
@@ -548,6 +568,11 @@ const zhHantMessages = {
     duplicateUnsavedTitle: "複製已儲存的版本？",
     enableField: "啟用第 {index} 個{kind}欄位",
     headerField: "標頭",
+    headerMode: {
+      override: "覆寫繼承值",
+      append: "附加到繼承值",
+      change: "標頭繼承方式：{mode}。點擊可切換。",
+    },
     headerName: "第 {index} 個標頭名稱",
     headerValue: "第 {index} 個標頭值",
     headers: "標頭",
@@ -556,6 +581,7 @@ const zhHantMessages = {
     inheritedHeaderEnabled: "繼承的第 {index} 個標頭已啟用",
     inheritedHeaderName: "繼承的第 {index} 個標頭名稱",
     inheritedHeaderValue: "繼承的第 {index} 個標頭值",
+    inheritedHeaderOverridden: "已被目前範圍覆寫",
     name: "請求名稱",
     moreActions: "{name} 的更多操作",
     newTemporary: "新增暫存請求",

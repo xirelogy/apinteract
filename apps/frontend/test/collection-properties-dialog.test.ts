@@ -167,12 +167,15 @@ describe("CollectionPropertiesDialog", () => {
       ).element.value,
     ).toBe("X-Parent-Host");
     expect(
-      inheritedHeader.get('input[aria-label="Inherited header name 1"]')
+      inheritedHeader
+        .get('input[aria-label="Inherited header name 1"]')
         .attributes("disabled"),
     ).toBeDefined();
-    expect(inheritedHeader.get('[role="img"]').attributes("aria-label")).toBe(
-      "Inherited",
-    );
+    expect(
+      inheritedHeader
+        .get('.inherited-header-indicator[role="img"]')
+        .attributes("aria-label"),
+    ).toBe("Inherited");
     const inheritedPrefix = wrapper.get<HTMLInputElement>(
       'input[aria-label="Inherited target"]',
     );
@@ -297,7 +300,14 @@ describe("CollectionPropertiesDialog", () => {
       [
         "Renamed examples",
         "/v1/examples",
-        [{ name: "X-Team", value: "platform", enabled: true }],
+        [
+          {
+            name: "X-Team",
+            value: "platform",
+            enabled: true,
+            mode: "override",
+          },
+        ],
         [
           {
             name: "base_url",
@@ -505,7 +515,14 @@ describe("WorkspacePropertiesDialog", () => {
       [
         "Platform",
         "https://api.example.test",
-        [{ name: "X-Workspace", value: "platform", enabled: true }],
+        [
+          {
+            name: "X-Workspace",
+            value: "platform",
+            enabled: true,
+            mode: "override",
+          },
+        ],
         [{ name: "team", kind: "value", value: "platform" }],
       ],
     ]);

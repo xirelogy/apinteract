@@ -108,7 +108,12 @@ describe("RequestService draft updates", () => {
         { name: "page", value: "2", enabled: true },
       ]);
       expect(changed.headers).toEqual([
-        { name: "Content-Type", value: "application/json", enabled: true },
+        {
+          name: "Content-Type",
+          value: "application/json",
+          enabled: true,
+          mode: "override",
+        },
       ]);
       expect(changed.body).toBe('{"hello":"world"}');
       expect(await audit.pendingCount()).toBe(3);

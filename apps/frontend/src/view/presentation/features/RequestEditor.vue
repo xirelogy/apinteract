@@ -18,6 +18,7 @@ import {
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
+import { defaultHeaderMergeMode } from "@/app/preferences/header-preferences";
 import type {
   ExecutionView,
   HttpMethod,
@@ -31,6 +32,7 @@ import type {
 } from "@/model/contracts/backend";
 import type { RequestDraftInput } from "@/model/domain/application";
 import {
+  createBlankHeaderField,
   editableRequestFields,
   ensureTrailingBlankRequestField,
   isBlankRequestField,
@@ -41,6 +43,7 @@ import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import InlineWarning from "@/view/presentation/controls/InlineWarning.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
+import HeaderMergeModeToggle from "@/view/presentation/controls/HeaderMergeModeToggle.vue";
 import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TemplateTextControl from "@/view/presentation/controls/TemplateTextControl.vue";
@@ -162,7 +165,11 @@ watch(
     targetMode.value = source?.targetMode ?? "composed";
     targetUrl.value = source?.targetUrl ?? "";
     query.value = editableRequestFields(source?.query ?? [], true);
-    headers.value = editableRequestFields(source?.headers ?? [], true);
+    headers.value = editableRequestFields(
+      source?.headers ?? [],
+      true,
+      createBlankHeaderField,
+    );
     body.value = source?.body ?? "";
     preRequestScript.value = source?.preRequestScript ?? "";
     postResponseScript.value = source?.postResponseScript ?? "";
@@ -210,6 +217,15 @@ const headerCount = computed(
     meaningfulRequestFields(headers.value).length +
     props.inheritedHeaders.length,
 );
+const overriddenInheritedHeaderNames = computed(() => {
+  const names = new Set<string>();
+  for (const header of meaningfulRequestFields(headers.value)) {
+    if (header.enabled && (header.mode ?? "override") === "override") {
+      names.add(header.name.toLowerCase());
+    }
+  }
+  return names;
+});
 const referencedVariableNames = computed(() =>
   collectTemplateVariableNames([
     ...(targetMode.value === "composed" ? [props.inheritedTarget] : []),
@@ -318,7 +334,10 @@ const draftRevisionLabel = computed(() =>
 function removeField(kind: "query" | "headers", index: number): void {
   const fields = kind === "query" ? query : headers;
   fields.value.splice(index, 1);
-  ensureTrailingBlankRequestField(fields.value);
+  ensureTrailingBlankRequestField(
+    fields.value,
+    kind === "headers" ? createBlankHeaderField : undefined,
+  );
   emitChange();
 }
 
@@ -337,7 +356,10 @@ function moveActiveField(fromIndex: number, toIndex: number): void {
   const fields = activeFields();
   const [field] = fields.splice(fromIndex, 1);
   if (field !== undefined) fields.splice(toIndex, 0, field);
-  ensureTrailingBlankRequestField(fields);
+  ensureTrailingBlankRequestField(
+    fields,
+    activeTab.value === "headers" ? createBlankHeaderField : undefined,
+  );
   emitChange();
 }
 
@@ -350,10 +372,24 @@ const fieldReorder = useRowReorder({
 });
 
 /** Publishes a field edit and materializes the next trailing blank row. */
-function updateActiveField(): void {
+function updateActiveField(index?: number, nameChanged = false): void {
   const fields = activeTab.value === "headers" ? headers : query;
-  ensureTrailingBlankRequestField(fields.value);
+  if (activeTab.value === "headers" && nameChanged && index !== undefined) {
+    const header = fields.value[index];
+    if (header !== undefined) {
+      header.mode = defaultHeaderMergeMode(header.name);
+    }
+  }
+  ensureTrailingBlankRequestField(
+    fields.value,
+    activeTab.value === "headers" ? createBlankHeaderField : undefined,
+  );
   emitChange();
+}
+
+/** Reports whether the current request replaces one inherited header pair. */
+function isInheritedHeaderOverridden(field: RequestField): boolean {
+  return overriddenInheritedHeaderNames.value.has(field.name.toLowerCase());
 }
 
 /** Builds an immutable draft payload from the current editor controls. */
@@ -711,6 +747,9 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 : []"
               :key="`inherited-${index}`"
               class="request-field-row inherited-header-row"
+              :class="{
+                'is-header-overridden': isInheritedHeaderOverridden(field),
+              }"
             >
               <CheckboxControl
                 :model-value="field.enabled"
@@ -730,22 +769,36 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 "
                 disabled
               />
-              <TemplateTextControl
-                :model-value="field.value"
-                class="field-template-input"
-                density="compact"
-                font="mono"
-                :previews="variablePreviews"
-                :aria-label="
-                  t('request.inheritedHeaderValue', { index: index + 1 })
-                "
-                readonly
-              />
+              <div class="header-value-field">
+                <HeaderMergeModeToggle
+                  :model-value="field.mode ?? 'override'"
+                  readonly
+                />
+                <TemplateTextControl
+                  :model-value="field.value"
+                  class="field-template-input"
+                  density="compact"
+                  font="mono"
+                  :previews="variablePreviews"
+                  :aria-label="
+                    t('request.inheritedHeaderValue', { index: index + 1 })
+                  "
+                  readonly
+                />
+              </div>
               <span
                 class="inherited-header-indicator"
                 role="img"
-                :aria-label="t('request.inherited')"
-                :title="t('request.inherited')"
+                :aria-label="
+                  isInheritedHeaderOverridden(field)
+                    ? t('request.inheritedHeaderOverridden')
+                    : t('request.inherited')
+                "
+                :title="
+                  isInheritedHeaderOverridden(field)
+                    ? t('request.inheritedHeaderOverridden')
+                    : t('request.inherited')
+                "
               >
                 <Lock :size="14" aria-hidden="true" />
               </span>
@@ -793,27 +846,42 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 autocomplete="off"
                 spellcheck="false"
                 :disabled="editorDisabled"
-                @input="updateActiveField"
+                @input="updateActiveField(index, true)"
               />
+              <div v-if="activeTab === 'headers'" class="header-value-field">
+                <HeaderMergeModeToggle
+                  :model-value="field.mode ?? 'override'"
+                  :disabled="editorDisabled"
+                  @update:model-value="field.mode = $event"
+                  @change="emitChange"
+                />
+                <TemplateTextControl
+                  v-model="field.value"
+                  class="field-template-input"
+                  density="compact"
+                  font="mono"
+                  :previews="variablePreviews"
+                  :aria-label="t('request.headerValue', { index: index + 1 })"
+                  :placeholder="t('common.fields.value')"
+                  autocomplete="off"
+                  spellcheck="false"
+                  :disabled="editorDisabled"
+                  @input="updateActiveField(index)"
+                />
+              </div>
               <TemplateTextControl
+                v-else
                 v-model="field.value"
                 class="field-template-input"
                 density="compact"
                 font="mono"
                 :previews="variablePreviews"
-                :aria-label="
-                  t(
-                    activeTab === 'query'
-                      ? 'request.queryValue'
-                      : 'request.headerValue',
-                    { index: index + 1 },
-                  )
-                "
+                :aria-label="t('request.queryValue', { index: index + 1 })"
                 :placeholder="t('common.fields.value')"
                 autocomplete="off"
                 spellcheck="false"
                 :disabled="editorDisabled"
-                @input="updateActiveField"
+                @input="updateActiveField(index)"
               />
               <div class="row-actions">
                 <RowReorderHandle

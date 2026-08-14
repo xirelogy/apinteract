@@ -250,7 +250,10 @@ describe("RequestEditor", () => {
       ?.trigger("click");
     const headerName = wrapper.get('input[aria-label="Header name 1"]');
     expect(headerName.attributes("placeholder")).toBe("Add header");
-    await headerName.setValue("X-Source");
+    await headerName.setValue("Cookie");
+    const cookieMode = wrapper.findAll(".header-merge-mode-toggle")[0];
+    expect(cookieMode?.attributes("data-mode")).toBe("append");
+    expect(cookieMode?.attributes("title")).toBe("Append to inherited values");
     expect(
       wrapper
         .get('input[aria-label="Header name 2"]')
@@ -270,7 +273,7 @@ describe("RequestEditor", () => {
       ],
       headers: [
         { name: "X-Target", value: "", enabled: true },
-        { name: "X-Source", value: "", enabled: true },
+        { name: "Cookie", value: "", enabled: true, mode: "append" },
       ],
     });
   });
@@ -498,7 +501,14 @@ describe("RequestEditor", () => {
           targetMode: "absolute",
           targetUrl: "https://example.test",
           query: [],
-          headers: [{ name: "X-Local", value: "local", enabled: true }],
+          headers: [
+            {
+              name: "X-Team",
+              value: "local",
+              enabled: true,
+              mode: "override",
+            },
+          ],
           body: "",
           preRequestScript: "",
           postResponseScript: "",
@@ -555,7 +565,24 @@ describe("RequestEditor", () => {
       wrapper
         .get('.inherited-header-indicator[role="img"]')
         .attributes("aria-label"),
-    ).toBe("Inherited");
+    ).toBe("Overridden by this scope");
+    expect(wrapper.get(".inherited-header-row").classes()).toContain(
+      "is-header-overridden",
+    );
+    await wrapper.get(".header-merge-mode-toggle").trigger("click");
+    expect(wrapper.get(".inherited-header-row").classes()).not.toContain(
+      "is-header-overridden",
+    );
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      headers: [
+        {
+          name: "X-Team",
+          value: "local",
+          enabled: true,
+          mode: "append",
+        },
+      ],
+    });
     expect(
       wrapper.get('input[aria-label="Header name 1"]').attributes("disabled"),
     ).toBeUndefined();

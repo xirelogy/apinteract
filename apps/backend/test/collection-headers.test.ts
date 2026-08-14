@@ -42,6 +42,57 @@ describe("collection header inheritance", () => {
     ]);
   });
 
+  it("retains ancestor pairs for append mode and removes them for local overrides", () => {
+    expect(
+      resolveHeaderLayers([
+        [
+          {
+            name: "Cookie",
+            value: "root=1",
+            enabled: true,
+            mode: "append",
+          },
+          { name: "X-Trace", value: "root", enabled: true },
+        ],
+        [
+          {
+            name: "cookie",
+            value: "child=1",
+            enabled: true,
+            mode: "append",
+          },
+          {
+            name: "x-trace",
+            value: "child-first",
+            enabled: true,
+            mode: "override",
+          },
+          {
+            name: "X-Trace",
+            value: "child-second",
+            enabled: true,
+            mode: "append",
+          },
+        ],
+      ]),
+    ).toEqual([
+      { name: "Cookie", value: "root=1", enabled: true, mode: "append" },
+      { name: "cookie", value: "child=1", enabled: true, mode: "append" },
+      {
+        name: "x-trace",
+        value: "child-first",
+        enabled: true,
+        mode: "override",
+      },
+      {
+        name: "X-Trace",
+        value: "child-second",
+        enabled: true,
+        mode: "append",
+      },
+    ]);
+  });
+
   it("persists profiles and snapshots resolved headers across three levels", async () => {
     const rootPath = await mkdtemp(join(tmpdir(), "apinteract-headers-"));
     const database = await SqliteDatabase.open(
@@ -230,11 +281,36 @@ describe("collection header inheritance", () => {
         request.requestId,
       );
       expect(prepared.request.headers).toEqual([
-        { name: "X-Workspace", value: "workspace", enabled: true },
-        { name: "X-Root", value: "root", enabled: true },
-        { name: "X-Leaf", value: "leaf", enabled: true },
-        { name: "X-Shared", value: "request", enabled: true },
-        { name: "X-Local", value: "local", enabled: true },
+        {
+          name: "X-Workspace",
+          value: "workspace",
+          enabled: true,
+          mode: "override",
+        },
+        {
+          name: "X-Root",
+          value: "root",
+          enabled: true,
+          mode: "override",
+        },
+        {
+          name: "X-Leaf",
+          value: "leaf",
+          enabled: true,
+          mode: "override",
+        },
+        {
+          name: "X-Shared",
+          value: "request",
+          enabled: true,
+          mode: "override",
+        },
+        {
+          name: "X-Local",
+          value: "local",
+          enabled: true,
+          mode: "override",
+        },
       ]);
       const execution = await database.db
         .selectFrom("executions")

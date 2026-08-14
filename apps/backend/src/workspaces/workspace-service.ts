@@ -17,6 +17,8 @@ export interface WorkspaceHeader {
   readonly name: string;
   readonly value: string;
   readonly enabled: boolean;
+  /** Controls whether descendants retain or replace older same-name values. */
+  readonly mode?: "override" | "append";
 }
 
 export interface WorkspaceSummary {
@@ -380,13 +382,16 @@ function validateWorkspaceHeaders(
       typeof header.name !== "string" ||
       typeof header.value !== "string" ||
       typeof header.enabled !== "boolean" ||
+      (header.mode !== undefined &&
+        header.mode !== "override" &&
+        header.mode !== "append") ||
       header.name.length > 1024 ||
       header.value.length > 16_384 ||
       (header.enabled && header.name.trim().length === 0)
     ) {
       throw new Error("Invalid workspace header");
     }
-    return { ...header };
+    return { ...header, mode: header.mode ?? "override" };
   });
 }
 

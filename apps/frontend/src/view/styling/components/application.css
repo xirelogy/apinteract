@@ -1131,6 +1131,55 @@
   color: var(--text-secondary);
 }
 
+.header-value-field {
+  position: relative;
+  min-width: 0;
+}
+
+.header-value-field > :is(.field-cell-input, .field-template-input) {
+  width: 100%;
+}
+
+.header-value-field
+  > :is(.header-merge-mode-toggle, .header-merge-mode-indicator) {
+  position: absolute;
+  z-index: 2;
+  inset-block-start: 0.0625rem;
+  inset-inline-start: 0.0625rem;
+}
+
+.header-merge-mode-indicator {
+  display: grid;
+  place-items: center;
+  width: var(--control-height-compact);
+  height: calc(var(--control-height-compact) - 0.125rem);
+  color: var(--text-secondary);
+}
+
+.header-value-field > .header-merge-mode-toggle {
+  width: calc(var(--control-height-compact) - 0.125rem);
+  min-height: calc(var(--control-height-compact) - 0.125rem);
+}
+
+.header-merge-mode-toggle[data-mode="append"] {
+  color: var(--accent-primary);
+  background: var(--surface-selected);
+}
+
+.inherited-header-row.is-header-overridden {
+  opacity: 0.65;
+}
+
+.inherited-header-row.is-header-overridden
+  :is(
+    .field-cell-input,
+    .template-text-control-input,
+    .template-text-control-mirror-content
+  ) {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-secondary);
+}
+
 .field-cell-input {
   min-width: 0;
   min-height: var(--control-height-compact);
@@ -1146,6 +1195,12 @@
   min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
+}
+
+.header-value-field > .field-cell-input,
+.header-value-field .template-text-control-input,
+.header-value-field .template-text-control-mirror-content {
+  padding-inline-start: calc(var(--control-height-compact) + var(--space-1));
 }
 
 .inherited-header-row .field-cell-input:disabled {
@@ -1708,6 +1763,39 @@
 .logout-confirmation-dialog,
 .resource-delete-dialog {
   width: min(24rem, calc(100vi - var(--space-6)));
+}
+
+.account-options-tabs {
+  min-width: 0;
+}
+
+.account-options-tabs > .request-tabs {
+  margin-top: 0;
+}
+
+.account-options-section {
+  padding-top: var(--space-3);
+}
+
+.account-options-section:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+}
+
+.appending-headers-input {
+  width: 100%;
+  min-height: calc(var(--control-height) * 2.5);
+  resize: block;
+  padding: var(--space-3);
+  color: var(--text-primary);
+  line-height: var(--line-height-code);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-primary);
+}
+
+.appending-headers-input:hover {
+  border-color: var(--border-strong);
 }
 
 @media (width <= 47.5rem) {

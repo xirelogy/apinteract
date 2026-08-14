@@ -291,8 +291,18 @@ describe("persisted variable scopes", () => {
       );
       expect(prepared.request.targetUrl).toBe("https://request.test/resource");
       expect(prepared.request.headers).toEqual([
-        { name: "X-Collection", value: "leaf", enabled: true },
-        { name: "Authorization", value: "super-secret", enabled: true },
+        {
+          name: "X-Collection",
+          value: "leaf",
+          enabled: true,
+          mode: "override",
+        },
+        {
+          name: "Authorization",
+          value: "super-secret",
+          enabled: true,
+          mode: "override",
+        },
       ]);
       const execution = await database.db
         .selectFrom("executions")

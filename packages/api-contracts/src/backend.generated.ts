@@ -1149,6 +1149,11 @@ export interface components {
       name: string;
       value: string;
       enabled: boolean;
+      /**
+       * @description Whether this header-value pair replaces same-name values from older scopes or appends to them.
+       * @enum {string}
+       */
+      mode?: "override" | "append";
     };
   };
   responses: {

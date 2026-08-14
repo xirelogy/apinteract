@@ -39,6 +39,13 @@ export const enUsMessages = {
     offline: "Offline",
     openNavigator: "Open workspace navigator",
     options: "Options",
+    optionsSections: {
+      general: "General",
+      defaults: "Defaults",
+    },
+    appendingHeaders: "Headers that append by default",
+    appendingHeadersInvalid:
+      "Enter valid HTTP header names separated by commas or lines.",
   },
   workspace: {
     baseUrl: "Base URL",
@@ -207,6 +214,11 @@ export const enUsMessages = {
     duplicateUnsavedTitle: "Duplicate the saved version?",
     enableField: "Enable {kind} field {index}",
     headerField: "header",
+    headerMode: {
+      override: "Override inherited values",
+      append: "Append to inherited values",
+      change: "Header inheritance: {mode}. Activate to change it.",
+    },
     headerName: "Header name {index}",
     headerValue: "Header value {index}",
     headers: "Headers",
@@ -215,6 +227,7 @@ export const enUsMessages = {
     inheritedHeaderEnabled: "Inherited header {index} is enabled",
     inheritedHeaderName: "Inherited header name {index}",
     inheritedHeaderValue: "Inherited header value {index}",
+    inheritedHeaderOverridden: "Overridden by this scope",
     name: "Request name",
     moreActions: "More actions for {name}",
     newTemporary: "New temporary request",
