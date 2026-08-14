@@ -137,6 +137,12 @@ const zhHansMessages = {
       value: "普通值",
     },
     label: "环境",
+    includeAction: "包含",
+    includeEnvironment: "要包含的环境",
+    includedEnvironment: "第 {index} 个包含的环境",
+    includedEnvironments: "包含的环境",
+    includedEnvironmentsDescription:
+      "环境按顺序应用。后面的环境会覆盖前面的环境，本环境的变量会覆盖所有包含的环境。",
     manage: "管理环境",
     moreActions: "{name} 的更多操作",
     noValue: "无值",
@@ -154,8 +160,11 @@ const zhHansMessages = {
       unknownKind: "未知变量类型",
       unsetVariable: "变量 {name} 未设置",
     },
+    removeIncludedEnvironment: "移除第 {index} 个包含的环境",
     removeVariable: "移除第 {index} 个变量",
     removeVariableTitle: "移除变量",
+    reorderIncludedEnvironment:
+      "调整第 {index} 个包含环境的顺序。使用 Alt+上箭头或 Alt+下箭头。",
     secretClearPendingPlaceholder: "保存时将清除机密值",
     secretState: {
       empty: "尚未保存机密值。输入一个值即可设置。",
@@ -513,6 +522,12 @@ const zhHantMessages = {
       value: "一般值",
     },
     label: "環境",
+    includeAction: "包含",
+    includeEnvironment: "要包含的環境",
+    includedEnvironment: "第 {index} 個包含的環境",
+    includedEnvironments: "包含的環境",
+    includedEnvironmentsDescription:
+      "環境會依序套用。後面的環境會覆寫前面的環境，而此環境的變數會覆寫所有包含的環境。",
     manage: "管理環境",
     moreActions: "{name} 的更多操作",
     noValue: "無值",
@@ -530,8 +545,11 @@ const zhHantMessages = {
       unknownKind: "未知變數類型",
       unsetVariable: "變數 {name} 未設定",
     },
+    removeIncludedEnvironment: "移除第 {index} 個包含的環境",
     removeVariable: "移除第 {index} 個變數",
     removeVariableTitle: "移除變數",
+    reorderIncludedEnvironment:
+      "調整第 {index} 個包含環境的順序。使用 Alt+向上鍵或 Alt+向下鍵。",
     secretClearPendingPlaceholder: "儲存時將清除機密值",
     secretState: {
       empty: "尚未儲存機密值。輸入一個值即可設定。",

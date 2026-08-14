@@ -747,6 +747,7 @@ export class EnvironmentService {
     const cache = new Map<EntityId, ComposedEnvironmentProfile<T>>();
     const stack: EntityId[] = [];
 
+    /** Resolves one node once while guarding persisted graph integrity. */
     const resolve = async (
       currentId: EntityId,
     ): Promise<ComposedEnvironmentProfile<T>> => {
@@ -1004,6 +1005,7 @@ function findEnvironmentCycle(
   const stack: EntityId[] = [];
   const complete = new Set<EntityId>();
 
+  /** Visits one reachable node and returns the active recursion cycle. */
   const visit = (currentId: EntityId): readonly EntityId[] | null => {
     const cycleStart = stack.indexOf(currentId);
     if (cycleStart >= 0) return [...stack.slice(cycleStart), currentId];

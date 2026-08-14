@@ -388,7 +388,7 @@ function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
           >
             {{ t("environment.includedEnvironments") }}
           </h3>
-          <p class="resource-dialog-context">
+          <p class="resource-dialog-context environment-includes-description">
             {{ t("environment.includedEnvironmentsDescription") }}
           </p>
           <div

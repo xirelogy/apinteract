@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { AuditService } from "../src/audit/audit-service.js";
 import {
+  EnvironmentCompositionCycleError,
+  EnvironmentCompositionInvalidError,
   EnvironmentConflictError,
+  EnvironmentInUseError,
   EnvironmentService,
 } from "../src/environments/environment-service.js";
 import {
@@ -21,7 +24,10 @@ import {
 import { SqliteDatabase } from "../src/persistence/sqlite-database.js";
 import { RequestService } from "../src/requests/request-service.js";
 import { VariableService } from "../src/variables/variable-service.js";
-import { WorkspaceService } from "../src/workspaces/workspace-service.js";
+import {
+  ResourceNotFoundError,
+  WorkspaceService,
+} from "../src/workspaces/workspace-service.js";
 
 describe("environment service", () => {
   const roots: string[] = [];
@@ -286,6 +292,215 @@ describe("environment service", () => {
       await fixture.database.close();
     }
   });
+
+  it("composes ordered nested environments and rejects cycles and dependent deletion", async () => {
+    const fixture = await createFixture(roots);
+    try {
+      const shared = await fixture.environments.create(
+        fixture.userId,
+        fixture.workspaceId,
+        "Shared",
+        [
+          { name: "diamond", kind: "value", value: "shared" },
+          { name: "sharedOnly", kind: "value", value: "available" },
+        ],
+      );
+      const first = await fixture.environments.create(
+        fixture.userId,
+        fixture.workspaceId,
+        "First",
+        [
+          { name: "winner", kind: "value", value: "first" },
+          { name: "diamond", kind: "value", value: "first" },
+        ],
+        [shared.environmentId],
+      );
+      const second = await fixture.environments.create(
+        fixture.userId,
+        fixture.workspaceId,
+        "Second",
+        [
+          { name: "winner", kind: "value", value: "second" },
+          { name: "secondOnly", kind: "value", value: "available" },
+        ],
+        [shared.environmentId],
+      );
+      const composed = await fixture.environments.create(
+        fixture.userId,
+        fixture.workspaceId,
+        "Composed",
+        [{ name: "winner", kind: "value", value: "local" }],
+        [first.environmentId, second.environmentId],
+      );
+
+      expect(composed.includedEnvironments).toEqual([
+        {
+          environmentId: first.environmentId,
+          name: "First",
+          revision: 0,
+        },
+        {
+          environmentId: second.environmentId,
+          name: "Second",
+          revision: 0,
+        },
+      ]);
+      expect(
+        composed.inheritedVariables.map(({ variable, source }) => ({
+          name: variable.name,
+          source: source.scopeName,
+          value: variable.kind === "value" ? variable.value : null,
+        })),
+      ).toEqual(
+        expect.arrayContaining([
+          { name: "winner", source: "Second", value: "second" },
+          { name: "diamond", source: "Shared", value: "shared" },
+          { name: "sharedOnly", source: "Shared", value: "available" },
+          { name: "secondOnly", source: "Second", value: "available" },
+        ]),
+      );
+
+      await fixture.environments.select(
+        fixture.userId,
+        fixture.firstSessionId,
+        fixture.workspaceId,
+        composed.environmentId,
+      );
+      const selected = await fixture.environments.selectedProfile(
+        fixture.database.db,
+        fixture.firstSessionId,
+        fixture.workspaceId,
+      );
+      expect(
+        selected?.variables.map((variable) => [
+          variable.name,
+          variable.kind === "value" ? variable.value : variable.kind,
+        ]),
+      ).toEqual(
+        expect.arrayContaining([
+          ["winner", "local"],
+          ["diamond", "shared"],
+          ["sharedOnly", "available"],
+          ["secondOnly", "available"],
+        ]),
+      );
+      expect(selected?.evidence.map((source) => source.environmentId)).toEqual([
+        first.environmentId,
+        shared.environmentId,
+        second.environmentId,
+        composed.environmentId,
+      ]);
+      const effective = await fixture.variables.effectiveProfile(
+        fixture.database.db,
+        fixture.firstSessionId,
+        fixture.workspaceId,
+        null,
+        null,
+      );
+      expect(
+        effective.evidence
+          .filter((entry) => entry.scope === "environment")
+          .map((entry) => entry.scopeId),
+      ).toEqual([
+        first.environmentId,
+        shared.environmentId,
+        second.environmentId,
+        composed.environmentId,
+      ]);
+
+      await expect(
+        fixture.environments.update(
+          fixture.userId,
+          shared.environmentId,
+          shared.revision,
+          shared.name,
+          [
+            { name: "diamond", kind: "value", value: "shared" },
+            { name: "sharedOnly", kind: "value", value: "available" },
+          ],
+          [composed.environmentId],
+        ),
+      ).rejects.toBeInstanceOf(EnvironmentCompositionCycleError);
+      await expect(
+        fixture.environments.update(
+          fixture.userId,
+          composed.environmentId,
+          composed.revision,
+          composed.name,
+          [{ name: "winner", kind: "value", value: "local" }],
+          [first.environmentId, first.environmentId],
+        ),
+      ).rejects.toBeInstanceOf(EnvironmentCompositionInvalidError);
+      await expect(
+        fixture.environments.update(
+          fixture.userId,
+          composed.environmentId,
+          composed.revision,
+          composed.name,
+          [{ name: "winner", kind: "value", value: "local" }],
+          [composed.environmentId],
+        ),
+      ).rejects.toBeInstanceOf(EnvironmentCompositionCycleError);
+      const otherWorkspace = await fixture.workspaces.create(
+        fixture.userId,
+        "Other workspace",
+      );
+      const foreign = await fixture.environments.create(
+        fixture.userId,
+        otherWorkspace.workspaceId,
+        "Foreign",
+        [],
+      );
+      await expect(
+        fixture.environments.update(
+          fixture.userId,
+          composed.environmentId,
+          composed.revision,
+          composed.name,
+          [{ name: "winner", kind: "value", value: "local" }],
+          [foreign.environmentId],
+        ),
+      ).rejects.toBeInstanceOf(ResourceNotFoundError);
+      await expect(
+        fixture.environments.delete(
+          fixture.userId,
+          shared.environmentId,
+          shared.revision,
+        ),
+      ).rejects.toBeInstanceOf(EnvironmentInUseError);
+
+      const reordered = await fixture.environments.update(
+        fixture.userId,
+        composed.environmentId,
+        composed.revision,
+        composed.name,
+        [],
+        [second.environmentId, first.environmentId],
+      );
+      const reorderedProfile = await fixture.environments.selectedProfile(
+        fixture.database.db,
+        fixture.firstSessionId,
+        fixture.workspaceId,
+      );
+      expect(
+        reordered.includedEnvironments.map(
+          ({ environmentId }) => environmentId,
+        ),
+      ).toEqual([second.environmentId, first.environmentId]);
+      expect(
+        reorderedProfile?.variables.find(
+          (variable) => variable.name === "winner",
+        ),
+      ).toMatchObject({ kind: "value", value: "first" });
+      expect(
+        reorderedProfile?.variables.find(
+          (variable) => variable.name === "diamond",
+        ),
+      ).toMatchObject({ kind: "value", value: "first" });
+    } finally {
+      await fixture.database.close();
+    }
+  });
 });
 
 /** Creates users, sessions, workspace, and environment-aware services. */
@@ -326,10 +541,16 @@ async function createFixture(roots: string[]) {
   const audit = new AuditService(database.db, join(rootPath, "audit"));
   const workspaces = new WorkspaceService(database.db, audit);
   const environments = new EnvironmentService(database.db, workspaces, audit);
+  const variables = new VariableService(
+    database.db,
+    workspaces,
+    environments,
+    audit,
+  );
   const requests = new RequestService(
     database.db,
     workspaces,
-    new VariableService(database.db, workspaces, environments, audit),
+    variables,
     audit,
   );
   const workspace = await workspaces.create(userId, "Workspace");
@@ -338,6 +559,8 @@ async function createFixture(roots: string[]) {
     database,
     audit,
     environments,
+    workspaces,
+    variables,
     requests,
     userId,
     firstSessionId,
@@ -348,6 +571,8 @@ async function createFixture(roots: string[]) {
     readonly database: SqliteDatabase;
     readonly audit: AuditService;
     readonly environments: EnvironmentService;
+    readonly workspaces: WorkspaceService;
+    readonly variables: VariableService;
     readonly requests: RequestService;
     readonly userId: EntityId;
     readonly firstSessionId: EntityId;

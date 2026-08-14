@@ -160,7 +160,7 @@ describe("EnvironmentManager", () => {
       ?.click();
     await flushPromises();
     await wrapper.get("form").trigger("submit");
-    expect(wrapper.emitted("create")).toEqual([["", []]]);
+    expect(wrapper.emitted("create")).toEqual([["", [], []]]);
     expect(wrapper.get("dialog").attributes()).toHaveProperty("open");
 
     await wrapper.setProps({ busy: true });
@@ -172,6 +172,61 @@ describe("EnvironmentManager", () => {
     wrapper.vm.finishMutation();
     await wrapper.vm.$nextTick();
     expect(wrapper.get("dialog").attributes()).not.toHaveProperty("open");
+    wrapper.unmount();
+  });
+
+  it("creates an ordered composition and supports keyboard reordering", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const firstId = "019fa8be-a510-76b9-b73b-69f4c7af7875";
+    const secondId = "019fa8be-a510-76b9-b73b-69f4c7af7876";
+    const wrapper = mount(EnvironmentManager, {
+      attachTo: document.body,
+      props: {
+        environments: [
+          { environmentId: firstId, name: "First", revision: 1 },
+          { environmentId: secondId, name: "Second", revision: 1 },
+        ],
+        selectedEnvironmentId: null,
+        environment: null,
+        canEdit: true,
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .get('button[aria-label="Manage environments"]')
+      .trigger("click");
+    await flushPromises();
+    document.body
+      .querySelector<HTMLButtonElement>('[role="menuitem"]')
+      ?.click();
+    await flushPromises();
+
+    for (const name of ["First", "Second"]) {
+      await wrapper
+        .get('button[aria-label="Environment to include"]')
+        .trigger("click");
+      await flushPromises();
+      const option = wrapper
+        .findAll('[role="option"]')
+        .find((candidate) => candidate.text().includes(name));
+      await option?.trigger("click");
+      await wrapper
+        .findAll("button")
+        .find((button) => button.text() === "Include")
+        ?.trigger("click");
+    }
+
+    await wrapper
+      .get('button[aria-label^="Reorder included environment 1"]')
+      .trigger("keydown", { altKey: true, key: "ArrowDown" });
+    await wrapper.get("form").trigger("submit");
+    expect(wrapper.emitted("create")).toEqual([["", [], [secondId, firstId]]]);
     wrapper.unmount();
   });
 
@@ -192,6 +247,7 @@ describe("EnvironmentManager", () => {
           workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
           name: "Development",
           revision: 2,
+          includedEnvironments: [],
           variables: [],
           inheritedVariables: [],
         },
@@ -283,6 +339,7 @@ describe("EnvironmentManager", () => {
         workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
         name: "Development",
         revision: 2,
+        includedEnvironments: [],
         variables: [
           {
             variableId: "019fa8be-a510-76b9-b73b-69f4c7af7877",
@@ -327,6 +384,7 @@ describe("EnvironmentManager", () => {
           kind: "secret",
         },
       ],
+      [],
     ]);
     wrapper.unmount();
   });

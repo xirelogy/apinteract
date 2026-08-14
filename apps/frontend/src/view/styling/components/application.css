@@ -268,7 +268,7 @@
   gap: var(--space-1);
 }
 
-.environment-includes .resource-dialog-context {
+.environment-includes-description {
   margin: 0 0 var(--space-1);
 }
 
