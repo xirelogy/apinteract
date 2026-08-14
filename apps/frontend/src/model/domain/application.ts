@@ -8,6 +8,8 @@ import type {
   RequestRevisionView,
   RequestView,
   TreeNode,
+  VariableProfileView,
+  VariableWrite,
   WorkspaceSummary,
 } from "../contracts/backend";
 
@@ -41,6 +43,9 @@ export interface RequestTab {
   readonly request: RequestView | null;
   readonly draft: RequestDraftInput;
   readonly baseline: RequestDraftInput | null;
+  readonly variableProfile: VariableProfileView | null;
+  readonly variableDraft: readonly VariableWrite[] | null;
+  readonly variableBaseline: readonly VariableWrite[] | null;
   readonly pendingParentCollectionId: string | null;
   readonly inheritedTarget: string;
   readonly inheritedHeaders: readonly RequestField[];
@@ -54,7 +59,8 @@ export interface RequestTab {
 export function isRequestTabDirty(tab: RequestTab): boolean {
   return (
     tab.baseline === null ||
-    JSON.stringify(tab.draft) !== JSON.stringify(tab.baseline)
+    JSON.stringify(tab.draft) !== JSON.stringify(tab.baseline) ||
+    JSON.stringify(tab.variableDraft) !== JSON.stringify(tab.variableBaseline)
   );
 }
 

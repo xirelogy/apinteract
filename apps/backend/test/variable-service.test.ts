@@ -150,6 +150,29 @@ describe("persisted variable scopes", () => {
           { name: "environment_only", kind: "value", value: "environment" },
         ],
       );
+      expect(
+        environment.inheritedVariables.find(
+          (item) => item.variable.name === "workspace_only",
+        ),
+      ).toMatchObject({
+        variable: {
+          name: "workspace_only",
+          kind: "value",
+          value: "workspace",
+        },
+        source: {
+          scope: "workspace",
+          scopeName: "Variable workspace",
+        },
+      });
+      expect(
+        environment.inheritedVariables.find(
+          (item) => item.variable.name === "token",
+        ),
+      ).toMatchObject({
+        variable: { name: "token", kind: "secret", hasValue: true },
+      });
+      expect(JSON.stringify(environment)).not.toContain("super-secret");
       await environments.select(
         userId,
         sessionId,
@@ -165,6 +188,53 @@ describe("persisted variable scopes", () => {
           { name: "base_url", kind: "value", value: "https://request.test" },
           { name: "secret_alias", kind: "alias", target: "token" },
         ],
+      );
+      const requestProfileWithInheritance = await variables.get(
+        userId,
+        "request",
+        request.requestId,
+        sessionId,
+      );
+      expect(
+        requestProfileWithInheritance.inheritedVariables.map((item) => ({
+          name: item.variable.name,
+          sourceScope: item.source.scope,
+          sourceName: item.source.scopeName,
+        })),
+      ).toEqual([
+        {
+          name: "base_url",
+          sourceScope: "collection",
+          sourceName: "Root",
+        },
+        {
+          name: "workspace_only",
+          sourceScope: "workspace",
+          sourceName: "Variable workspace",
+        },
+        {
+          name: "token",
+          sourceScope: "workspace",
+          sourceName: "Variable workspace",
+        },
+        {
+          name: "environment_only",
+          sourceScope: "environment",
+          sourceName: "Development",
+        },
+        {
+          name: "collection_only",
+          sourceScope: "collection",
+          sourceName: "Leaf",
+        },
+        {
+          name: "blocked",
+          sourceScope: "collection",
+          sourceName: "Leaf",
+        },
+      ]);
+      expect(JSON.stringify(requestProfileWithInheritance)).not.toContain(
+        "super-secret",
       );
 
       await expect(

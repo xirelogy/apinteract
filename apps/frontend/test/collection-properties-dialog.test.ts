@@ -98,6 +98,7 @@ describe("CollectionPropertiesDialog", () => {
           scopeName: "Examples",
           revision: 0,
           variables: [],
+          inheritedVariables: [],
         },
         variablePreviews: [
           {
@@ -227,6 +228,7 @@ describe("CollectionPropertiesDialog", () => {
           scopeName: "Examples",
           revision: 0,
           variables: [],
+          inheritedVariables: [],
         },
         variablePreviews: [],
         canEdit: true,
@@ -350,6 +352,7 @@ describe("CollectionPropertiesDialog", () => {
           scopeName: "Examples",
           revision: 0,
           variables: [],
+          inheritedVariables: [],
         },
         variablePreviews: [],
         canEdit: true,
@@ -408,6 +411,7 @@ describe("WorkspacePropertiesDialog", () => {
           scopeName: "Platform",
           revision: 0,
           variables: [],
+          inheritedVariables: [],
         },
         variablePreviews: [
           {
@@ -478,6 +482,7 @@ describe("WorkspacePropertiesDialog", () => {
           scopeName: "Platform",
           revision: 0,
           variables: [],
+          inheritedVariables: [],
         },
         variablePreviews: [],
         canEdit: true,
@@ -554,6 +559,7 @@ describe("WorkspacePropertiesDialog", () => {
           scopeName: "Platform",
           revision: 0,
           variables: [],
+          inheritedVariables: [],
         },
         variablePreviews: [],
         canEdit: true,

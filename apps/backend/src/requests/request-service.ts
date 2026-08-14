@@ -20,7 +20,10 @@ import type {
   VariablePreviewSource,
   VariableProfileEvidence,
 } from "../variables/variable-service.js";
-import type { ResolvedVariable } from "../variables/variable-profile-store.js";
+import type {
+  ResolvedVariable,
+  VariableWrite,
+} from "../variables/variable-profile-store.js";
 import type { WorkspaceService } from "../workspaces/workspace-service.js";
 import {
   normalizeName,
@@ -116,6 +119,12 @@ export interface RequestExecutionInput {
   readonly body: string;
   readonly preRequestScript?: string;
   readonly postResponseScript?: string;
+}
+
+/** Carries an optional request-variable mutation within a request save. */
+export interface RequestVariableProfileUpdate {
+  readonly expectedRevision: number;
+  readonly variables: readonly VariableWrite[];
 }
 
 export interface ExecutionRequestSnapshot extends RequestExecutionInput {
@@ -1215,7 +1224,7 @@ export class RequestService {
     });
   }
 
-  /** Updates a request draft only when its expected revision is current. */
+  /** Atomically updates a request draft and its optional variable profile. */
   async update(
     userId: EntityId,
     requestId: EntityId,
@@ -1229,6 +1238,7 @@ export class RequestService {
     preRequestScript = "",
     postResponseScript = "",
     targetMode: "absolute" | "composed" = "absolute",
+    variableProfileUpdate: RequestVariableProfileUpdate | null = null,
   ): Promise<RequestView> {
     const normalizedName = normalizeName(name);
     const content = normalizeExecutionInput({
@@ -1249,6 +1259,16 @@ export class RequestService {
       await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
       if (row.draft_revision !== expectedDraftRevision) {
         throw new DraftConflictError("The request draft changed");
+      }
+      if (variableProfileUpdate !== null) {
+        await this.#variables.updateInTransaction(
+          transaction,
+          userId,
+          "request",
+          requestId,
+          variableProfileUpdate.expectedRevision,
+          variableProfileUpdate.variables,
+        );
       }
       if (
         row.name === normalizedName &&

@@ -33,6 +33,18 @@ export interface EnvironmentView {
   readonly name: string;
   readonly revision: number;
   readonly variables: readonly EnvironmentVariableView[];
+  readonly inheritedVariables: readonly InheritedEnvironmentVariableView[];
+}
+
+/** Describes one workspace variable inherited by an environment profile. */
+export interface InheritedEnvironmentVariableView {
+  readonly variable: EnvironmentVariableView;
+  readonly source: {
+    readonly scope: "workspace";
+    readonly scopeId: EntityId;
+    readonly scopeName: string;
+    readonly revision: number;
+  };
 }
 
 export interface EnvironmentSummary {
@@ -53,6 +65,13 @@ export interface SelectedEnvironmentProfile {
   readonly name: string;
   readonly revision: number;
   readonly variables: readonly ResolvedEnvironmentVariable[];
+}
+
+/** Identifies a selected environment without loading secret-bearing values. */
+export interface SelectedEnvironmentProfileMetadata {
+  readonly environmentId: EntityId;
+  readonly name: string;
+  readonly revision: number;
 }
 
 /** Identifies the effective persisted scope supplying a previewed variable. */
@@ -471,6 +490,26 @@ export class EnvironmentService {
     sessionId: EntityId,
     workspaceId: EntityId,
   ): Promise<SelectedEnvironmentProfile | null> {
+    const selected = await this.selectedProfileMetadata(
+      database,
+      sessionId,
+      workspaceId,
+    );
+    if (selected === null) return null;
+    const variables = await this.#variables.resolvedVariables(
+      database,
+      "environment",
+      selected.environmentId,
+    );
+    return { ...selected, variables };
+  }
+
+  /** Loads selected-environment identity without reading secret plaintext. */
+  async selectedProfileMetadata(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    sessionId: EntityId,
+    workspaceId: EntityId,
+  ): Promise<SelectedEnvironmentProfileMetadata | null> {
     const selected = await database
       .selectFrom("session_workspace_environments as selection")
       .innerJoin(
@@ -486,17 +525,10 @@ export class EnvironmentService {
     if (selected === undefined) {
       return null;
     }
-    const environmentId = bytesToId(selected.id);
-    const variables = await this.#variables.resolvedVariables(
-      database,
-      "environment",
-      environmentId,
-    );
     return {
-      environmentId,
+      environmentId: bytesToId(selected.id),
       name: selected.name,
       revision: selected.revision,
-      variables,
     };
   }
 
@@ -544,9 +576,10 @@ export class EnvironmentService {
     environmentId: EntityId,
   ): Promise<EnvironmentView> {
     const environment = await this.#row(database, environmentId);
+    const workspaceId = bytesToId(environment.workspace_id);
     return {
       environmentId,
-      workspaceId: bytesToId(environment.workspace_id),
+      workspaceId,
       name: environment.name,
       revision: environment.revision,
       variables: await this.#variables.redactedVariables(
@@ -554,7 +587,41 @@ export class EnvironmentService {
         "environment",
         environmentId,
       ),
+      inheritedVariables: await this.#workspaceInheritedVariables(
+        database,
+        workspaceId,
+      ),
     };
+  }
+
+  /** Returns the redacted workspace variables inherited by an environment. */
+  async #workspaceInheritedVariables(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    workspaceId: EntityId,
+  ): Promise<readonly InheritedEnvironmentVariableView[]> {
+    const metadata = await this.#variables.metadata(
+      database,
+      "workspace",
+      workspaceId,
+    );
+    if (metadata === null) return [];
+    const workspace = await database
+      .selectFrom("workspaces")
+      .select("name")
+      .where("id", "=", idToBytes(workspaceId))
+      .executeTakeFirstOrThrow();
+    const source = {
+      scope: "workspace" as const,
+      scopeId: workspaceId,
+      scopeName: workspace.name,
+      revision: metadata.revision,
+    };
+    const variables = await this.#variables.redactedVariables(
+      database,
+      "workspace",
+      workspaceId,
+    );
+    return variables.map((variable) => ({ variable, source }));
   }
 }
 

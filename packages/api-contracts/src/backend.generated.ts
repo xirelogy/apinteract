@@ -735,6 +735,7 @@ export interface components {
         body: string;
         preRequestScript?: string;
         postResponseScript?: string;
+        variableProfile?: components["schemas"]["RequestVariableProfileUpdate"];
       };
     } & {
       /**
@@ -897,7 +898,16 @@ export interface components {
     /** @enum {string} */
     EditableVariableScopeKind: "workspace" | "collection" | "request";
     VariableView: components["schemas"]["EnvironmentVariableView"];
+    InheritedVariableView: {
+      variable: components["schemas"]["VariableView"];
+      source: components["schemas"]["VariablePreviewSource"];
+    };
     VariableWrite: components["schemas"]["EnvironmentVariableWrite"];
+    /** @description Optional request-variable mutation committed atomically with request draft updates. */
+    RequestVariableProfileUpdate: {
+      expectedRevision: number;
+      variables: components["schemas"]["VariableWrite"][];
+    };
     VariableProfileView: {
       workspaceId: components["schemas"]["WorkspaceId"];
       scopeKind: components["schemas"]["EditableVariableScopeKind"];
@@ -905,6 +915,8 @@ export interface components {
       scopeName: string;
       revision: number;
       variables: components["schemas"]["VariableView"][];
+      /** @description Effective lower-precedence variables before this scope applies its local declarations. */
+      inheritedVariables: components["schemas"]["InheritedVariableView"][];
     };
     EnvironmentVariableView:
       | components["schemas"]["EnvironmentValueVariableView"]
@@ -980,6 +992,8 @@ export interface components {
       name: string;
       revision: number;
       variables: components["schemas"]["EnvironmentVariableView"][];
+      /** @description Effective workspace variables before this environment applies its local declarations. */
+      inheritedVariables: components["schemas"]["InheritedVariableView"][];
     };
     CollectionView: {
       collectionId: components["schemas"]["CollectionId"];

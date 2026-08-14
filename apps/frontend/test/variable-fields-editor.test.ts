@@ -8,6 +8,139 @@ import { enUsMessages } from "../src/app/i18n/messages";
 import VariableFieldsEditor from "../src/view/presentation/features/VariableFieldsEditor.vue";
 
 describe("VariableFieldsEditor", () => {
+  it("restores an unsaved request-variable draft over persisted metadata", () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const variableId = "019facab-1eee-765f-bd9f-ac2449151be1";
+    const wrapper = mount(VariableFieldsEditor, {
+      props: {
+        profileVariables: [
+          {
+            variableId,
+            name: "token",
+            kind: "secret",
+            hasValue: true,
+            secretVersion: 2,
+          },
+        ],
+        draftVariables: [
+          {
+            variableId,
+            name: "token",
+            kind: "secret",
+            value: "replacement",
+          },
+        ],
+        canEdit: true,
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    expect(
+      wrapper.get<HTMLInputElement>('input[aria-label="Secret value 1"]')
+        .element.value,
+    ).toBe("replacement");
+    expect(
+      wrapper.get('.secret-input-shell[data-secret-state="replacement"]')
+        .element,
+    ).toBeInstanceOf(HTMLElement);
+    expect(wrapper.vm.writes()).toEqual([
+      {
+        variableId,
+        name: "token",
+        kind: "secret",
+        value: "replacement",
+      },
+    ]);
+  });
+
+  it("shows inherited variables and strikes them when a local declaration overrides them", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(VariableFieldsEditor, {
+      props: {
+        profileVariables: [
+          {
+            variableId: "019facab-1eee-765f-bd9f-ac2449151be1",
+            name: "base_url",
+            kind: "value",
+            value: "https://request.test",
+          },
+        ],
+        inheritedVariables: [
+          {
+            variable: {
+              variableId: "019facab-1eee-765f-bd9f-ac2449151be2",
+              name: "base_url",
+              kind: "value",
+              value: "https://workspace.test",
+            },
+            source: {
+              scope: "workspace",
+              scopeId: "019facab-1eee-765f-bd9f-ac2449151be0",
+              scopeName: "Shared workspace",
+              revision: 2,
+            },
+          },
+          {
+            variable: {
+              variableId: "019facab-1eee-765f-bd9f-ac2449151be3",
+              name: "token",
+              kind: "secret",
+              hasValue: true,
+              secretVersion: 4,
+            },
+            source: {
+              scope: "environment",
+              scopeId: "019facab-1eee-765f-bd9f-ac2449151be4",
+              scopeName: "Development",
+              revision: 4,
+            },
+          },
+        ],
+        canEdit: true,
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    const inheritedRows = wrapper.findAll(".inherited-variable-row");
+    expect(inheritedRows).toHaveLength(2);
+    expect(inheritedRows[0]?.classes()).toContain("is-variable-overridden");
+    expect(inheritedRows[1]?.classes()).not.toContain("is-variable-overridden");
+    expect(
+      inheritedRows[0]
+        ?.get('.inherited-variable-indicator[role="img"]')
+        .attributes("aria-label"),
+    ).toBe("Inherited from Workspace: Shared workspace; overridden here");
+    const inheritedSecret = inheritedRows[1]?.get(
+      'input[aria-label="Inherited variable value 2"]',
+    );
+    expect(inheritedSecret?.attributes("placeholder")).toBe(
+      "Secret stored — type to replace",
+    );
+    expect(inheritedSecret?.attributes("readonly")).toBeDefined();
+    expect(wrapper.vm.writes()).toEqual([
+      {
+        variableId: "019facab-1eee-765f-bd9f-ac2449151be1",
+        name: "base_url",
+        kind: "value",
+        value: "https://request.test",
+      },
+    ]);
+
+    await wrapper.get('input[aria-label="Variable name 2"]').setValue("token");
+    expect(wrapper.findAll(".is-variable-overridden")).toHaveLength(2);
+    wrapper.unmount();
+  });
+
   it("reorders persisted variables with the keyboard and keeps the blank row last", async () => {
     const i18n = createI18n({
       legacy: false,

@@ -182,12 +182,14 @@ export const enUsMessages = {
   variables: {
     description:
       "Values in this scope override lower-precedence variables with the same name.",
+    inheritedFrom: "Inherited from {scope}: {name}",
+    inheritedKind: "Inherited variable kind {index}",
+    inheritedName: "Inherited variable name {index}",
+    inheritedOverridden: "Inherited from {scope}: {name}; overridden here",
+    inheritedTarget: "Inherited alias target {index}",
+    inheritedValue: "Inherited variable value {index}",
     requestUnavailable: "Save this request before adding request variables.",
-    requestDescription:
-      "Variables defined here take precedence over collection, environment, and workspace variables with the same name.",
-    requestWarningTitle: "Request-level override",
     loading: "Loading request variables…",
-    saveRequest: "Save request variables",
     title: "Variables for {name}",
     typeLocked:
       "Variable type cannot be changed after saving to prevent secret disclosure.",

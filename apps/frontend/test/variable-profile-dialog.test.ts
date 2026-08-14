@@ -119,6 +119,7 @@ describe("VariableProfileDialog", () => {
               secretVersion: 4,
             },
           ],
+          inheritedVariables: [],
         },
         canEdit: true,
         busy: false,

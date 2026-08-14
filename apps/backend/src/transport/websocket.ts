@@ -18,6 +18,7 @@ import {
   type HttpMethod,
   type RequestExecutionInput,
   type RequestField,
+  type RequestVariableProfileUpdate,
   type TreeMovePlacement,
 } from "../requests/request-service.js";
 import type { SessionIdentity } from "../sessions/session-service.js";
@@ -303,6 +304,7 @@ async function dispatch(
         userId,
         requireVariableScopeKind(command.payload.scopeKind),
         requireString(command.payload.scopeId, "scopeId"),
+        identity.sessionId,
       );
     case "variable_profile.update":
       return application.variables.update(
@@ -311,6 +313,7 @@ async function dispatch(
         requireString(command.payload.scopeId, "scopeId"),
         requireInteger(command.payload.expectedRevision, "expectedRevision"),
         requireEnvironmentVariables(command.payload.variables),
+        identity.sessionId,
       );
     case "variable.preview":
       return application.variables.previewVariables(
@@ -400,6 +403,7 @@ async function dispatch(
           "postResponseScript",
         ),
         requireTargetMode(command.payload.targetMode),
+        optionalRequestVariableProfileUpdate(command.payload.variableProfile),
       );
     case "request.delete":
       return application.requests.delete(
@@ -754,6 +758,27 @@ function requireEnvironmentVariables(
         );
     }
   });
+}
+
+/** Validates an optional request-variable mutation embedded in a request save. */
+function optionalRequestVariableProfileUpdate(
+  value: unknown,
+): RequestVariableProfileUpdate | null {
+  if (value === undefined) return null;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new CommandError(
+      "validation_failed",
+      "variableProfile must be an object.",
+    );
+  }
+  const profile = value as Record<string, unknown>;
+  return {
+    expectedRevision: requireInteger(
+      profile.expectedRevision,
+      "variableProfile.expectedRevision",
+    ),
+    variables: requireEnvironmentVariables(profile.variables),
+  };
 }
 
 /** Accepts only persisted variable scopes exposed by the generic profile API. */

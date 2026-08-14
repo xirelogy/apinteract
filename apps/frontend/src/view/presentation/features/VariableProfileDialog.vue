@@ -68,6 +68,7 @@ function close(): void {
         <VariableFieldsEditor
           ref="variableEditor"
           :profile-variables="profile.variables"
+          :inherited-variables="profile.inheritedVariables"
           :can-edit="canEdit"
           :busy="busy"
         />

@@ -367,6 +367,7 @@ function save(): void {
             <VariableFieldsEditor
               ref="variableEditor"
               :profile-variables="variableProfile.variables"
+              :inherited-variables="variableProfile.inheritedVariables"
               :can-edit="canEdit"
               :busy="busy"
             />

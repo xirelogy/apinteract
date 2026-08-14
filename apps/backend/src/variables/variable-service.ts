@@ -27,6 +27,13 @@ export interface VariableProfileView {
   readonly scopeName: string;
   readonly revision: number;
   readonly variables: readonly VariableView[];
+  readonly inheritedVariables: readonly InheritedVariableView[];
+}
+
+/** Describes one effective lower-precedence variable and its persisted source. */
+export interface InheritedVariableView {
+  readonly variable: VariableView;
+  readonly source: VariablePreviewSource;
 }
 
 /** Identifies the highest-precedence persisted scope supplying a variable. */
@@ -79,6 +86,11 @@ interface VariableLayer {
   readonly variables: readonly ResolvedVariable[];
 }
 
+interface RedactedVariableLayer {
+  readonly source: VariablePreviewSource;
+  readonly variables: readonly VariableView[];
+}
+
 /** Describes an authorized request-profile clone owned by a larger transaction. */
 interface RequestProfileCloneOptions {
   readonly userId: EntityId;
@@ -114,6 +126,7 @@ export class VariableService {
     userId: EntityId,
     scopeKind: EditableVariableScopeKind,
     scopeId: EntityId,
+    sessionId: EntityId | null = null,
   ): Promise<VariableProfileView> {
     const identity = await this.#scopeIdentity(
       this.#database,
@@ -125,7 +138,7 @@ export class VariableService {
       userId,
       identity.workspaceId,
     );
-    return this.#view(this.#database, identity);
+    return this.#view(this.#database, identity, sessionId);
   }
 
   /** Replaces one authorized ordered profile under optimistic concurrency. */
@@ -135,65 +148,78 @@ export class VariableService {
     scopeId: EntityId,
     expectedRevision: number,
     variables: readonly VariableWrite[],
+    sessionId: EntityId | null = null,
   ): Promise<VariableProfileView> {
-    return this.#database.transaction().execute(async (transaction) => {
-      const identity = await this.#scopeIdentity(
-        transaction,
-        scopeKind,
-        scopeId,
-      );
-      await this.#workspaces.requireCanEdit(
-        transaction,
-        userId,
-        identity.workspaceId,
-      );
-      const metadata = await this.#profiles.metadata(
-        transaction,
-        scopeKind,
-        scopeId,
-      );
-      let revision: number;
-      let mutations: readonly SecretMutation[];
-      if (metadata === null) {
-        if (expectedRevision !== 0) {
-          throw new VariableProfileConflictError(
-            "The variable profile changed",
-          );
-        }
-        revision = 1;
-        mutations = await this.#profiles.create(
+    return this.#database
+      .transaction()
+      .execute((transaction) =>
+        this.updateInTransaction(
           transaction,
-          identity.workspaceId,
-          scopeKind,
-          scopeId,
-          revision,
           userId,
-          variables,
-        );
-      } else {
-        ({ revision, mutations } = await this.#profiles.replace(
-          transaction,
           scopeKind,
           scopeId,
           expectedRevision,
-          userId,
           variables,
-        ));
-      }
-      await this.#audit.record(transaction, {
-        type: "variable_profile.updated",
-        actorUserId: userId,
-        workspaceId: identity.workspaceId,
-        data: { scopeKind, scopeId, revision },
-      });
-      await this.#recordSecretMutations(
-        transaction,
-        userId,
-        identity,
-        mutations,
+          sessionId,
+        ),
       );
-      return this.#view(transaction, identity);
+  }
+
+  /** Replaces one profile inside a caller-owned transaction and audit boundary. */
+  async updateInTransaction(
+    transaction: Transaction<DatabaseSchema>,
+    userId: EntityId,
+    scopeKind: EditableVariableScopeKind,
+    scopeId: EntityId,
+    expectedRevision: number,
+    variables: readonly VariableWrite[],
+    sessionId: EntityId | null = null,
+  ): Promise<VariableProfileView> {
+    const identity = await this.#scopeIdentity(transaction, scopeKind, scopeId);
+    await this.#workspaces.requireCanEdit(
+      transaction,
+      userId,
+      identity.workspaceId,
+    );
+    const metadata = await this.#profiles.metadata(
+      transaction,
+      scopeKind,
+      scopeId,
+    );
+    let revision: number;
+    let mutations: readonly SecretMutation[];
+    if (metadata === null) {
+      if (expectedRevision !== 0) {
+        throw new VariableProfileConflictError("The variable profile changed");
+      }
+      revision = 1;
+      mutations = await this.#profiles.create(
+        transaction,
+        identity.workspaceId,
+        scopeKind,
+        scopeId,
+        revision,
+        userId,
+        variables,
+      );
+    } else {
+      ({ revision, mutations } = await this.#profiles.replace(
+        transaction,
+        scopeKind,
+        scopeId,
+        expectedRevision,
+        userId,
+        variables,
+      ));
+    }
+    await this.#audit.record(transaction, {
+      type: "variable_profile.updated",
+      actorUserId: userId,
+      workspaceId: identity.workspaceId,
+      data: { scopeKind, scopeId, revision },
     });
+    await this.#recordSecretMutations(transaction, userId, identity, mutations);
+    return this.#view(transaction, identity, sessionId);
   }
 
   /** Clones a request profile inside an already authorized caller transaction. */
@@ -524,6 +550,7 @@ export class VariableService {
   async #view(
     database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
     identity: ScopeIdentity,
+    sessionId: EntityId | null,
   ): Promise<VariableProfileView> {
     const metadata = await this.#profiles.metadata(
       database,
@@ -541,7 +568,95 @@ export class VariableService {
         identity.scopeKind,
         identity.scopeId,
       ),
+      inheritedVariables: await this.#inheritedVariables(
+        database,
+        sessionId,
+        identity,
+      ),
     };
+  }
+
+  /** Builds the effective lower-precedence profile visible beneath one scope. */
+  async #inheritedVariables(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    sessionId: EntityId | null,
+    identity: ScopeIdentity,
+  ): Promise<readonly InheritedVariableView[]> {
+    if (identity.scopeKind === "workspace") return [];
+
+    const workspace = await database
+      .selectFrom("workspaces")
+      .select("name")
+      .where("id", "=", idToBytes(identity.workspaceId))
+      .executeTakeFirstOrThrow();
+    const layers: RedactedVariableLayer[] = [];
+    await this.#appendRedactedLayer(
+      database,
+      layers,
+      "workspace",
+      identity.workspaceId,
+      workspace.name,
+    );
+
+    if (sessionId !== null) {
+      const environment = await this.#environments.selectedProfileMetadata(
+        database,
+        sessionId,
+        identity.workspaceId,
+      );
+      if (environment !== null) {
+        await this.#appendRedactedLayer(
+          database,
+          layers,
+          "environment",
+          environment.environmentId,
+          environment.name,
+        );
+      }
+    }
+
+    const collections = await this.#collectionPath(
+      database,
+      identity.workspaceId,
+      identity.parentCollectionId,
+    );
+    for (const collection of collections) {
+      await this.#appendRedactedLayer(
+        database,
+        layers,
+        "collection",
+        collection.collectionId,
+        collection.name,
+      );
+    }
+
+    const inherited = new Map<string, InheritedVariableView>();
+    for (const layer of layers) {
+      for (const variable of layer.variables) {
+        inherited.set(variable.name, { variable, source: layer.source });
+      }
+    }
+    return [...inherited.values()];
+  }
+
+  /** Appends one persisted layer with secrets redacted for editor display. */
+  async #appendRedactedLayer(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    layers: RedactedVariableLayer[],
+    scope: VariableScopeKind,
+    scopeId: EntityId,
+    scopeName: string,
+  ): Promise<void> {
+    const metadata = await this.#profiles.metadata(database, scope, scopeId);
+    if (metadata === null) return;
+    layers.push({
+      source: { scope, scopeId, scopeName, revision: metadata.revision },
+      variables: await this.#profiles.redactedVariables(
+        database,
+        scope,
+        scopeId,
+      ),
+    });
   }
 
   /** Records allowlisted secret lifecycle metadata without plaintext. */

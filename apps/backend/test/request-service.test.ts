@@ -14,6 +14,7 @@ import {
   TreeOrderConflictError,
 } from "../src/requests/request-service.js";
 import { VariableService } from "../src/variables/variable-service.js";
+import { VariableProfileConflictError } from "../src/variables/variable-profile-store.js";
 import {
   AccessDeniedError,
   WorkspaceService,
@@ -89,6 +90,18 @@ describe("RequestService draft updates", () => {
       expect(unchanged.name).toBe("Example request");
       expect(await audit.pendingCount()).toBe(2);
 
+      const variableProfile = await variables.update(
+        userId,
+        "request",
+        original.requestId,
+        0,
+        [{ name: "source", kind: "value", value: "before" }],
+      );
+      const sourceVariable = variableProfile.variables[0];
+      if (sourceVariable?.kind !== "value") {
+        throw new Error("Unexpected request variable fixture");
+      }
+
       const changed = await requests.update(
         userId,
         original.requestId,
@@ -99,6 +112,13 @@ describe("RequestService draft updates", () => {
         [{ name: "page", value: "2", enabled: true }],
         [{ name: "Content-Type", value: "application/json", enabled: true }],
         '{"hello":"world"}',
+        "",
+        "",
+        "absolute",
+        {
+          expectedRevision: variableProfile.revision,
+          variables: [{ ...sourceVariable, value: "after" }],
+        },
       );
 
       expect(changed.draftRevision).toBe(1);
@@ -116,7 +136,42 @@ describe("RequestService draft updates", () => {
         },
       ]);
       expect(changed.body).toBe('{"hello":"world"}');
-      expect(await audit.pendingCount()).toBe(3);
+      await expect(
+        variables.get(userId, "request", original.requestId),
+      ).resolves.toMatchObject({
+        revision: variableProfile.revision + 1,
+        variables: [
+          expect.objectContaining({ name: "source", value: "after" }),
+        ],
+      });
+      expect(await audit.pendingCount()).toBe(5);
+
+      await expect(
+        requests.update(
+          userId,
+          original.requestId,
+          changed.draftRevision,
+          "Should roll back",
+          "POST",
+          "https://example.test/hello",
+          [],
+          [],
+          "",
+          "",
+          "",
+          "absolute",
+          {
+            expectedRevision: variableProfile.revision,
+            variables: [{ ...sourceVariable, value: "stale" }],
+          },
+        ),
+      ).rejects.toBeInstanceOf(VariableProfileConflictError);
+      await expect(
+        requests.get(userId, original.requestId),
+      ).resolves.toMatchObject({
+        name: "Updated request",
+        draftRevision: changed.draftRevision,
+      });
 
       const temporary = await requests.prepareTemporaryExecution(
         userId,
@@ -141,7 +196,7 @@ describe("RequestService draft updates", () => {
       expect(bytesToId(execution.workspace_id)).toBe(workspace.workspaceId);
       expect(execution.request_id).toBeNull();
       expect(execution.request_revision_id).toBeNull();
-      expect(await audit.pendingCount()).toBe(4);
+      expect(await audit.pendingCount()).toBe(6);
     } finally {
       await database.close();
       await rm(rootPath, { recursive: true, force: true });

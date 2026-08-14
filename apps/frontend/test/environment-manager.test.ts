@@ -193,6 +193,7 @@ describe("EnvironmentManager", () => {
           name: "Development",
           revision: 2,
           variables: [],
+          inheritedVariables: [],
         },
         canEdit: true,
         busy: false,
@@ -291,6 +292,7 @@ describe("EnvironmentManager", () => {
             secretVersion: 4,
           },
         ],
+        inheritedVariables: [],
       },
     });
 

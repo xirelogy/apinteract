@@ -40,7 +40,6 @@ import {
 } from "@/model/domain/request-fields";
 import { collectTemplateVariableNames } from "@/model/domain/template-variables";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
-import InlineWarning from "@/view/presentation/controls/InlineWarning.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import HeaderMergeModeToggle from "@/view/presentation/controls/HeaderMergeModeToggle.vue";
@@ -56,10 +55,6 @@ import { useRowReorder } from "@/view/presentation/controls/row-reorder";
 import ResponsePanel from "./ResponsePanel.vue";
 import VariableFieldsEditor from "./VariableFieldsEditor.vue";
 
-interface VariableFieldsEditorApi {
-  writes(): VariableWrite[];
-}
-
 const ScriptEditor = defineAsyncComponent(
   () => import("@/view/presentation/controls/ScriptEditor.vue"),
 );
@@ -74,6 +69,7 @@ const props = withDefaults(
     inheritedTarget?: string;
     inheritedHeaders: readonly RequestField[];
     requestVariableProfile?: VariableProfileView | null;
+    requestVariableDraft?: readonly VariableWrite[] | null;
     variablePreviews?: readonly VariablePreview[];
     previewContextKey?: string | null;
     busy: boolean;
@@ -85,6 +81,7 @@ const props = withDefaults(
     inheritedTarget: "",
     variablePreviews: () => [],
     requestVariableProfile: null,
+    requestVariableDraft: null,
     previewContextKey: null,
     canEdit: true,
     revisions: () => [],
@@ -100,7 +97,7 @@ const emit = defineEmits<{
   download: [executionId: string];
   preview: [names: readonly string[]];
   loadVariables: [];
-  saveVariables: [variables: readonly VariableWrite[]];
+  changeVariables: [variables: readonly VariableWrite[]];
   loadRevisions: [];
   selectRevision: [revisionId: string | null];
   nameRevision: [revisionId: string, name: string | null];
@@ -145,7 +142,6 @@ const preRequestScript = ref("");
 const postResponseScript = ref("");
 const activeTab = ref<(typeof requestTabs)[number]>("query");
 const versionName = ref("");
-const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 const requestVariableCount = ref<number | null>(null);
 const workbench = ref<HTMLElement | null>(null);
 const requestPanePercent = ref(44);
@@ -185,9 +181,10 @@ watch(
 );
 
 watch(
-  () => props.requestVariableProfile,
-  (profile) => {
-    requestVariableCount.value = profile?.variables.length ?? null;
+  [() => props.requestVariableProfile, () => props.requestVariableDraft],
+  ([profile, draft]) => {
+    requestVariableCount.value =
+      draft?.length ?? profile?.variables.length ?? null;
   },
   { immediate: true },
 );
@@ -484,13 +481,6 @@ function activeFieldKind(): string {
   return activeTab.value === "headers"
     ? t("request.headerField")
     : t("request.queryField");
-}
-
-/** Emits the complete persisted request-variable profile from its inline tab. */
-function saveVariables(): void {
-  if (props.canEdit && props.requestVariableProfile !== null) {
-    emit("saveVariables", variableEditor.value?.writes() ?? []);
-  }
 }
 
 /** Constrains one splitter position to usable request and response panes. */
@@ -1005,26 +995,18 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               {{ t("variables.loading") }}
             </p>
             <template v-else>
-              <InlineWarning :title="t('variables.requestWarningTitle')">
-                {{ t("variables.requestDescription") }}
-              </InlineWarning>
               <VariableFieldsEditor
                 :key="`${requestVariableProfile.scopeId}:${requestVariableProfile.revision}`"
-                ref="variableEditor"
                 :profile-variables="requestVariableProfile.variables"
+                :draft-variables="
+                  requestVariableDraft ?? requestVariableProfile.variables
+                "
+                :inherited-variables="requestVariableProfile.inheritedVariables"
                 :can-edit="canEdit"
                 :busy="busy"
                 @count-change="requestVariableCount = $event"
+                @change="emit('changeVariables', $event)"
               />
-              <div v-if="canEdit" class="request-variable-actions">
-                <ButtonControl
-                  variant="primary"
-                  :disabled="editorDisabled"
-                  @click="saveVariables"
-                >
-                  {{ t("variables.saveRequest") }}
-                </ButtonControl>
-              </div>
             </template>
           </TabsPanel>
           <TabsPanel

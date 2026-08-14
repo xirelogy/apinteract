@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, useId } from "vue";
-import { Asterisk, CircleX, LockKeyhole, RotateCcw, Trash2 } from "@lucide/vue";
+import {
+  Asterisk,
+  CircleX,
+  Lock,
+  LockKeyhole,
+  RotateCcw,
+  Trash2,
+} from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -26,29 +33,56 @@ interface DraftVariable {
 }
 
 type SecretInputState = "empty" | "stored" | "replacement" | "pending-clear";
+type InheritedVariable = VariableProfileView["inheritedVariables"][number];
 
-const props = defineProps<{
-  profileVariables: VariableProfileView["variables"];
-  canEdit: boolean;
-  busy: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    profileVariables: VariableProfileView["variables"];
+    // Absence intentionally falls back to the persisted profile variables.
+    // eslint-disable-next-line vue/require-default-prop
+    draftVariables?: readonly VariableWrite[] | undefined;
+    inheritedVariables?: VariableProfileView["inheritedVariables"];
+    canEdit: boolean;
+    busy: boolean;
+  }>(),
+  { inheritedVariables: () => [] },
+);
 const emit = defineEmits<{
   countChange: [count: number];
+  change: [variables: readonly VariableWrite[]];
 }>();
 const { t } = useI18n();
 const secretDescriptionIdPrefix = useId();
+const profileVariablesById = new Map(
+  props.profileVariables.map((variable) => [variable.variableId, variable]),
+);
 const variables = ref<DraftVariable[]>([
-  ...props.profileVariables.map((variable) => ({
-    rowKey: Symbol(variable.variableId),
-    variableId: variable.variableId,
-    name: variable.name,
-    kind: variable.kind,
-    value: variable.kind === "value" ? variable.value : "",
-    target: variable.kind === "alias" ? variable.target : "",
-    hasValue: variable.kind === "secret" && variable.hasValue,
-    secretTouched: false,
-    clearValue: false,
-  })),
+  ...(props.draftVariables ?? props.profileVariables).map((variable) => {
+    const persisted =
+      variable.variableId === undefined
+        ? undefined
+        : profileVariablesById.get(variable.variableId);
+    const replacement =
+      variable.kind === "secret" && "value" in variable
+        ? (variable.value ?? "")
+        : "";
+    return {
+      rowKey: Symbol(variable.variableId ?? "variable-row"),
+      ...(variable.variableId === undefined
+        ? {}
+        : { variableId: variable.variableId }),
+      name: variable.name,
+      kind: variable.kind,
+      value: variable.kind === "value" ? variable.value : replacement,
+      target: variable.kind === "alias" ? variable.target : "",
+      hasValue: persisted?.kind === "secret" && persisted.hasValue,
+      secretTouched: replacement !== "",
+      clearValue:
+        variable.kind === "secret" &&
+        "clearValue" in variable &&
+        variable.clearValue === true,
+    };
+  }),
   ...(props.canEdit ? [createBlankVariable()] : []),
 ]);
 const kindOptions = computed(() => [
@@ -99,12 +133,32 @@ function publishCount(): void {
     "countChange",
     variables.value.filter((variable) => !isBlankVariable(variable)).length,
   );
+  emit("change", writes());
 }
 
 /** Handles text edits and materializes the next trailing blank variable. */
 function updateVariable(): void {
   ensureTrailingBlankVariable();
   publishCount();
+}
+
+/** Reports whether a local declaration replaces one inherited variable. */
+function isInheritedVariableOverridden(inherited: InheritedVariable): boolean {
+  return variables.value.some(
+    (variable) =>
+      !isBlankVariable(variable) && variable.name === inherited.variable.name,
+  );
+}
+
+/** Describes an inherited variable's source and local override state. */
+function inheritedVariableDescription(inherited: InheritedVariable): string {
+  const values = {
+    scope: t(`variables.scope.${inherited.source.scope}`),
+    name: inherited.source.scopeName,
+  };
+  return isInheritedVariableOverridden(inherited)
+    ? t("variables.inheritedOverridden", values)
+    : t("variables.inheritedFrom", values);
 }
 
 /** Removes one variable and publishes the new editor-local row count. */
@@ -244,6 +298,80 @@ defineExpose({ writes });
       <span>{{ t("common.fields.type") }}</span>
       <span>{{ t("common.fields.valueOrTarget") }}</span>
       <span></span>
+    </div>
+    <div
+      v-for="(inherited, index) in inheritedVariables"
+      :key="`${inherited.source.scope}:${inherited.source.scopeId}:${inherited.variable.variableId}`"
+      class="variable-field-row inherited-variable-row"
+      :class="{
+        'is-variable-overridden': isInheritedVariableOverridden(inherited),
+      }"
+    >
+      <TextInput
+        :model-value="inherited.variable.name"
+        class="field-cell-input"
+        density="compact"
+        font="mono"
+        :aria-label="t('variables.inheritedName', { index: index + 1 })"
+        disabled
+      />
+      <div class="variable-type-cell">
+        <SelectMenu
+          :model-value="inherited.variable.kind"
+          :options="kindOptions"
+          :label="t('variables.inheritedKind', { index: index + 1 })"
+          density="compact"
+          disabled
+        />
+      </div>
+      <TextInput
+        v-if="inherited.variable.kind === 'value'"
+        :model-value="inherited.variable.value"
+        class="field-cell-input"
+        density="compact"
+        font="mono"
+        :aria-label="t('variables.inheritedValue', { index: index + 1 })"
+        readonly
+      />
+      <TextInput
+        v-else-if="inherited.variable.kind === 'alias'"
+        :model-value="inherited.variable.target"
+        class="field-cell-input"
+        density="compact"
+        font="mono"
+        :aria-label="t('variables.inheritedTarget', { index: index + 1 })"
+        readonly
+      />
+      <TextInput
+        v-else-if="inherited.variable.kind === 'secret'"
+        model-value=""
+        class="field-cell-input"
+        density="compact"
+        font="mono"
+        type="password"
+        :placeholder="
+          inherited.variable.hasValue
+            ? t('environment.secretStoredPlaceholder')
+            : t('environment.enterSecretValue')
+        "
+        :aria-label="t('variables.inheritedValue', { index: index + 1 })"
+        readonly
+      />
+      <span
+        v-else
+        class="variable-field-empty-value"
+        :aria-label="t('environment.noValue')"
+      >
+        —
+      </span>
+      <span
+        class="inherited-variable-indicator"
+        role="img"
+        :aria-label="inheritedVariableDescription(inherited)"
+        :title="inheritedVariableDescription(inherited)"
+      >
+        <Lock :size="14" aria-hidden="true" />
+      </span>
     </div>
     <div
       v-for="(variable, index) in variables"

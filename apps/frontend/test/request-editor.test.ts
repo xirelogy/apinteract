@@ -650,17 +650,14 @@ describe("RequestEditor", () => {
         scopeName: "Saved request",
         revision: 0,
         variables: [],
+        inheritedVariables: [],
       },
     });
     const variablesTab = wrapper
       .findAll('[role="tab"]')
       .find((tab) => tab.text().includes("Variables"));
     expect(variablesTab?.text()).toContain("0");
-    const warning = wrapper.get('.inline-warning[role="alert"]');
-    expect(warning.text()).toContain("Request-level override");
-    expect(warning.text()).toContain(
-      "Variables defined here take precedence over collection, environment, and workspace variables with the same name.",
-    );
+    expect(wrapper.find('.inline-warning[role="alert"]').exists()).toBe(false);
     const variableName = wrapper.get('input[aria-label="Variable name 1"]');
     expect(variableName.attributes("placeholder")).toBe("Add variable");
     await variableName.setValue("source");
@@ -673,13 +670,19 @@ describe("RequestEditor", () => {
     await wrapper
       .get('input[aria-label="Variable value 1"]')
       .setValue("request");
+    expect(
+      wrapper
+        .findAll("button")
+        .some((button) => button.text().includes("Save request variables")),
+    ).toBe(false);
+    expect(wrapper.emitted("changeVariables")?.at(-1)).toEqual([
+      [{ name: "source", kind: "value", value: "request" }],
+    ]);
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Save request variables"))
+      .find((button) => button.text().trim() === "Save")
       ?.trigger("click");
-    expect(wrapper.emitted("saveVariables")).toEqual([
-      [[{ name: "source", kind: "value", value: "request" }]],
-    ]);
+    expect(wrapper.emitted("save")).toHaveLength(1);
   });
 
   it("edits both script phases from the request settings", async () => {

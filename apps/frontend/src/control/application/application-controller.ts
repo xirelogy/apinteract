@@ -311,7 +311,23 @@ export class ApplicationController {
         "variable_profile.get",
         { scopeKind, scopeId },
       );
-      useApplicationStore().selectedVariableProfile = profile;
+      const store = useApplicationStore();
+      store.selectedVariableProfile = profile;
+      if (profile.scopeKind === "request") {
+        const baseline = variableViewsToWrites(profile.variables);
+        store.requestTabs = store.requestTabs.map((tab) =>
+          tab.request?.requestId === profile.scopeId
+            ? {
+                ...tab,
+                variableProfile: profile,
+                variableDraft:
+                  tab.variableDraft ?? cloneVariableWrites(baseline),
+                variableBaseline:
+                  tab.variableBaseline ?? cloneVariableWrites(baseline),
+              }
+            : tab,
+        );
+      }
       return profile;
     });
   }
@@ -665,6 +681,9 @@ export class ApplicationController {
       request: null,
       draft: emptyDraft(),
       baseline: null,
+      variableProfile: null,
+      variableDraft: null,
+      variableBaseline: null,
       pendingParentCollectionId: parentCollectionId,
       inheritedTarget:
         parentCollectionId === null
@@ -810,6 +829,17 @@ export class ApplicationController {
     this.#updateTab(tabId, (tab) => ({ ...tab, draft: cloneDraft(draft) }));
   }
 
+  /** Replaces one request tab's editable variable profile. */
+  updateRequestVariableDraft(
+    tabId: string,
+    variables: readonly VariableWrite[],
+  ): void {
+    this.#updateTab(tabId, (tab) => ({
+      ...tab,
+      variableDraft: cloneVariableWrites(variables),
+    }));
+  }
+
   /** Persists edits for one already saved request tab. */
   async saveRequest(tabId: string, draft: RequestDraftInput): Promise<void> {
     this.updateRequestDraft(tabId, draft);
@@ -818,21 +848,52 @@ export class ApplicationController {
       return;
     }
     await this.#runTab(tabId, async () => {
+      const variableUpdate =
+        tab.variableProfile === null ||
+        tab.variableDraft === null ||
+        JSON.stringify(tab.variableDraft) ===
+          JSON.stringify(tab.variableBaseline)
+          ? null
+          : {
+              expectedRevision: tab.variableProfile.revision,
+              variables: tab.variableDraft,
+            };
       const updated = await this.#webSocket.command<RequestView>(
         "request.update",
         {
           requestId: tab.request?.requestId,
           expectedDraftRevision: tab.request?.draftRevision,
           ...draft,
+          ...(variableUpdate === null
+            ? {}
+            : { variableProfile: variableUpdate }),
         },
       );
+      const updatedVariableProfile =
+        variableUpdate === null
+          ? tab.variableProfile
+          : await this.#webSocket.command<VariableProfileView>(
+              "variable_profile.get",
+              { scopeKind: "request", scopeId: updated.requestId },
+            );
       const savedDraft = requestToDraft(updated);
+      const savedVariables =
+        tab.variableDraft === null
+          ? null
+          : cloneVariableWrites(tab.variableDraft);
       this.#updateTab(tabId, (current) => ({
         ...current,
         request: updated,
         draft: savedDraft,
         baseline: cloneDraft(savedDraft),
+        variableProfile: updatedVariableProfile,
+        variableDraft: savedVariables,
+        variableBaseline:
+          savedVariables === null ? null : cloneVariableWrites(savedVariables),
       }));
+      if (updatedVariableProfile !== null) {
+        useApplicationStore().selectedVariableProfile = updatedVariableProfile;
+      }
       replaceLoadedRequestNode(updated);
       await this.#refreshRequestRevisions(tabId, updated.requestId);
     });
@@ -1057,6 +1118,9 @@ export class ApplicationController {
       request,
       draft,
       baseline: cloneDraft(draft),
+      variableProfile: null,
+      variableDraft: null,
+      variableBaseline: null,
       pendingParentCollectionId: null,
       inheritedTarget: request.inheritedTarget,
       inheritedHeaders: request.inheritedHeaders.map((field) => ({
@@ -1312,6 +1376,32 @@ function cloneDraft(draft: RequestDraftInput): RequestDraftInput {
     query: draft.query.map((field) => ({ ...field })),
     headers: draft.headers.map((field) => ({ ...field })),
   };
+}
+
+/** Converts a redacted profile into a write-safe editable baseline. */
+function variableViewsToWrites(
+  variables: VariableProfileView["variables"],
+): VariableWrite[] {
+  return variables.map((variable) => {
+    const common = { variableId: variable.variableId, name: variable.name };
+    switch (variable.kind) {
+      case "value":
+        return { ...common, kind: "value", value: variable.value };
+      case "alias":
+        return { ...common, kind: "alias", target: variable.target };
+      case "unset":
+        return { ...common, kind: "unset" };
+      case "secret":
+        return { ...common, kind: "secret" };
+    }
+  });
+}
+
+/** Clones variable writes without sharing mutable command objects. */
+function cloneVariableWrites(
+  variables: readonly VariableWrite[],
+): VariableWrite[] {
+  return variables.map((variable) => ({ ...variable }));
 }
 
 /** Joins an inherited target and local path across a single slash boundary. */

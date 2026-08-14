@@ -1783,6 +1783,9 @@
                   "postResponseScript": {
                     "type": "string",
                     "maxLength": 65536
+                  },
+                  "variableProfile": {
+                    "$ref": "#/components/schemas/RequestVariableProfileUpdate"
                   }
                 }
               }
@@ -2207,8 +2210,30 @@
       "VariableView": {
         "$ref": "#/components/schemas/EnvironmentVariableView"
       },
+      "InheritedVariableView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["variable", "source"],
+        "properties": {
+          "variable": { "$ref": "#/components/schemas/VariableView" },
+          "source": { "$ref": "#/components/schemas/VariablePreviewSource" }
+        }
+      },
       "VariableWrite": {
         "$ref": "#/components/schemas/EnvironmentVariableWrite"
+      },
+      "RequestVariableProfileUpdate": {
+        "type": "object",
+        "description": "Optional request-variable mutation committed atomically with request draft updates.",
+        "additionalProperties": false,
+        "required": ["expectedRevision", "variables"],
+        "properties": {
+          "expectedRevision": { "type": "integer", "minimum": 0 },
+          "variables": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/VariableWrite" }
+          }
+        }
       },
       "VariableProfileView": {
         "type": "object",
@@ -2219,7 +2244,8 @@
           "scopeId",
           "scopeName",
           "revision",
-          "variables"
+          "variables",
+          "inheritedVariables"
         ],
         "properties": {
           "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
@@ -2232,6 +2258,11 @@
           "variables": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/VariableView" }
+          },
+          "inheritedVariables": {
+            "type": "array",
+            "description": "Effective lower-precedence variables before this scope applies its local declarations.",
+            "items": { "$ref": "#/components/schemas/InheritedVariableView" }
           }
         }
       },
@@ -2368,7 +2399,8 @@
           "workspaceId",
           "name",
           "revision",
-          "variables"
+          "variables",
+          "inheritedVariables"
         ],
         "properties": {
           "environmentId": { "$ref": "#/components/schemas/EnvironmentId" },
@@ -2378,6 +2410,11 @@
           "variables": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/EnvironmentVariableView" }
+          },
+          "inheritedVariables": {
+            "type": "array",
+            "description": "Effective workspace variables before this environment applies its local declarations.",
+            "items": { "$ref": "#/components/schemas/InheritedVariableView" }
           }
         }
       },

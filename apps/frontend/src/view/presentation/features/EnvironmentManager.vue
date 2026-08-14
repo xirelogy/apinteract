@@ -303,6 +303,9 @@ function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
           :profile-variables="
             editingId === null ? [] : (environment?.variables ?? [])
           "
+          :inherited-variables="
+            editingId === null ? [] : (environment?.inheritedVariables ?? [])
+          "
           :can-edit="canEdit"
           :busy="busy"
         />

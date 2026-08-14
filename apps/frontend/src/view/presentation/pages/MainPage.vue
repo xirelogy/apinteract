@@ -105,13 +105,7 @@ const workspaceProperties = computed(() => {
     : null;
 });
 const requestVariableProfile = computed(() => {
-  const requestId = activeTab.value?.request?.requestId;
-  const profile = selectedVariableProfile.value;
-  return requestId !== undefined &&
-    profile?.scopeKind === "request" &&
-    profile.scopeId === requestId
-    ? profile
-    : null;
+  return activeTab.value?.variableProfile ?? null;
 });
 const displayedInheritedHeaders = computed(
   () =>
@@ -417,18 +411,12 @@ async function editRequestVariables(): Promise<void> {
   }
 }
 
-/** Saves persisted variables owned by the active saved request. */
-async function saveRequestVariables(
+/** Keeps request-variable edits in the active tab until the request is saved. */
+function updateActiveRequestVariables(
   variables: readonly VariableWrite[],
-): Promise<void> {
-  const profile = requestVariableProfile.value;
-  if (profile !== null) {
-    await controller.updateVariableProfile(
-      "request",
-      profile.scopeId,
-      profile.revision,
-      variables,
-    );
+): void {
+  if (activeTab.value !== null) {
+    controller.updateRequestVariableDraft(activeTab.value.tabId, variables);
   }
 }
 
@@ -738,6 +726,7 @@ function discardRequestTab(): void {
           :inherited-target="displayedInheritedTarget"
           :inherited-headers="displayedInheritedHeaders"
           :request-variable-profile="requestVariableProfile"
+          :request-variable-draft="activeTab?.variableDraft ?? null"
           :variable-previews="variablePreviews"
           :preview-context-key="variablePreviewContextKey"
           :busy="(activeTab?.busy ?? false) || busy"
@@ -751,7 +740,7 @@ function discardRequestTab(): void {
           @execute="executeRequest"
           @preview="controller.previewVariables($event)"
           @load-variables="editRequestVariables"
-          @save-variables="saveRequestVariables"
+          @change-variables="updateActiveRequestVariables"
           @load-revisions="
             activeTab && controller.loadRequestRevisions(activeTab.tabId)
           "
