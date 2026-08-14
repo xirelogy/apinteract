@@ -7,9 +7,14 @@ import {
   parseAppendingHeaderNames,
   useHeaderPreferences,
 } from "@/app/preferences/header-preferences";
+import {
+  type DisplayStyle,
+  useDisplayStylePreference,
+} from "@/app/preferences/display-style";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import FormField from "@/view/presentation/controls/FormField.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
+import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TextArea from "@/view/presentation/controls/TextArea.vue";
 import DialogControl from "@/view/presentation/controls/dialog/DialogControl.vue";
 import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
@@ -27,8 +32,15 @@ const emit = defineEmits<{
 }>();
 const { t } = useI18n();
 const headerPreferences = useHeaderPreferences();
+const displayStylePreference = useDisplayStylePreference();
 const activeSection = ref<"general" | "defaults">("general");
+const displayStyle = ref<DisplayStyle>("system");
 const appendingHeaders = ref("");
+const displayStyleOptions = computed(() => [
+  { value: "system", label: t("header.displayStyle.system") },
+  { value: "light", label: t("header.displayStyle.light") },
+  { value: "dark", label: t("header.displayStyle.dark") },
+]);
 const parsedAppendingHeaders = computed(() =>
   parseAppendingHeaderNames(appendingHeaders.value),
 );
@@ -43,6 +55,7 @@ watch(
   (open) => {
     if (open) {
       activeSection.value = "general";
+      displayStyle.value = displayStylePreference.displayStyle.value;
       appendingHeaders.value =
         headerPreferences.appendingHeaderNames.value.join("\n");
     }
@@ -58,8 +71,16 @@ function close(): void {
 /** Persists the header defaults shared by every editor before closing. */
 function save(): void {
   if (appendingHeadersError.value !== undefined) return;
+  displayStylePreference.setDisplayStyle(displayStyle.value);
   headerPreferences.setAppendingHeaderNames(parsedAppendingHeaders.value.names);
   close();
+}
+
+/** Accepts only display styles represented by the controlled option list. */
+function selectDisplayStyle(value: string): void {
+  if (value === "system" || value === "light" || value === "dark") {
+    displayStyle.value = value;
+  }
 }
 </script>
 
@@ -95,6 +116,19 @@ function save(): void {
               <LocaleSelector
                 :input-id="controlId"
                 mobile-presentation="popover"
+              />
+            </FormField>
+            <FormField
+              v-slot="{ controlId }"
+              :label="t('header.displayStyle.label')"
+            >
+              <SelectMenu
+                :input-id="controlId"
+                :model-value="displayStyle"
+                :options="displayStyleOptions"
+                :label="t('header.displayStyle.label')"
+                mobile-presentation="popover"
+                @update:model-value="selectDisplayStyle"
               />
             </FormField>
           </TabsPanel>

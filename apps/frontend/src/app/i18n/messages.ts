@@ -43,6 +43,12 @@ export const enUsMessages = {
       general: "General",
       defaults: "Defaults",
     },
+    displayStyle: {
+      label: "Display style",
+      system: "System",
+      light: "Light",
+      dark: "Dark",
+    },
     appendingHeaders: "Headers that append by default",
     appendingHeadersInvalid:
       "Enter valid HTTP header names separated by commas or lines.",

@@ -57,6 +57,7 @@ afterEach(() => {
   }
   document.body.replaceChildren();
   window.localStorage.clear();
+  document.documentElement.removeAttribute("data-theme");
 });
 
 describe("AppHeader", () => {
@@ -106,8 +107,18 @@ describe("AppHeader", () => {
     ]);
     expect(optionTabs[0]?.attributes("aria-selected")).toBe("true");
     expect(optionsDialog.findAll("label").map((label) => label.text())).toEqual(
-      ["Language", "Headers that append by default"],
+      ["Language", "Display style", "Headers that append by default"],
     );
+    const displayStyle = optionsDialog.get(
+      'button[aria-label="Display style"]',
+    );
+    expect(displayStyle.text()).toContain("System");
+    await displayStyle.trigger("click");
+    await flushPromises();
+    const darkOption = optionsDialog
+      .findAll('[role="option"]')
+      .find((option) => option.text().includes("Dark"));
+    await darkOption?.trigger("click");
     await optionTabs[1]?.trigger("click");
     expect(optionTabs[1]?.attributes("aria-selected")).toBe("true");
     const appendingHeaders = optionsDialog.get("textarea");
@@ -121,6 +132,8 @@ describe("AppHeader", () => {
         window.localStorage.getItem("apinteract.appendingHeaders") ?? "[]",
       ),
     ).toEqual(["Cookie", "X-List"]);
+    expect(window.localStorage.getItem("apinteract.displayStyle")).toBe("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
     await accountTrigger.trigger("click");
     await flushPromises();
     menuItems = [

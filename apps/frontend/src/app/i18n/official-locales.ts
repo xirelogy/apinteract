@@ -46,6 +46,12 @@ const zhHansMessages = {
       general: "常规",
       defaults: "默认值",
     },
+    displayStyle: {
+      label: "显示样式",
+      system: "跟随系统",
+      light: "浅色",
+      dark: "深色",
+    },
     appendingHeaders: "默认追加的请求头",
     appendingHeadersInvalid:
       "请输入有效的 HTTP 请求头名称，并使用逗号或换行分隔。",
@@ -411,6 +417,12 @@ const zhHantMessages = {
     optionsSections: {
       general: "一般",
       defaults: "預設值",
+    },
+    displayStyle: {
+      label: "顯示樣式",
+      system: "跟隨系統",
+      light: "淺色",
+      dark: "深色",
     },
     appendingHeaders: "預設附加的標頭",
     appendingHeadersInvalid:

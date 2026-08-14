@@ -7,12 +7,15 @@ import {
   createTranslationService,
   translationServiceKey,
 } from "./app/i18n/translation-service";
+import { initializeDisplayStyle } from "./app/preferences/display-style";
 import { router } from "./app/router";
 import { ApplicationController } from "./control/application/application-controller";
 import { SessionController } from "./control/session/session-controller";
 import { BackendHttpClient } from "./control/transport/http-client";
 import { BackendWebSocketClient } from "./control/transport/websocket-client";
 import "./view/styling/index.css";
+
+initializeDisplayStyle();
 
 const app = createApp(App);
 const pinia = createPinia();
