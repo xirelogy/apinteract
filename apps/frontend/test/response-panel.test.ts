@@ -149,7 +149,7 @@ describe("ResponsePanel body transfer", () => {
     ).toBe(false);
   });
 
-  it("retains useful partial response details after transport failure", () => {
+  it("makes an error the first tab when partial response data remains", async () => {
     const execution: ExecutionView = {
       executionId: "019fa8be-a510-76b9-b73b-69f4c7af7878",
       state: "failed",
@@ -179,10 +179,90 @@ describe("ResponsePanel body transfer", () => {
     });
 
     expect(wrapper.findAll('[role="tab"]').map((tab) => tab.text())).toEqual([
+      "Error",
       "Raw",
       "Headers 1",
     ]);
+    expect(wrapper.get('[role="tab"]').attributes("aria-selected")).toBe(
+      "true",
+    );
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      "The upstream disconnected.",
+    );
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text() === "Raw")
+      ?.trigger("click");
     expect(wrapper.get(".body-preview").text()).toBe("partial");
+  });
+
+  it("keeps request and script data beside a tabbed execution error", async () => {
+    const execution: ExecutionView = {
+      executionId: "019fa8be-a510-76b9-b73b-69f4c7af7879",
+      state: "failed",
+      bodyComplete: false,
+      bodyBytes: 0,
+      createdAt: "2026-07-28T00:00:00.000Z",
+      completedAt: "2026-07-28T00:00:01.000Z",
+      error: {
+        code: "execution_failed",
+        message: "The post-processing step failed.",
+        errors: [],
+      },
+      outgoingRequest: {
+        method: "GET",
+        url: { value: "https://example.test/items", redacted: false },
+        headers: [],
+        body: {
+          value: "",
+          encoding: "utf8",
+          byteLength: 0,
+          redacted: false,
+          truncated: false,
+        },
+      },
+      scriptLogs: [
+        {
+          sequence: 1,
+          phase: "pre-request",
+          level: "info",
+          message: "request prepared",
+        },
+      ],
+      scriptTests: [],
+    };
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(ResponsePanel, {
+      props: { execution },
+      global: { plugins: [i18n] },
+    });
+
+    expect(wrapper.findAll('[role="tab"]').map((tab) => tab.text())).toEqual([
+      "Error",
+      "Request",
+      "Scripts 1",
+    ]);
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      "The post-processing step failed.",
+    );
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text() === "Request")
+      ?.trigger("click");
+    expect(wrapper.get(".outgoing-request-content").text()).toContain(
+      "https://example.test/items",
+    );
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Scripts"))
+      ?.trigger("click");
+    expect(wrapper.get(".script-results").text()).toContain("request prepared");
   });
 
   it("shows script logs, tests, and post-response errors", async () => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { Download, LoaderCircle } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
@@ -18,7 +18,7 @@ const emit = defineEmits<{
 }>();
 const { t } = useI18n();
 
-type ResponseDetailTab = "request" | "headers" | "raw" | "scripts";
+type ResponseDetailTab = "error" | "request" | "headers" | "raw" | "scripts";
 const selectedTab = ref<ResponseDetailTab>("raw");
 
 type ScriptLog = ExecutionView["scriptLogs"][number];
@@ -103,8 +103,17 @@ const hasResponseHead = computed(() => {
   );
 });
 
-/** Exposes only detail tabs backed by useful data after execution failure. */
-const visibleDetailTabs = computed<readonly ResponseDetailTab[]>(() => {
+/** Reports whether a failed execution retained an inspectable response body. */
+const hasResponseBody = computed(() => {
+  const execution = props.execution;
+  return (
+    execution !== null &&
+    (execution.bodyPreview !== undefined || (execution.bodyBytes ?? 0) > 0)
+  );
+});
+
+/** Exposes data tabs backed by useful execution results after failure. */
+const resultDetailTabs = computed<readonly ResponseDetailTab[]>(() => {
   const execution = props.execution;
   if (execution === null) return [];
   if (execution.error === undefined || execution.state === "running") {
@@ -121,12 +130,40 @@ const visibleDetailTabs = computed<readonly ResponseDetailTab[]>(() => {
     ...(execution.outgoingRequest === undefined
       ? ([] as const)
       : (["request"] as const)),
-    ...(hasResponseHead.value ? (["raw", "headers"] as const) : ([] as const)),
+    ...(hasResponseHead.value || hasResponseBody.value
+      ? (["raw"] as const)
+      : ([] as const)),
+    ...(hasResponseHead.value ? (["headers"] as const) : ([] as const)),
     ...(scriptResultCards.value.length > 0
       ? (["scripts"] as const)
       : ([] as const)),
   ];
 });
+
+/** Places an execution error in a tab when other result data is available. */
+const hasTabbedError = computed(
+  () =>
+    props.execution?.error !== undefined && resultDetailTabs.value.length > 0,
+);
+
+/** Orders the error before every retained request, response, or script result. */
+const visibleDetailTabs = computed<readonly ResponseDetailTab[]>(() => [
+  ...(hasTabbedError.value ? (["error"] as const) : ([] as const)),
+  ...resultDetailTabs.value,
+]);
+
+/** Keeps an error-only execution in the compact tabless presentation. */
+const showsStandaloneError = computed(
+  () => props.execution?.error !== undefined && !hasTabbedError.value,
+);
+
+watch(
+  () => [props.execution?.executionId, props.execution?.error !== undefined],
+  () => {
+    selectedTab.value = props.execution?.error === undefined ? "raw" : "error";
+  },
+  { immediate: true },
+);
 
 /** Keeps tab selection valid when a failed execution has limited results. */
 const activeTab = computed<ResponseDetailTab>({
@@ -222,7 +259,11 @@ function formatScriptLocation(error: ScriptError): string {
     <div v-if="execution === null" class="response-empty">
       {{ t("response.empty") }}
     </div>
-    <div v-else-if="execution.error" class="execution-error" role="alert">
+    <div
+      v-else-if="showsStandaloneError && execution.error"
+      class="execution-error"
+      role="alert"
+    >
       <strong>{{ localizeExecutionCode(execution.error.code) }}</strong>
       <code>{{ execution.error.code }}</code>
       <span>{{ execution.error.message }}</span>
@@ -233,6 +274,13 @@ function formatScriptLocation(error: ScriptError): string {
       activation-mode="manual"
     >
       <TabsList class="response-tabs" :label="t('response.details')">
+        <TabsTrigger
+          v-if="visibleDetailTabs.includes('error')"
+          class="tab-button"
+          value="error"
+        >
+          {{ t("response.error") }}
+        </TabsTrigger>
         <TabsTrigger
           v-if="visibleDetailTabs.includes('request')"
           class="tab-button"
@@ -264,6 +312,17 @@ function formatScriptLocation(error: ScriptError): string {
           <span class="tab-count">{{ scriptResultCards.length }}</span>
         </TabsTrigger>
       </TabsList>
+      <TabsPanel
+        v-if="visibleDetailTabs.includes('error') && execution.error"
+        value="error"
+        class="response-content"
+      >
+        <div class="execution-error" role="alert">
+          <strong>{{ localizeExecutionCode(execution.error.code) }}</strong>
+          <code>{{ execution.error.code }}</code>
+          <span>{{ execution.error.message }}</span>
+        </div>
+      </TabsPanel>
       <TabsPanel
         v-if="visibleDetailTabs.includes('request')"
         value="request"

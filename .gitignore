@@ -23,6 +23,7 @@ test-results/
 !.env.example
 !deploy/development/.env.defaults
 !deploy/development/.env.local.example
+/deploy/development/compose.dev.yaml
 
 # Local runtime data
 /var/

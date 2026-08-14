@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { createI18n } from "vue-i18n";
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
@@ -11,6 +14,15 @@ import {
   parseTemplateSegments,
 } from "../src/model/domain/template-variables";
 import TemplateTextControl from "../src/view/presentation/controls/TemplateTextControl.vue";
+
+const applicationStyles = readFileSync(
+  resolve(process.cwd(), "src/view/styling/components/application.css"),
+  "utf8",
+);
+const controlStyles = readFileSync(
+  resolve(process.cwd(), "src/view/styling/components/controls.css"),
+  "utf8",
+);
 
 describe("template variable editing", () => {
   it("recognizes valid placeholders while preserving escapes and invalid text", () => {
@@ -131,5 +143,66 @@ describe("template variable editing", () => {
     const tooltip = wrapper.get('[role="tooltip"]');
     expect(tooltip.text()).toContain("变量 missing_token 不存在");
     expect(tooltip.text()).not.toContain("Variable missing_token is missing");
+  });
+
+  it("aligns compact decorations with merge-prefixed header values", () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const host = document.createElement("div");
+    host.className = "header-value-field";
+    host.style.setProperty("--control-height-compact", "32px");
+    host.style.setProperty("--space-1", "4px");
+    host.style.setProperty("--space-2", "8px");
+    const headerInsetRule = applicationStyles.match(
+      /\.header-value-field > \.field-cell-input,[\s\S]*?\}/u,
+    )?.[0];
+    const compactMirrorRule = controlStyles.match(
+      /\.template-text-control:where\(\[data-density="compact"\]\)[\s\S]*?\}/u,
+    )?.[0];
+    expect(headerInsetRule).toBeDefined();
+    expect(compactMirrorRule).toBeDefined();
+    if (headerInsetRule === undefined || compactMirrorRule === undefined)
+      return;
+    const style = document.createElement("style");
+    style.textContent = `
+      .text-input-control-compact { padding-left: 8px; }
+      ${compactMirrorRule}
+      ${headerInsetRule}
+    `
+      .replaceAll("var(--control-height-compact)", "32px")
+      .replaceAll("var(--space-1)", "4px")
+      .replaceAll("calc(32px + 4px)", "36px")
+      // JSDOM does not expose computed logical padding, so use its LTR equivalent.
+      .replaceAll("padding-inline-start", "padding-left")
+      .replaceAll("padding-inline:", "padding-left:");
+    document.head.append(style);
+    document.body.append(host);
+    const wrapper = mount(TemplateTextControl, {
+      attachTo: host,
+      props: {
+        modelValue: "Bearer <<token>>",
+        previews: [],
+        density: "compact",
+        font: "mono",
+      },
+      attrs: { class: "field-template-input" },
+      global: { plugins: [i18n] },
+    });
+
+    const inputPadding = getComputedStyle(
+      wrapper.get(".template-text-control-input").element,
+    ).paddingLeft;
+    const mirrorPadding = getComputedStyle(
+      wrapper.get(".template-text-control-mirror-content").element,
+    ).paddingLeft;
+
+    expect(inputPadding).not.toBe("");
+    expect(mirrorPadding).toBe(inputPadding);
+    wrapper.unmount();
+    host.remove();
+    style.remove();
   });
 });

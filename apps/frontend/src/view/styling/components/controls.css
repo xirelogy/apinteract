@@ -229,7 +229,8 @@
   transform-origin: top left;
 }
 
-.template-text-control[data-density="compact"]
+/* Keep density defaults overrideable by layout-specific mirror insets. */
+.template-text-control:where([data-density="compact"])
   .template-text-control-mirror-content {
   padding-inline: var(--space-2);
   line-height: calc(var(--control-height-compact) - 2px);

@@ -5,6 +5,7 @@ set -euo pipefail
 script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "${script_directory}/../.." && pwd)"
 compose_file="${repository_root}/deploy/development/compose.yaml"
+local_compose_file="${repository_root}/deploy/development/compose.dev.yaml"
 defaults_file="${repository_root}/deploy/development/.env.defaults"
 local_file="${repository_root}/deploy/development/.env.local"
 
@@ -18,6 +19,10 @@ if [[ -f "${local_file}" ]]; then
 fi
 
 compose+=(-f "${compose_file}")
+
+if [[ -f "${local_compose_file}" ]]; then
+  compose+=(-f "${local_compose_file}")
+fi
 
 usage() {
   cat <<'USAGE'

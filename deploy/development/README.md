@@ -98,6 +98,30 @@ These variables configure Docker build and host-port publication. They are not
 APInteract application configuration overrides. Component configuration
 continues to use strict YAML under `/etc/apinteract/`.
 
+## Local Compose Overrides
+
+The development command also loads the ignored
+`deploy/development/compose.dev.yaml` file after the checked-in `compose.yaml`
+when it exists. Use this optional file for machine-specific Compose settings
+that environment variables cannot express, such as extra mounts or service
+resource limits. Its values follow normal Compose merge rules and therefore
+override matching values from the maintained development configuration.
+
+For example:
+
+```yaml
+services:
+  workspace:
+    volumes:
+      - ../../local-tools:/opt/local-tools:ro
+```
+
+As with other Compose override files, relative host paths are resolved from the
+directory containing the first Compose file, `deploy/development/`.
+
+Run `deploy/scripts/development config` to inspect the fully merged
+configuration before starting the workspace.
+
 ## Local Mutable State
 
 The ignored repository-root `var/` directory is reserved for local mutable

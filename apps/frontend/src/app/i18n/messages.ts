@@ -349,6 +349,7 @@ export const enUsMessages = {
     downloadBody: "Download response body",
     empty: "Send the request to inspect its response.",
     emptyBody: "No request body.",
+    error: "Error",
     failure: {
       execution_failed: "Request execution failed",
       unknown: "Request execution failed",

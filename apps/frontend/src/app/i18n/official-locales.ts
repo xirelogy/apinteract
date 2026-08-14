@@ -335,6 +335,7 @@ const zhHansMessages = {
     downloadBody: "下载响应体",
     empty: "发送请求后可查看响应。",
     emptyBody: "没有请求体。",
+    error: "错误",
     failure: {
       execution_failed: "请求执行失败",
       unknown: "请求执行失败",
@@ -707,6 +708,7 @@ const zhHantMessages = {
     downloadBody: "下載回應本文",
     empty: "傳送請求後可查看回應。",
     emptyBody: "沒有請求本文。",
+    error: "錯誤",
     failure: {
       execution_failed: "請求執行失敗",
       unknown: "請求執行失敗",
