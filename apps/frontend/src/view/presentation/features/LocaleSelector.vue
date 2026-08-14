@@ -9,10 +9,12 @@ import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 withDefaults(
   defineProps<{
     inputId?: string;
+    density?: "compact" | "default";
     mobilePresentation?: "fullscreen" | "popover";
   }>(),
   {
     inputId: "",
+    density: "compact",
     mobilePresentation: "fullscreen",
   },
 );
@@ -41,7 +43,7 @@ async function changeLocale(locale: string): Promise<void> {
     :label="t('common.language.label')"
     :input-id="inputId"
     :mobile-presentation="mobilePresentation"
-    density="compact"
+    :density="density"
     @update:model-value="changeLocale"
   >
     <template #selected="{ option }">

@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
 
+import { ref } from "vue";
 import { createI18n } from "vue-i18n";
 import { flushPromises, mount } from "@vue/test-utils";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
+import { translationServiceKey } from "../src/app/i18n/translation-service";
+import type {
+  LocaleOption,
+  LocalePreference,
+  TranslationService,
+} from "../src/app/i18n/translation-types";
 import AppHeader from "../src/view/presentation/layout/AppHeader.vue";
 
 let showModalDescriptor: PropertyDescriptor | undefined;
@@ -67,15 +74,26 @@ describe("AppHeader", () => {
       locale: "en-US",
       messages: { "en-US": enUsMessages },
     });
+    const translation = {
+      i18n,
+      locale: ref("en-US"),
+      preference: ref<LocalePreference>("system"),
+      locales: ref<readonly LocaleOption[]>([
+        {
+          locale: "en-US",
+          name: "English (United States)",
+          direction: "ltr",
+        },
+      ]),
+      setPreference: vi.fn(() => Promise.resolve()),
+    } satisfies TranslationService;
     const wrapper = mount(AppHeader, {
       attachTo: document.body,
       props: { username: "admin", navigatorOpen: false },
       global: {
         plugins: [i18n],
-        stubs: {
-          LocaleSelector: {
-            template: '<button type="button">English (United States)</button>',
-          },
+        provide: {
+          [translationServiceKey as symbol]: translation,
         },
       },
     });
@@ -109,6 +127,12 @@ describe("AppHeader", () => {
     expect(optionsDialog.findAll("label").map((label) => label.text())).toEqual(
       ["Language", "Display style", "Headers that append by default"],
     );
+    expect(
+      optionsDialog
+        .get('button[aria-label="Language"]')
+        .element.closest(".select-menu")
+        ?.getAttribute("data-density"),
+    ).toBe("default");
     const displayStyle = optionsDialog.get(
       'button[aria-label="Display style"]',
     );

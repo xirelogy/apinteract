@@ -115,6 +115,7 @@ function selectDisplayStyle(value: string): void {
             >
               <LocaleSelector
                 :input-id="controlId"
+                density="default"
                 mobile-presentation="popover"
               />
             </FormField>
