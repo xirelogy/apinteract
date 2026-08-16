@@ -335,10 +335,14 @@ describe("RequestEditor", () => {
     const bodyTypeOptions = bodyType?.props("options") as
       | Array<{ value: string; label: string }>
       | undefined;
-    expect(bodyTypeOptions?.at(-1)).toEqual({
-      value: "file",
-      label: "Binary File",
-    });
+    expect(bodyTypeOptions).toEqual([
+      { value: "none", label: "None" },
+      { value: "text", label: "Plain text" },
+      { value: "json", label: "JSON" },
+      { value: "urlencoded", label: "Form (URL-encoded)" },
+      { value: "multipart", label: "Multipart Form" },
+      { value: "file", label: "Binary File" },
+    ]);
     bodyType?.vm.$emit("update:modelValue", "file");
     await wrapper.vm.$nextTick();
     expect(wrapper.text()).toContain("Choose file");
