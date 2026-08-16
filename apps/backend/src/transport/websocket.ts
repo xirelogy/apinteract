@@ -22,6 +22,7 @@ import {
   type RequestBodyDefinition,
   type RequestExecutionInput,
   type RequestField,
+  type RequestMultipartField,
   type RequestVariableProfileUpdate,
   type TreeMovePlacement,
 } from "../requests/request-service.js";
@@ -883,11 +884,49 @@ function optionalRequestBody(
     }
     return { kind: "none" };
   }
-  if (body.kind !== "text") {
+  if (
+    body.kind !== "text" &&
+    body.kind !== "urlencoded" &&
+    body.kind !== "multipart"
+  ) {
     throw new CommandError(
       "validation_failed",
-      "requestBody.kind must be none or text.",
+      "requestBody.kind is not supported.",
     );
+  }
+  if (body.contentType !== null && typeof body.contentType !== "string") {
+    throw new CommandError(
+      "validation_failed",
+      "requestBody.contentType must be a string or null.",
+    );
+  }
+  if (body.kind === "urlencoded" || body.kind === "multipart") {
+    const allowed =
+      body.kind === "multipart"
+        ? ["kind", "contentType", "boundary", "fields"]
+        : ["kind", "contentType", "fields"];
+    if (Object.keys(body).some((key) => !allowed.includes(key))) {
+      throw new CommandError(
+        "validation_failed",
+        `A ${body.kind} requestBody contains an unsupported field.`,
+      );
+    }
+    if (body.kind === "urlencoded") {
+      const fields = requireRequestFields(body.fields, "requestBody.fields");
+      return { kind: "urlencoded", contentType: body.contentType, fields };
+    }
+    if (typeof body.boundary !== "string") {
+      throw new CommandError(
+        "validation_failed",
+        "requestBody.boundary must be a string.",
+      );
+    }
+    return {
+      kind: "multipart",
+      contentType: body.contentType,
+      boundary: body.boundary,
+      fields: requireMultipartFields(body.fields),
+    };
   }
   if (
     Object.keys(body).some(
@@ -905,17 +944,61 @@ function optionalRequestBody(
       "requestBody.text must be a string.",
     );
   }
-  if (body.contentType !== null && typeof body.contentType !== "string") {
-    throw new CommandError(
-      "validation_failed",
-      "requestBody.contentType must be a string or null.",
-    );
-  }
   return {
     kind: "text",
     contentType: body.contentType,
     text: body.text,
   };
+}
+
+/** Validates ordered multipart text fields and immutable file references. */
+function requireMultipartFields(value: unknown): RequestMultipartField[] {
+  if (!Array.isArray(value)) {
+    throw new CommandError(
+      "validation_failed",
+      "requestBody.fields must be an array.",
+    );
+  }
+  return value.map((field) => {
+    if (typeof field !== "object" || field === null || Array.isArray(field)) {
+      throw new CommandError(
+        "validation_failed",
+        "requestBody.fields contains an invalid field.",
+      );
+    }
+    const item = field as Record<string, unknown>;
+    if (item.kind !== "file") {
+      return requireRequestFields([field], "requestBody.fields")[0]!;
+    }
+    const attachment = item.attachment;
+    if (
+      typeof item.name !== "string" ||
+      typeof item.enabled !== "boolean" ||
+      typeof attachment !== "object" ||
+      attachment === null ||
+      Array.isArray(attachment)
+    ) {
+      throw new CommandError(
+        "validation_failed",
+        "requestBody.fields contains an invalid file field.",
+      );
+    }
+    const metadata = attachment as Record<string, unknown>;
+    if (
+      typeof metadata.attachmentId !== "string" ||
+      typeof metadata.workspaceId !== "string" ||
+      typeof metadata.fileName !== "string" ||
+      typeof metadata.contentType !== "string" ||
+      typeof metadata.byteLength !== "number" ||
+      typeof metadata.sha256 !== "string"
+    ) {
+      throw new CommandError(
+        "validation_failed",
+        "requestBody.fields contains invalid attachment metadata.",
+      );
+    }
+    return field as RequestMultipartField;
+  });
 }
 
 /** Requires a bounded JavaScript source string, including a disabled blank. */

@@ -321,7 +321,11 @@ export class ExecutionService {
             prepared.request.preRequestScript,
             {
               execution: scriptExecutionContext(prepared),
-              request: preRequestScriptView(prepared.request, resolver),
+              request: preRequestScriptView(
+                prepared.request,
+                resolver,
+                prepared.templateRequest,
+              ),
               variables: scriptVariables(prepared, resolver),
             },
           );
@@ -341,6 +345,9 @@ export class ExecutionService {
             ...prepared,
             templateRequest: scriptedRequest,
             request: scriptedRequest,
+            ...(prepared.materialized
+              ? { postScriptRequest: result.request }
+              : {}),
           };
         } catch (cause) {
           scripts = {

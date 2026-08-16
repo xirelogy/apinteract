@@ -23,6 +23,8 @@ export type VariablePreviewResult =
 export type RequestView = components["schemas"]["RequestView"];
 export type RequestBodyDefinition =
   components["schemas"]["RequestBodyDefinition"];
+export type RequestAttachment = components["schemas"]["RequestAttachment"];
+export type MultipartFileField = components["schemas"]["MultipartFileField"];
 export type RequestRevisionSummary =
   components["schemas"]["RequestRevisionSummary"];
 export type RequestRevisionView = components["schemas"]["RequestRevisionView"];

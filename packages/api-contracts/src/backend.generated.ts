@@ -89,6 +89,25 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{workspaceId}/request-attachments": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Upload an immutable file for multipart request bodies */
+    post: operations["uploadRequestAttachment"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/executions/{executionId}/body": {
     parameters: {
       query?: never;
@@ -150,6 +169,7 @@ export interface components {
     RevisionId: components["schemas"]["UuidV7"];
     ExecutionId: components["schemas"]["UuidV7"];
     BlobId: components["schemas"]["UuidV7"];
+    RequestAttachmentId: components["schemas"]["UuidV7"];
     ProblemCode: string;
     ValidationError: {
       /** @description JSON Pointer to the invalid input. */
@@ -1024,7 +1044,9 @@ export interface components {
     /** @description Editable request body semantics before interpolation and UTF-8 encoding. */
     RequestBodyDefinition:
       | components["schemas"]["NoRequestBody"]
-      | components["schemas"]["TextRequestBody"];
+      | components["schemas"]["TextRequestBody"]
+      | components["schemas"]["UrlEncodedRequestBody"]
+      | components["schemas"]["MultipartRequestBody"];
     NoRequestBody: {
       /** @constant */
       kind: "none";
@@ -1035,6 +1057,42 @@ export interface components {
       /** @description Optional body-owned media type applied as the effective Content-Type during execution. */
       contentType: string | null;
       text: string;
+    };
+    /** @description Ordered text fields encoded as application/x-www-form-urlencoded after interpolation. */
+    UrlEncodedRequestBody: {
+      /** @constant */
+      kind: "urlencoded";
+      contentType: string | null;
+      fields: components["schemas"]["RequestField"][];
+    };
+    /** @description Ordered multipart/form-data text fields and immutable file attachments. */
+    MultipartRequestBody: {
+      /** @constant */
+      kind: "multipart";
+      /** @description Optional media type override without a boundary parameter; the persisted boundary is appended during execution. */
+      contentType: string | null;
+      boundary: string;
+      fields: (
+        | components["schemas"]["RequestField"]
+        | components["schemas"]["MultipartFileField"]
+      )[];
+    };
+    /** @description Immutable workspace-owned upload metadata referenced by multipart file fields. */
+    RequestAttachment: {
+      attachmentId: components["schemas"]["RequestAttachmentId"];
+      workspaceId: components["schemas"]["WorkspaceId"];
+      fileName: string;
+      contentType: string;
+      byteLength: number;
+      sha256: string;
+    };
+    /** @description One uploaded file positioned among multipart text fields. */
+    MultipartFileField: {
+      /** @constant */
+      kind: "file";
+      name: string;
+      enabled: boolean;
+      attachment: components["schemas"]["RequestAttachment"];
     };
     RequestView: {
       requestId: components["schemas"]["RequestId"];
@@ -1351,6 +1409,49 @@ export interface operations {
         };
       };
       401: components["responses"]["Unauthorized"];
+    };
+  };
+  uploadRequestAttachment: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Percent-encoded UTF-8 filename. */
+        "X-APInteract-File-Name": string;
+        /** @description Percent-encoded MIME type; defaults to application/octet-stream. */
+        "X-APInteract-File-Type"?: string;
+      };
+      path: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/octet-stream": string;
+      };
+    };
+    responses: {
+      /** @description Immutable workspace attachment metadata. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RequestAttachment"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      404: components["responses"]["NotFound"];
+      /** @description The attachment exceeds the request-body limit. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
     };
   };
   downloadExecutionResponseBody: {

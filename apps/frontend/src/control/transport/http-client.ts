@@ -2,6 +2,7 @@ import type {
   AccessCredential,
   CurrentSession,
   Problem,
+  RequestAttachment,
 } from "@/model/contracts/backend";
 
 /** Backend RFC 9457 response exposed as a typed frontend error. */
@@ -74,6 +75,29 @@ export class BackendHttpClient {
       throw await this.#problem(response);
     }
     return response.blob();
+  }
+
+  /** Uploads exact file bytes and returns their immutable workspace metadata. */
+  async uploadRequestAttachment(
+    accessToken: string,
+    workspaceId: string,
+    file: File,
+  ): Promise<RequestAttachment> {
+    return this.#request<RequestAttachment>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/request-attachments`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/octet-stream",
+          "X-APInteract-File-Name": encodeURIComponent(file.name),
+          "X-APInteract-File-Type": encodeURIComponent(
+            file.type || "application/octet-stream",
+          ),
+        },
+        body: file,
+      },
+    );
   }
 
   /** Performs one JSON request and converts non-success responses to problems. */

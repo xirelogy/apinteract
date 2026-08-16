@@ -18,11 +18,14 @@ import {
   Trash2,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
+import { v7 as uuidV7 } from "uuid";
 
 import { defaultHeaderMergeMode } from "@/app/preferences/header-preferences";
 import type {
   ExecutionView,
   HttpMethod,
+  MultipartFileField,
+  RequestAttachment,
   RequestBodyDefinition,
   RequestField,
   RequestRevisionSummary,
@@ -43,6 +46,9 @@ import {
 import { collectTemplateVariableNames } from "@/model/domain/template-variables";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
+import FormValueTypeToggle, {
+  type FormValueType,
+} from "@/view/presentation/controls/FormValueTypeToggle.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import HeaderMergeModeToggle from "@/view/presentation/controls/HeaderMergeModeToggle.vue";
 import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue";
@@ -81,6 +87,7 @@ const props = withDefaults(
     canEdit?: boolean;
     revisions?: readonly RequestRevisionSummary[];
     viewingRevision?: RequestRevisionView | null;
+    uploadAttachment?: ((file: File) => Promise<RequestAttachment>) | null;
   }>(),
   {
     inheritedTarget: "",
@@ -91,6 +98,7 @@ const props = withDefaults(
     canEdit: true,
     revisions: () => [],
     viewingRevision: null,
+    uploadAttachment: null,
   },
 );
 const { t } = useI18n();
@@ -131,6 +139,8 @@ const bodyTypeOptions = computed(() => [
   { value: "none", label: t("request.bodyTypes.none") },
   { value: "text", label: t("request.bodyTypes.text") },
   { value: "json", label: t("request.bodyTypes.json") },
+  { value: "urlencoded", label: t("request.bodyTypes.urlencoded") },
+  { value: "multipart", label: t("request.bodyTypes.multipart") },
 ]);
 const requestTabs = [
   "query",
@@ -147,9 +157,26 @@ const targetMode = ref<"absolute" | "composed">("composed");
 const targetUrl = ref("");
 const query = ref<RequestField[]>([]);
 const headers = ref<RequestField[]>([]);
-const bodyKind = ref<"none" | "text" | "json">("none");
+type BodyEditorKind = "none" | "text" | "json" | "urlencoded" | "multipart";
+const bodyKind = ref<BodyEditorKind>("none");
 const bodyText = ref("");
 const bodyContentType = ref("");
+interface PendingMultipartFileField {
+  readonly kind: "pending-file";
+  name: string;
+  enabled: boolean;
+  readonly textValue: string;
+}
+type MultipartFormField =
+  | RequestField
+  | MultipartFileField
+  | PendingMultipartFileField;
+type PersistedMultipartFormField = RequestField | MultipartFileField;
+const formFields = ref<MultipartFormField[]>([]);
+const multipartBoundary = ref(createMultipartBoundary());
+const attachmentInput = ref<HTMLInputElement | null>(null);
+const attachmentTargetIndex = ref<number | null>(null);
+const uploadingAttachment = ref(false);
 const bodyTypeControlId = useId();
 const preRequestScript = ref("");
 const postResponseScript = ref("");
@@ -180,15 +207,19 @@ watch(
       createBlankHeaderField,
     );
     const requestBody = bodyDefinitionFromSource(source);
-    bodyKind.value =
-      requestBody.kind === "none"
-        ? "none"
-        : isJsonMediaType(requestBody.contentType)
-          ? "json"
-          : "text";
+    bodyKind.value = bodyEditorKind(requestBody);
     bodyText.value = requestBody.kind === "text" ? requestBody.text : "";
     bodyContentType.value =
-      requestBody.kind === "text" ? (requestBody.contentType ?? "") : "";
+      requestBody.kind === "none" ? "" : (requestBody.contentType ?? "");
+    formFields.value = editableFormFields(
+      requestBody.kind === "urlencoded" || requestBody.kind === "multipart"
+        ? requestBody.fields
+        : [],
+    );
+    multipartBoundary.value =
+      requestBody.kind === "multipart"
+        ? requestBody.boundary
+        : createMultipartBoundary();
     preRequestScript.value = source?.preRequestScript ?? "";
     postResponseScript.value = source?.postResponseScript ?? "";
   },
@@ -239,8 +270,15 @@ const headerCount = computed(
 );
 const generatedContentType = computed(() => {
   if (bodyKind.value === "none") return null;
-  const contentType = bodyContentType.value.trim();
-  return contentType === "" ? null : contentType;
+  const override = bodyContentType.value.trim();
+  if (bodyKind.value === "text" || bodyKind.value === "json") {
+    return override || null;
+  }
+  const contentType = override || defaultContentType(bodyKind.value);
+  if (contentType === "") return null;
+  return bodyKind.value === "multipart"
+    ? `${contentType}; boundary=${multipartBoundary.value}`
+    : contentType;
 });
 const overriddenInheritedHeaderNames = computed(() => {
   const names = new Set<string>();
@@ -259,7 +297,16 @@ const referencedVariableNames = computed(() =>
     ...query.value.map((field) => field.value),
     ...headers.value.map((field) => field.value),
     ...props.inheritedHeaders.map((field) => field.value),
-    bodyKind.value === "none" ? "" : bodyText.value,
+    bodyKind.value === "text" || bodyKind.value === "json"
+      ? bodyText.value
+      : "",
+    ...(bodyKind.value === "urlencoded" || bodyKind.value === "multipart"
+      ? formFields.value.flatMap((field) =>
+          isMultipartFileValueField(field)
+            ? [field.name]
+            : [field.name, field.value],
+        )
+      : []),
   ]),
 );
 const previewSignature = computed(() =>
@@ -397,6 +444,200 @@ const fieldReorder = useRowReorder({
   isDisabled: () => editorDisabled.value,
 });
 
+/** Moves one structured form field while retaining its trailing blank row. */
+function moveFormField(fromIndex: number, toIndex: number): void {
+  const [field] = formFields.value.splice(fromIndex, 1);
+  if (field !== undefined) formFields.value.splice(toIndex, 0, field);
+  ensureTrailingFormBlank();
+  emitChange();
+}
+
+const formFieldReorder = useRowReorder({
+  canMove: (index) =>
+    formFields.value[index] !== undefined &&
+    !isBlankFormField(formFields.value[index]),
+  move: moveFormField,
+  isDisabled: () => editorDisabled.value,
+});
+
+/** Publishes a form-field edit unless its file selection is still incomplete. */
+function updateFormField(index: number): void {
+  ensureTrailingFormBlank();
+  if (isPendingMultipartFileField(formFields.value[index])) return;
+  emitChange();
+}
+
+/** Removes one form field without removing the presentation-only blank row. */
+function removeFormField(index: number): void {
+  formFields.value.splice(index, 1);
+  ensureTrailingFormBlank();
+  emitChange();
+}
+
+/** Reports whether one multipart row owns immutable uploaded file bytes. */
+function isMultipartFileField(
+  field: MultipartFormField,
+): field is MultipartFileField {
+  return "kind" in field && field.kind === "file";
+}
+
+/** Reports whether one row is waiting for the user to select file bytes. */
+function isPendingMultipartFileField(
+  field: MultipartFormField | undefined,
+): field is PendingMultipartFileField {
+  return (
+    field !== undefined && "kind" in field && field.kind === "pending-file"
+  );
+}
+
+/** Reports whether one multipart row currently uses the file value type. */
+function isMultipartFileValueField(
+  field: MultipartFormField,
+): field is MultipartFileField | PendingMultipartFileField {
+  return isMultipartFileField(field) || isPendingMultipartFileField(field);
+}
+
+/** Reports whether a row's current value type can be changed. */
+function formValueTypeDisabled(field: MultipartFormField): boolean {
+  return (
+    editorDisabled.value ||
+    uploadingAttachment.value ||
+    (!isMultipartFileValueField(field) && props.uploadAttachment === null)
+  );
+}
+
+/** Reports whether the picker can assign or replace attachment bytes. */
+function attachmentSelectionDisabled(): boolean {
+  return (
+    editorDisabled.value ||
+    uploadingAttachment.value ||
+    props.uploadAttachment === null
+  );
+}
+
+/** Reports whether one presentation-only multipart text row is untouched. */
+function isBlankFormField(field: MultipartFormField): boolean {
+  return !isMultipartFileValueField(field) && isBlankRequestField(field);
+}
+
+/** Deep-copies persisted multipart rows and appends one text-entry row. */
+function editableFormFields(
+  fields: readonly MultipartFormField[],
+): MultipartFormField[] {
+  const editable = fields.map((field) =>
+    isMultipartFileField(field)
+      ? { ...field, attachment: { ...field.attachment } }
+      : { ...field },
+  );
+  if (editable.length === 0 || !isBlankFormField(editable.at(-1)!)) {
+    editable.push({ name: "", value: "", enabled: true });
+  }
+  return editable;
+}
+
+/** Maintains one trailing text row after edits, uploads, and reordering. */
+function ensureTrailingFormBlank(): void {
+  if (
+    formFields.value.length === 0 ||
+    !isBlankFormField(formFields.value.at(-1)!)
+  ) {
+    formFields.value.push({ name: "", value: "", enabled: true });
+  }
+}
+
+/** Returns meaningful text rows for URL encoding without retained file parts. */
+function meaningfulUrlEncodedFields(): RequestField[] {
+  return formFields.value.flatMap((field) =>
+    isMultipartFileValueField(field) || isBlankFormField(field)
+      ? []
+      : [{ ...field }],
+  );
+}
+
+/** Returns ordered multipart text/file rows without the trailing blank entry. */
+function meaningfulMultipartFields(): PersistedMultipartFormField[] {
+  const fields: PersistedMultipartFormField[] = [];
+  for (const field of formFields.value) {
+    if (isBlankFormField(field) || isPendingMultipartFileField(field)) continue;
+    fields.push(
+      isMultipartFileField(field)
+        ? { ...field, attachment: { ...field.attachment } }
+        : { ...field },
+    );
+  }
+  return fields;
+}
+
+const visibleFormFields = computed(() =>
+  formFields.value.flatMap((field, index) =>
+    bodyKind.value === "urlencoded" && isMultipartFileValueField(field)
+      ? []
+      : [{ field, index }],
+  ),
+);
+
+/** Opens the native file picker for one multipart name-value row. */
+function chooseAttachment(index: number): void {
+  attachmentTargetIndex.value = index;
+  attachmentInput.value?.click();
+}
+
+/** Uploads a selected file and assigns it as the targeted row's value. */
+async function attachFile(event: Event): Promise<void> {
+  const input = event.currentTarget;
+  if (!(input instanceof HTMLInputElement) || props.uploadAttachment === null) {
+    return;
+  }
+  const file = input.files?.[0];
+  const targetIndex = attachmentTargetIndex.value;
+  input.value = "";
+  attachmentTargetIndex.value = null;
+  if (file === undefined || targetIndex === null) return;
+  uploadingAttachment.value = true;
+  try {
+    const attachment = await props.uploadAttachment(file);
+    const field = formFields.value[targetIndex];
+    if (field === undefined || bodyKind.value !== "multipart") return;
+    formFields.value.splice(targetIndex, 1, {
+      kind: "file",
+      name: field.name,
+      enabled: field.enabled,
+      attachment,
+    });
+    ensureTrailingFormBlank();
+    emitChange();
+  } catch {
+    // The controller publishes the safe application error; keep the picker usable.
+  } finally {
+    uploadingAttachment.value = false;
+  }
+}
+
+/** Applies one multipart row's value type without uploading until requested. */
+function selectFormValueType(index: number, valueType: FormValueType): void {
+  const field = formFields.value[index];
+  if (field === undefined) return;
+  if (valueType === "file") {
+    if (isMultipartFileValueField(field)) return;
+    formFields.value.splice(index, 1, {
+      kind: "pending-file",
+      name: field.name,
+      enabled: field.enabled,
+      textValue: field.value,
+    });
+    ensureTrailingFormBlank();
+    return;
+  }
+  if (!isMultipartFileValueField(field)) return;
+  formFields.value.splice(index, 1, {
+    name: field.name,
+    value: isPendingMultipartFileField(field) ? field.textValue : "",
+    enabled: field.enabled,
+  });
+  ensureTrailingFormBlank();
+  emitChange();
+}
+
 /** Publishes a field edit and materializes the next trailing blank row. */
 function updateActiveField(index?: number, nameChanged = false): void {
   const fields = activeTab.value === "headers" ? headers : query;
@@ -434,6 +675,34 @@ function isJsonMediaType(contentType: string | null): boolean {
   return mediaType === "application/json" || mediaType.endsWith("+json");
 }
 
+/** Maps semantic body variants to the frontend presentation preset. */
+function bodyEditorKind(body: RequestBodyDefinition): BodyEditorKind {
+  if (body.kind === "text") {
+    return isJsonMediaType(body.contentType) ? "json" : "text";
+  }
+  return body.kind;
+}
+
+/** Returns the standard media type selected by one frontend body preset. */
+function defaultContentType(kind: BodyEditorKind): string {
+  if (kind === "text") return "text/plain";
+  if (kind === "json") return "application/json";
+  if (kind === "urlencoded") return "application/x-www-form-urlencoded";
+  if (kind === "multipart") return "multipart/form-data";
+  return "";
+}
+
+/** Formats compact attachment sizes without implying transformed wire bytes. */
+function formatAttachmentSize(byteLength: number): string {
+  if (byteLength < 1024) return `${byteLength} B`;
+  return `${(byteLength / 1024).toFixed(byteLength < 10_240 ? 1 : 0)} KiB`;
+}
+
+/** Creates a stable, persisted multipart boundary for one editable body. */
+function createMultipartBoundary(): string {
+  return `----APInteractBoundary${uuidV7().replaceAll("-", "")}`;
+}
+
 /** Normalizes a legacy or semantic request view into the editable body model. */
 function bodyDefinitionFromSource(
   source: RequestDraftInput | RequestView | null | undefined,
@@ -447,12 +716,26 @@ function bodyDefinitionFromSource(
 
 /** Builds the semantic body represented by the body controls. */
 function currentRequestBody(): RequestBodyDefinition {
-  return bodyKind.value === "none"
-    ? { kind: "none" }
+  if (bodyKind.value === "none") return { kind: "none" };
+  const contentType = bodyContentType.value.trim() || null;
+  if (bodyKind.value === "text" || bodyKind.value === "json") {
+    return {
+      kind: "text",
+      contentType,
+      text: bodyText.value,
+    };
+  }
+  return bodyKind.value === "urlencoded"
+    ? {
+        kind: "urlencoded",
+        contentType,
+        fields: meaningfulUrlEncodedFields(),
+      }
     : {
-        kind: "text",
-        contentType: generatedContentType.value,
-        text: bodyText.value,
+        kind: "multipart",
+        contentType,
+        boundary: multipartBoundary.value,
+        fields: meaningfulMultipartFields(),
       };
 }
 
@@ -466,7 +749,10 @@ function currentDraft(): RequestDraftInput {
     query: meaningfulRequestFields(query.value),
     headers: meaningfulRequestFields(headers.value),
     requestBody: currentRequestBody(),
-    body: bodyKind.value === "none" ? "" : bodyText.value,
+    body:
+      bodyKind.value === "text" || bodyKind.value === "json"
+        ? bodyText.value
+        : "",
     preRequestScript: preRequestScript.value,
     postResponseScript: postResponseScript.value,
   };
@@ -482,7 +768,10 @@ function emitChange(): void {
     query: meaningfulRequestFields(query.value),
     headers: meaningfulRequestFields(headers.value),
     requestBody: currentRequestBody(),
-    body: bodyKind.value === "none" ? "" : bodyText.value,
+    body:
+      bodyKind.value === "text" || bodyKind.value === "json"
+        ? bodyText.value
+        : "",
     preRequestScript: preRequestScript.value,
     postResponseScript: postResponseScript.value,
   });
@@ -504,17 +793,22 @@ function selectTargetMode(value: string): void {
 
 /** Applies a frontend body preset without changing the current text. */
 function selectBodyKind(value: string): void {
-  if (value !== "none" && value !== "text" && value !== "json") return;
-  bodyKind.value = value;
-  if (value === "json" && !isJsonMediaType(bodyContentType.value || null)) {
-    bodyContentType.value = "application/json";
-  } else if (
-    value === "text" &&
-    (bodyContentType.value.trim() === "" ||
-      isJsonMediaType(bodyContentType.value))
+  if (
+    value !== "none" &&
+    value !== "text" &&
+    value !== "json" &&
+    value !== "urlencoded" &&
+    value !== "multipart"
   ) {
-    bodyContentType.value = "text/plain";
+    return;
   }
+  if (bodyKind.value !== value && value !== "none") {
+    bodyContentType.value =
+      value === "urlencoded" || value === "multipart"
+        ? ""
+        : defaultContentType(value);
+  }
+  bodyKind.value = value;
   emitChange();
 }
 
@@ -1073,7 +1367,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 density="compact"
                 font="mono"
                 :aria-label="t('request.contentTypeOverride')"
-                placeholder="text/plain"
+                :placeholder="defaultContentType(bodyKind)"
                 autocomplete="off"
                 spellcheck="false"
                 :disabled="editorDisabled"
@@ -1084,7 +1378,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               {{ t("request.noBodyDescription") }}
             </p>
             <CodeEditor
-              v-else
+              v-else-if="bodyKind === 'text' || bodyKind === 'json'"
               v-model="bodyText"
               class="body-code-editor"
               :language="bodyKind === 'json' ? 'json' : 'plain'"
@@ -1092,6 +1386,171 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               :disabled="editorDisabled"
               @input="emitChange"
             />
+            <div v-else class="request-form-fields">
+              <input
+                v-if="bodyKind === 'multipart'"
+                ref="attachmentInput"
+                class="visually-hidden"
+                type="file"
+                tabindex="-1"
+                aria-hidden="true"
+                :disabled="attachmentSelectionDisabled()"
+                @change="attachFile"
+              />
+              <div class="request-field-heading" aria-hidden="true">
+                <span></span>
+                <span>{{ t("common.fields.name") }}</span>
+                <span>{{ t("common.fields.value") }}</span>
+                <span></span>
+              </div>
+              <div
+                v-for="entry in visibleFormFields"
+                :key="entry.index"
+                class="request-field-row"
+                :class="formFieldReorder.classes(entry.index)"
+                @dragover.stop="
+                  formFieldReorder.updateDropTarget($event, entry.index)
+                "
+                @drop.stop="formFieldReorder.finishDrop($event)"
+              >
+                <CheckboxControl
+                  v-model="entry.field.enabled"
+                  visually-hidden-label
+                  :label="
+                    t('request.enableField', {
+                      kind: t('request.formField'),
+                      index: entry.index + 1,
+                    })
+                  "
+                  :disabled="editorDisabled"
+                  @change="updateFormField(entry.index)"
+                />
+                <TemplateTextControl
+                  v-model="entry.field.name"
+                  class="field-template-input"
+                  density="compact"
+                  font="mono"
+                  :previews="variablePreviews"
+                  :aria-label="
+                    t('request.formName', { index: entry.index + 1 })
+                  "
+                  :placeholder="
+                    isBlankFormField(entry.field)
+                      ? t('request.addFormField')
+                      : t('common.fields.name')
+                  "
+                  autocomplete="off"
+                  spellcheck="false"
+                  :disabled="editorDisabled"
+                  @input="updateFormField(entry.index)"
+                />
+                <div
+                  class="form-value-field"
+                  :class="{
+                    'has-value-type-toggle': bodyKind === 'multipart',
+                  }"
+                >
+                  <FormValueTypeToggle
+                    v-if="bodyKind === 'multipart'"
+                    :model-value="
+                      isMultipartFileValueField(entry.field) ? 'file' : 'text'
+                    "
+                    :disabled="formValueTypeDisabled(entry.field)"
+                    @update:model-value="
+                      selectFormValueType(entry.index, $event)
+                    "
+                  />
+                  <TemplateTextControl
+                    v-if="!isMultipartFileValueField(entry.field)"
+                    v-model="entry.field.value"
+                    class="field-template-input"
+                    density="compact"
+                    font="mono"
+                    :previews="variablePreviews"
+                    :aria-label="
+                      t('request.formValue', { index: entry.index + 1 })
+                    "
+                    :placeholder="t('common.fields.value')"
+                    autocomplete="off"
+                    spellcheck="false"
+                    :disabled="editorDisabled || uploadingAttachment"
+                    @input="updateFormField(entry.index)"
+                  />
+                  <button
+                    v-else-if="isPendingMultipartFileField(entry.field)"
+                    type="button"
+                    class="request-file-part request-file-part-empty"
+                    :disabled="attachmentSelectionDisabled()"
+                    @click="chooseAttachment(entry.index)"
+                  >
+                    {{ t("request.attachFile") }}
+                  </button>
+                  <button
+                    v-else-if="isMultipartFileField(entry.field)"
+                    type="button"
+                    class="request-file-part"
+                    :aria-label="
+                      t('request.replaceAttachedFile', {
+                        fileName: entry.field.attachment.fileName,
+                      })
+                    "
+                    :title="entry.field.attachment.fileName"
+                    :disabled="attachmentSelectionDisabled()"
+                    @click="chooseAttachment(entry.index)"
+                  >
+                    <span class="request-file-name">
+                      {{ entry.field.attachment.fileName }}
+                    </span>
+                    <span class="request-file-metadata">
+                      {{ entry.field.attachment.contentType }} ·
+                      {{
+                        formatAttachmentSize(entry.field.attachment.byteLength)
+                      }}
+                    </span>
+                  </button>
+                </div>
+                <div class="row-actions">
+                  <RowReorderHandle
+                    v-if="!isBlankFormField(entry.field)"
+                    :label="
+                      t('common.actions.reorderRow', {
+                        item: t('request.formField'),
+                        index: entry.index + 1,
+                      })
+                    "
+                    :disabled="editorDisabled"
+                    @drag-start="
+                      formFieldReorder.startDrag($event, entry.index)
+                    "
+                    @drag-end="formFieldReorder.cancelDrag"
+                    @move="formFieldReorder.moveByKeyboard(entry.index, $event)"
+                  />
+                  <IconButton
+                    v-if="!isBlankFormField(entry.field)"
+                    class="compact-icon-button"
+                    size="compact"
+                    :label="
+                      t('request.removeField', {
+                        kind: t('request.formField'),
+                        index: entry.index + 1,
+                      })
+                    "
+                    :title="
+                      t('request.removeFieldTitle', {
+                        kind: t('request.formField'),
+                      })
+                    "
+                    :disabled="editorDisabled"
+                    @click="removeFormField(entry.index)"
+                  >
+                    <Trash2 :size="15" aria-hidden="true" />
+                  </IconButton>
+                  <span v-else class="new-row-marker" aria-hidden="true">
+                    <Asterisk :size="15" />
+                  </span>
+                </div>
+              </div>
+            </div>
           </TabsPanel>
 
           <TabsPanel

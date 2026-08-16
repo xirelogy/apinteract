@@ -1,4 +1,7 @@
-import type { CurrentSession } from "@/model/contracts/backend";
+import type {
+  CurrentSession,
+  RequestAttachment,
+} from "@/model/contracts/backend";
 import { useApplicationStore } from "@/control/state/application-store";
 import type { BackendHttpClient } from "@/control/transport/http-client";
 import type { BackendWebSocketClient } from "@/control/transport/websocket-client";
@@ -69,6 +72,21 @@ export class SessionController {
       throw new Error("An authenticated session is required");
     }
     return this.#http.downloadExecutionBody(this.#accessToken, executionId);
+  }
+
+  /** Uploads one multipart file through the active bearer-authenticated session. */
+  async uploadRequestAttachment(
+    workspaceId: string,
+    file: File,
+  ): Promise<RequestAttachment> {
+    if (this.#accessToken === null) {
+      throw new Error("An authenticated session is required");
+    }
+    return this.#http.uploadRequestAttachment(
+      this.#accessToken,
+      workspaceId,
+      file,
+    );
   }
 
   /** Connects the control channel before publishing authenticated view state. */

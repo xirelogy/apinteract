@@ -154,4 +154,9 @@ export class LocalBlobStore {
     }
     return bytes;
   }
+
+  /** Removes one provider object after its metadata transaction fails. */
+  async remove(storageKey: string): Promise<void> {
+    await rm(join(this.#rootPath, storageKey), { force: true });
+  }
 }

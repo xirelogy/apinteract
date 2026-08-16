@@ -34,6 +34,10 @@
       "description": "Request execution and streamed response-body access."
     },
     {
+      "name": "Requests",
+      "description": "Request drafts, revisions, and reusable body attachments."
+    },
+    {
       "name": "WebSocket",
       "description": "Frontend control-channel establishment and message contracts."
     }
@@ -176,6 +180,71 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspaceId}/request-attachments": {
+      "parameters": [
+        {
+          "name": "workspaceId",
+          "in": "path",
+          "required": true,
+          "schema": { "$ref": "#/components/schemas/WorkspaceId" }
+        }
+      ],
+      "post": {
+        "tags": ["Requests"],
+        "operationId": "uploadRequestAttachment",
+        "summary": "Upload an immutable file for multipart request bodies",
+        "security": [{ "accessToken": [] }],
+        "parameters": [
+          {
+            "name": "X-APInteract-File-Name",
+            "in": "header",
+            "required": true,
+            "description": "Percent-encoded UTF-8 filename.",
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "X-APInteract-File-Type",
+            "in": "header",
+            "required": false,
+            "description": "Percent-encoded MIME type; defaults to application/octet-stream.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "maxLength": 786432
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Immutable workspace attachment metadata.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RequestAttachment" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "413": {
+            "description": "The attachment exceeds the request-body limit.",
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/Problem" }
+              }
+            }
           }
         }
       }
@@ -393,6 +462,9 @@
         "$ref": "#/components/schemas/UuidV7"
       },
       "BlobId": {
+        "$ref": "#/components/schemas/UuidV7"
+      },
+      "RequestAttachmentId": {
         "$ref": "#/components/schemas/UuidV7"
       },
       "ProblemCode": {
@@ -2525,7 +2597,9 @@
         "description": "Editable request body semantics before interpolation and UTF-8 encoding.",
         "oneOf": [
           { "$ref": "#/components/schemas/NoRequestBody" },
-          { "$ref": "#/components/schemas/TextRequestBody" }
+          { "$ref": "#/components/schemas/TextRequestBody" },
+          { "$ref": "#/components/schemas/UrlEncodedRequestBody" },
+          { "$ref": "#/components/schemas/MultipartRequestBody" }
         ]
       },
       "NoRequestBody": {
@@ -2550,6 +2624,91 @@
             "description": "Optional body-owned media type applied as the effective Content-Type during execution."
           },
           "text": { "type": "string", "maxLength": 786432 }
+        }
+      },
+      "UrlEncodedRequestBody": {
+        "description": "Ordered text fields encoded as application/x-www-form-urlencoded after interpolation.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "contentType", "fields"],
+        "properties": {
+          "kind": { "type": "string", "const": "urlencoded" },
+          "contentType": {
+            "oneOf": [
+              { "type": "string", "minLength": 1, "maxLength": 512 },
+              { "type": "null" }
+            ]
+          },
+          "fields": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RequestField" }
+          }
+        }
+      },
+      "MultipartRequestBody": {
+        "description": "Ordered multipart/form-data text fields and immutable file attachments.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "contentType", "boundary", "fields"],
+        "properties": {
+          "kind": { "type": "string", "const": "multipart" },
+          "contentType": {
+            "description": "Optional media type override without a boundary parameter; the persisted boundary is appended during execution.",
+            "oneOf": [
+              { "type": "string", "minLength": 1, "maxLength": 512 },
+              { "type": "null" }
+            ]
+          },
+          "boundary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 70,
+            "pattern": "^[0-9A-Za-z'()+_,./:=?-]+$"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "$ref": "#/components/schemas/RequestField" },
+                { "$ref": "#/components/schemas/MultipartFileField" }
+              ]
+            }
+          }
+        }
+      },
+      "RequestAttachment": {
+        "description": "Immutable workspace-owned upload metadata referenced by multipart file fields.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "attachmentId",
+          "workspaceId",
+          "fileName",
+          "contentType",
+          "byteLength",
+          "sha256"
+        ],
+        "properties": {
+          "attachmentId": {
+            "$ref": "#/components/schemas/RequestAttachmentId"
+          },
+          "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+          "fileName": { "type": "string", "minLength": 1, "maxLength": 255 },
+          "contentType": { "type": "string", "minLength": 1, "maxLength": 255 },
+          "byteLength": { "type": "integer", "minimum": 0, "maximum": 786432 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      },
+      "MultipartFileField": {
+        "description": "One uploaded file positioned among multipart text fields.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "name", "enabled", "attachment"],
+        "properties": {
+          "kind": { "type": "string", "const": "file" },
+          "name": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "attachment": { "$ref": "#/components/schemas/RequestAttachment" }
         }
       },
       "RequestView": {

@@ -8,6 +8,7 @@ import { SqliteDatabase } from "../persistence/sqlite-database.js";
 import { ProxyClient } from "../proxy/proxy-client.js";
 import { ScriptService } from "../scripting/script-service.js";
 import { RequestService } from "../requests/request-service.js";
+import { RequestAttachmentService } from "../requests/request-attachment-service.js";
 import { SessionService } from "../sessions/session-service.js";
 import { VariableService } from "../variables/variable-service.js";
 import { WorkspaceService } from "../workspaces/workspace-service.js";
@@ -21,6 +22,7 @@ export interface Application {
   readonly workspaces: WorkspaceService;
   readonly environments: EnvironmentService;
   readonly variables: VariableService;
+  readonly requestAttachments: RequestAttachmentService;
   readonly requests: RequestService;
   readonly executions: ExecutionService;
   readonly proxy: ProxyClient;
@@ -59,11 +61,18 @@ export async function createApplication(
     environments,
     audit,
   );
+  const requestAttachments = new RequestAttachmentService(
+    database.db,
+    workspaces,
+    blobs,
+    audit,
+  );
   const requests = new RequestService(
     database.db,
     workspaces,
     variables,
     audit,
+    requestAttachments,
   );
   const proxy = new ProxyClient(
     configuration.proxy.endpoint,
@@ -89,6 +98,7 @@ export async function createApplication(
     workspaces,
     environments,
     variables,
+    requestAttachments,
     requests,
     executions,
     proxy,

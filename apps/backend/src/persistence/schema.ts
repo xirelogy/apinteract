@@ -216,6 +216,21 @@ export interface BlobReferenceTable {
   created_at: number;
 }
 
+/** Immutable request-upload metadata owned by one workspace. */
+export interface RequestAttachmentTable {
+  id: BinaryId;
+  workspace_id: BinaryId;
+  provider_id: string;
+  storage_key: string;
+  state: "available" | "missing";
+  file_name: string;
+  content_type: string;
+  byte_length: number;
+  sha256: string;
+  created_by: BinaryId;
+  created_at: number;
+}
+
 export interface AuditOutboxTable {
   id: BinaryId;
   event_json: string;
@@ -268,6 +283,7 @@ export interface DatabaseSchema {
   executions: ExecutionTable;
   blobs: BlobTable;
   blob_references: BlobReferenceTable;
+  request_attachments: RequestAttachmentTable;
   audit_outbox: AuditOutboxTable;
   audit_event_index: AuditEventIndexTable;
   audit_segments: AuditSegmentTable;

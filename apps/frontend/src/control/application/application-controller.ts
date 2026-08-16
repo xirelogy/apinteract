@@ -6,6 +6,8 @@ import type {
   EnvironmentVariableWrite,
   EnvironmentView,
   ExecutionView,
+  RequestBodyDefinition,
+  RequestAttachment,
   RequestField,
   RequestRevisionSummary,
   RequestRevisionView,
@@ -81,6 +83,16 @@ export class ApplicationController {
         await this.#selectWorkspace(first.workspaceId);
       }
     });
+  }
+
+  /** Uploads one immutable multipart attachment with shared workflow errors. */
+  async uploadRequestAttachment(
+    workspaceId: string,
+    file: File,
+  ): Promise<RequestAttachment> {
+    return this.#run(() =>
+      this.session.uploadRequestAttachment(workspaceId, file),
+    );
   }
 
   /** Creates, lists, and selects a new workspace. */
@@ -1366,6 +1378,11 @@ function emptyDraft(): RequestDraftInput {
 
 /** Projects a saved backend request onto editable tab content. */
 function requestToDraft(request: RequestView): RequestDraftInput {
+  const requestBody =
+    request.requestBody ??
+    (request.body === ""
+      ? { kind: "none" as const }
+      : { kind: "text" as const, contentType: null, text: request.body });
   return {
     name: request.name,
     method: request.method,
@@ -1373,12 +1390,8 @@ function requestToDraft(request: RequestView): RequestDraftInput {
     targetUrl: request.targetUrl,
     query: request.query.map((field) => ({ ...field })),
     headers: request.headers.map((field) => ({ ...field })),
-    requestBody:
-      request.requestBody ??
-      (request.body === ""
-        ? { kind: "none" }
-        : { kind: "text", contentType: null, text: request.body }),
-    body: request.body,
+    requestBody: cloneRequestBody(requestBody),
+    body: requestBody.kind === "text" ? request.body : "",
     preRequestScript: request.preRequestScript,
     postResponseScript: request.postResponseScript,
   };
@@ -1390,10 +1403,28 @@ function cloneDraft(draft: RequestDraftInput): RequestDraftInput {
     ...draft,
     ...(draft.requestBody === undefined
       ? {}
-      : { requestBody: { ...draft.requestBody } }),
+      : { requestBody: cloneRequestBody(draft.requestBody) }),
     query: draft.query.map((field) => ({ ...field })),
     headers: draft.headers.map((field) => ({ ...field })),
   };
+}
+
+/** Clones semantic body definitions, including ordered structured form fields. */
+function cloneRequestBody(body: RequestBodyDefinition): RequestBodyDefinition {
+  if (body.kind === "urlencoded") {
+    return { ...body, fields: body.fields.map((field) => ({ ...field })) };
+  }
+  if (body.kind === "multipart") {
+    return {
+      ...body,
+      fields: body.fields.map((field) =>
+        "kind" in field && field.kind === "file"
+          ? { ...field, attachment: { ...field.attachment } }
+          : { ...field },
+      ),
+    };
+  }
+  return { ...body };
 }
 
 /** Converts a redacted profile into a write-safe editable baseline. */

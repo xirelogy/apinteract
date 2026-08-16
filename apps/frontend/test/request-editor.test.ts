@@ -5,6 +5,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
+import type { RequestDraftInput } from "../src/model/domain/application";
 import CodeEditor from "../src/view/presentation/controls/CodeEditor.vue";
 import SelectMenu from "../src/view/presentation/controls/SelectMenu.vue";
 import ScriptEditor from "../src/view/presentation/controls/ScriptEditor.vue";
@@ -281,6 +282,227 @@ describe("RequestEditor", () => {
       ?.trigger("click");
     expect(wrapper.emitted("execute")?.at(-1)?.[0]).toMatchObject({
       requestBody: { kind: "text", text: "{" },
+    });
+  });
+
+  it("edits URL-encoded and multipart bodies as ordered form fields", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const attachment = {
+      attachmentId: "019facab-1eee-765f-bd9f-ac2449151cf2",
+      workspaceId: "019facab-1eee-765f-bd9f-ac2449151cf3",
+      fileName: "payload.bin",
+      contentType: "application/octet-stream",
+      byteLength: 4,
+      sha256: "a".repeat(64),
+    };
+    const uploadAttachment = vi.fn().mockResolvedValue(attachment);
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft: {
+          name: "Form request",
+          method: "POST",
+          targetMode: "absolute",
+          targetUrl: "https://example.test/forms",
+          query: [],
+          headers: [],
+          body: "",
+          requestBody: {
+            kind: "urlencoded",
+            contentType: null,
+            fields: [
+              { name: "first", value: "one", enabled: true },
+              { name: "second", value: "two", enabled: false },
+            ],
+          },
+          preRequestScript: "",
+          postResponseScript: "",
+        },
+        execution: null,
+        tabId: "019facab-1eee-765f-bd9f-ac2449151cf1",
+        temporary: true,
+        inheritedHeaders: [],
+        busy: false,
+        uploadAttachment,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    expect(wrapper.emitted("change")).toBeUndefined();
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Body"))
+      ?.trigger("click");
+    const bodyType = wrapper
+      .findAllComponents(SelectMenu)
+      .find((select) => select.props("label") === "Content type");
+    expect(bodyType?.props("modelValue")).toBe("urlencoded");
+    expect(wrapper.find(".request-form-fields").exists()).toBe(true);
+    expect(
+      wrapper.get<HTMLInputElement>('input[aria-label="Form field name 1"]')
+        .element.value,
+    ).toBe("first");
+    expect(
+      wrapper.get<HTMLInputElement>('input[aria-label="Form field name 2"]')
+        .element.value,
+    ).toBe("second");
+    expect(
+      wrapper
+        .get('input[aria-label="Form field name 3"]')
+        .attributes("placeholder"),
+    ).toBe("Add form field");
+
+    await wrapper
+      .get('input[aria-label="Form field name 3"]')
+      .setValue("third");
+    await wrapper.get('input[aria-label="Form field value 3"]').setValue("a+b");
+    await wrapper
+      .findAll<HTMLInputElement>(".request-form-fields input[type=checkbox]")[0]
+      ?.setValue(false);
+    const reorderHandles = wrapper.findAll(
+      ".request-form-fields .row-reorder-handle",
+    );
+    await reorderHandles[0]?.trigger("keydown", {
+      key: "ArrowDown",
+      altKey: true,
+    });
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      body: "",
+      requestBody: {
+        kind: "urlencoded",
+        contentType: null,
+        fields: [
+          { name: "second", value: "two", enabled: false },
+          { name: "first", value: "one", enabled: false },
+          { name: "third", value: "a+b", enabled: true },
+        ],
+      },
+    });
+    await wrapper
+      .findAll(".request-form-fields .compact-icon-button")[1]
+      ?.trigger("click");
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      requestBody: {
+        kind: "urlencoded",
+        fields: [
+          { name: "second", value: "two", enabled: false },
+          { name: "third", value: "a+b", enabled: true },
+        ],
+      },
+    });
+
+    bodyType?.vm.$emit("update:modelValue", "multipart");
+    await wrapper.vm.$nextTick();
+    const multipartDraft = wrapper.emitted("change")?.at(-1)?.[0] as
+      | RequestDraftInput
+      | undefined;
+    expect(multipartDraft).toMatchObject({
+      body: "",
+      requestBody: {
+        kind: "multipart",
+        contentType: null,
+        fields: [
+          { name: "second", value: "two", enabled: false },
+          { name: "third", value: "a+b", enabled: true },
+        ],
+      },
+    });
+    const multipartBody = multipartDraft?.requestBody;
+    if (multipartBody?.kind !== "multipart") {
+      throw new Error("Missing multipart draft");
+    }
+    expect(multipartBody.boundary).toMatch(
+      /^----APInteractBoundary[0-9a-f]{32}$/u,
+    );
+
+    expect(wrapper.text()).not.toContain("Attach files");
+    await wrapper
+      .get('input[aria-label="Form field name 3"]')
+      .setValue("upload");
+    const valueTypeToggles = wrapper.findAll(".form-value-type-toggle");
+    expect(valueTypeToggles).toHaveLength(4);
+    expect(valueTypeToggles[2]?.attributes("data-type")).toBe("text");
+    await valueTypeToggles[2]?.trigger("click");
+    expect(
+      wrapper.findAll(".form-value-type-toggle")[2]?.attributes("data-type"),
+    ).toBe("file");
+    const attachFile = wrapper.get(".request-file-part-empty");
+    expect(attachFile.text()).toBe("Attach file");
+    await attachFile.trigger("click");
+
+    const file = new File([new Uint8Array([0, 1, 2, 255])], "payload.bin", {
+      type: "application/octet-stream",
+    });
+    const fileInput = wrapper.get<HTMLInputElement>('input[type="file"]');
+    expect(fileInput.attributes("multiple")).toBeUndefined();
+    Object.defineProperty(fileInput.element, "files", {
+      configurable: true,
+      value: [file],
+    });
+    await fileInput.trigger("change");
+    await flushPromises();
+    expect(uploadAttachment).toHaveBeenCalledWith(file);
+    expect(wrapper.get(".request-file-name").text()).toBe("payload.bin");
+    expect(wrapper.get(".request-file-metadata").text()).toContain(
+      "application/octet-stream · 4 B",
+    );
+    const multipartWithFile = wrapper.emitted("change")?.at(-1)?.[0] as
+      | RequestDraftInput
+      | undefined;
+    expect(multipartWithFile).toMatchObject({
+      requestBody: {
+        kind: "multipart",
+        fields: [
+          { name: "second", value: "two", enabled: false },
+          { name: "third", value: "a+b", enabled: true },
+          { kind: "file", name: "upload", enabled: true, attachment },
+        ],
+      },
+    });
+    expect(
+      wrapper.findAll(".form-value-type-toggle")[2]?.attributes("data-type"),
+    ).toBe("file");
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Headers"))
+      ?.trigger("click");
+    expect(
+      wrapper.get<HTMLInputElement>('input[aria-label="Generated header name"]')
+        .element.value,
+    ).toBe("Content-Type");
+    expect(
+      wrapper.get<HTMLInputElement>(
+        'input[aria-label="Generated header value"]',
+      ).element.value,
+    ).toBe(`multipart/form-data; boundary=${multipartBody.boundary}`);
+
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Send"))
+      ?.trigger("click");
+    expect(wrapper.emitted("execute")?.at(-1)?.[0]).toMatchObject({
+      requestBody: multipartWithFile?.requestBody,
+    });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Body"))
+      ?.trigger("click");
+    await wrapper.findAll(".form-value-type-toggle")[2]?.trigger("click");
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      requestBody: {
+        kind: "multipart",
+        fields: [
+          { name: "second", value: "two", enabled: false },
+          { name: "third", value: "a+b", enabled: true },
+          { name: "upload", value: "", enabled: true },
+        ],
+      },
     });
   });
 

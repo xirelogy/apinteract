@@ -8,6 +8,7 @@ import { useApplicationController } from "@/app/dependencies";
 import { useApplicationStore } from "@/control/state/application-store";
 import type {
   EnvironmentVariableWrite,
+  RequestAttachment,
   RequestField,
   RequestView,
   VariableWrite,
@@ -457,6 +458,15 @@ async function executeRequest(draft: RequestDraftInput): Promise<void> {
   }
 }
 
+/** Uploads one file into the active request tab's workspace. */
+async function uploadActiveRequestAttachment(
+  file: File,
+): Promise<RequestAttachment> {
+  const tab = activeTab.value;
+  if (tab === null) throw new Error("An active request is required");
+  return controller.uploadRequestAttachment(tab.workspaceId, file);
+}
+
 /** Downloads exact response bytes without exposing the bearer token in a URL. */
 async function downloadExecutionBody(executionId: string): Promise<void> {
   try {
@@ -741,6 +751,7 @@ function discardRequestTab(): void {
           :can-edit="canEditWorkspace"
           :revisions="activeTab?.revisions ?? []"
           :viewing-revision="activeTab?.viewingRevision ?? null"
+          :upload-attachment="uploadActiveRequestAttachment"
           @change="
             activeTab && controller.updateRequestDraft(activeTab.tabId, $event)
           "

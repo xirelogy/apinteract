@@ -5,9 +5,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { AuditService } from "../src/audit/audit-service.js";
+import { LocalBlobStore } from "../src/blobs/local-blob-store.js";
 import { EnvironmentService } from "../src/environments/environment-service.js";
 import { bytesToId, createEntityId, idToBytes } from "../src/foundation/id.js";
 import { SqliteDatabase } from "../src/persistence/sqlite-database.js";
+import { RequestAttachmentService } from "../src/requests/request-attachment-service.js";
 import {
   RequestService,
   TreeMoveInvalidError,
@@ -21,6 +23,445 @@ import {
 } from "../src/workspaces/workspace-service.js";
 
 describe("RequestService draft updates", () => {
+  it("serializes, redacts, and restores structured form bodies", async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), "apinteract-forms-"));
+    const database = await SqliteDatabase.open(
+      join(rootPath, "database.sqlite"),
+    );
+
+    try {
+      const userId = createEntityId();
+      await database.db
+        .insertInto("users")
+        .values({
+          id: idToBytes(userId),
+          status: "active",
+          username: "form-test",
+          display_name: "Form Test",
+          is_instance_admin: 0,
+          created_at: Date.now(),
+          deleted_at: null,
+        })
+        .execute();
+
+      const audit = new AuditService(database.db, join(rootPath, "audit"));
+      const workspaces = new WorkspaceService(database.db, audit);
+      const environments = new EnvironmentService(
+        database.db,
+        workspaces,
+        audit,
+      );
+      const variables = new VariableService(
+        database.db,
+        workspaces,
+        environments,
+        audit,
+      );
+      const blobs = new LocalBlobStore(
+        join(rootPath, "blobs"),
+        join(rootPath, "staging"),
+      );
+      await blobs.initialize();
+      const attachments = new RequestAttachmentService(
+        database.db,
+        workspaces,
+        blobs,
+        audit,
+      );
+      const requests = new RequestService(
+        database.db,
+        workspaces,
+        variables,
+        audit,
+        attachments,
+      );
+      const workspace = await workspaces.create(userId, "Workspace");
+      const request = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        null,
+        "Form request",
+        "POST",
+        "https://example.test/forms",
+        [],
+        [],
+        "",
+      );
+      await variables.update(userId, "request", request.requestId, 0, [
+        { name: "words", kind: "value", value: "hello world" },
+        { name: "credential", kind: "secret", value: "top secret" },
+      ]);
+
+      const urlencoded = await requests.update(
+        userId,
+        request.requestId,
+        request.draftRevision,
+        request.name,
+        "POST",
+        request.targetUrl,
+        [],
+        [],
+        "",
+        "",
+        "",
+        "absolute",
+        null,
+        {
+          kind: "urlencoded",
+          contentType: null,
+          fields: [
+            { name: "plain", value: "<<words>>", enabled: true },
+            { name: "duplicate", value: "first value", enabled: true },
+            { name: "duplicate", value: "a+b&c", enabled: true },
+            { name: "ignored", value: "<<missing>>", enabled: false },
+            {
+              name: "<<credential>>",
+              value: "<<credential>>",
+              enabled: true,
+            },
+          ],
+        },
+      );
+      const preparedUrlencoded = await requests.prepareExecution(
+        userId,
+        createEntityId(),
+        request.requestId,
+      );
+
+      expect(preparedUrlencoded.request.bodyPresent).toBe(true);
+      expect(preparedUrlencoded.request.body).toBe(
+        "plain=hello+world&duplicate=first+value&duplicate=a%2Bb%26c&top+secret=top+secret",
+      );
+      expect(preparedUrlencoded.request.headers).toContainEqual({
+        name: "Content-Type",
+        value: "application/x-www-form-urlencoded",
+        enabled: true,
+        mode: "override",
+      });
+      const executionRow = await database.db
+        .selectFrom("executions")
+        .select("snapshot_json")
+        .where("id", "=", idToBytes(preparedUrlencoded.executionId))
+        .executeTakeFirstOrThrow();
+      expect(executionRow.snapshot_json).not.toContain("top secret");
+      expect(JSON.parse(executionRow.snapshot_json)).toMatchObject({
+        body: "plain=hello+world&duplicate=first+value&duplicate=a%2Bb%26c&%5Bsecret%5D=%5Bsecret%5D",
+        requestBody: {
+          kind: "urlencoded",
+          fields: [
+            { name: "plain", value: "hello world", enabled: true },
+            { name: "duplicate", value: "first value", enabled: true },
+            { name: "duplicate", value: "a+b&c", enabled: true },
+            { name: "ignored", value: "<<missing>>", enabled: false },
+            { name: "[secret]", value: "[secret]", enabled: true },
+          ],
+        },
+      });
+
+      const [urlencodedRevision] = await requests.listRevisions(
+        userId,
+        request.requestId,
+      );
+      if (urlencodedRevision === undefined) {
+        throw new Error("Missing URL-encoded revision");
+      }
+      const boundary = "APInteractTestBoundary";
+      const multipart = await requests.update(
+        userId,
+        request.requestId,
+        urlencoded.draftRevision,
+        request.name,
+        "POST",
+        request.targetUrl,
+        [],
+        [],
+        "",
+        "",
+        "",
+        "absolute",
+        null,
+        {
+          kind: "multipart",
+          contentType: null,
+          boundary,
+          fields: [
+            { name: "alpha", value: "line 1\nline 2", enabled: true },
+            { name: "disabled", value: "not sent", enabled: false },
+          ],
+        },
+      );
+      const preparedMultipart = await requests.prepareExecution(
+        userId,
+        createEntityId(),
+        request.requestId,
+      );
+      expect(preparedMultipart.request.body).toBe(
+        `--${boundary}\r\nContent-Disposition: form-data; name="alpha"\r\n\r\nline 1\nline 2\r\n--${boundary}--\r\n`,
+      );
+      expect(preparedMultipart.request.headers).toContainEqual({
+        name: "Content-Type",
+        value: `multipart/form-data; boundary=${boundary}`,
+        enabled: true,
+        mode: "override",
+      });
+
+      const attachmentBytes = Buffer.from([0, 1, 2, 255]);
+      const attachment = await attachments.upload(
+        userId,
+        workspace.workspaceId,
+        "payload.bin",
+        "application/octet-stream",
+        attachmentBytes,
+      );
+      const fileBoundary = "APInteractFileBoundary";
+      const multipartFile = await requests.update(
+        userId,
+        request.requestId,
+        multipart.draftRevision,
+        request.name,
+        "POST",
+        request.targetUrl,
+        [],
+        [],
+        "",
+        "",
+        "",
+        "absolute",
+        null,
+        {
+          kind: "multipart",
+          contentType: null,
+          boundary: fileBoundary,
+          fields: [
+            { name: "description", value: "binary", enabled: true },
+            {
+              kind: "file",
+              name: "file-<<credential>>",
+              enabled: true,
+              attachment,
+            },
+          ],
+        },
+      );
+      const preparedFile = await requests.prepareExecution(
+        userId,
+        createEntityId(),
+        request.requestId,
+      );
+      expect(preparedFile.request.body).toBe("");
+      expect(Buffer.from(preparedFile.request.bodyBytes ?? [])).toEqual(
+        Buffer.concat([
+          Buffer.from(
+            `--${fileBoundary}\r\nContent-Disposition: form-data; name="description"\r\n\r\nbinary\r\n--${fileBoundary}\r\nContent-Disposition: form-data; name="file-top secret"; filename="payload.bin"\r\nContent-Type: application/octet-stream\r\n\r\n`,
+          ),
+          attachmentBytes,
+          Buffer.from(`\r\n--${fileBoundary}--\r\n`),
+        ]),
+      );
+      expect(preparedFile.request.requestBody).toMatchObject({
+        kind: "multipart",
+        fields: [
+          { name: "description", value: "binary", enabled: true },
+          { kind: "file", name: "file-top secret", attachment },
+        ],
+      });
+      const fileExecutionRow = await database.db
+        .selectFrom("executions")
+        .select("snapshot_json")
+        .where("id", "=", idToBytes(preparedFile.executionId))
+        .executeTakeFirstOrThrow();
+      expect(fileExecutionRow.snapshot_json).not.toContain("top secret");
+      expect(JSON.parse(fileExecutionRow.snapshot_json)).toMatchObject({
+        requestBody: {
+          fields: [
+            { name: "description" },
+            { kind: "file", name: "[secret]", attachment },
+          ],
+        },
+      });
+      const otherWorkspace = await workspaces.create(userId, "Other workspace");
+      await expect(
+        requests.prepareTemporaryExecution(
+          userId,
+          createEntityId(),
+          otherWorkspace.workspaceId,
+          null,
+          {
+            method: "POST",
+            targetUrl: "https://example.test/cross-workspace",
+            query: [],
+            headers: [],
+            body: "",
+            requestBody: {
+              kind: "multipart",
+              contentType: null,
+              boundary: "CrossWorkspaceBoundary",
+              fields: [
+                {
+                  kind: "file",
+                  name: "file",
+                  enabled: true,
+                  attachment,
+                },
+              ],
+            },
+          },
+        ),
+      ).rejects.toThrow("attachment is unavailable");
+
+      const restored = await requests.restoreRevision(
+        userId,
+        request.requestId,
+        urlencodedRevision.revisionId,
+        multipartFile.draftRevision,
+      );
+      expect(restored.requestBody).toEqual(urlencoded.requestBody);
+      expect(restored.body).toBe(
+        "plain=%3C%3Cwords%3E%3E&duplicate=first+value&duplicate=a%2Bb%26c&%3C%3Ccredential%3E%3E=%3C%3Ccredential%3E%3E",
+      );
+
+      const empty = await requests.prepareTemporaryExecution(
+        userId,
+        createEntityId(),
+        workspace.workspaceId,
+        null,
+        {
+          method: "POST",
+          targetUrl: "https://example.test/empty-form",
+          query: [],
+          headers: [],
+          body: "",
+          requestBody: {
+            kind: "urlencoded",
+            contentType: null,
+            fields: [],
+          },
+        },
+      );
+      expect(empty.request).toMatchObject({ body: "", bodyPresent: true });
+      expect(empty.request.headers).toContainEqual({
+        name: "Content-Type",
+        value: "application/x-www-form-urlencoded",
+        enabled: true,
+        mode: "override",
+      });
+    } finally {
+      await database.close();
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects multipart framing collisions and invalid field names", async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), "apinteract-form-invalid-"));
+    const database = await SqliteDatabase.open(
+      join(rootPath, "database.sqlite"),
+    );
+
+    try {
+      const userId = createEntityId();
+      await database.db
+        .insertInto("users")
+        .values({
+          id: idToBytes(userId),
+          status: "active",
+          username: "invalid-form-test",
+          display_name: "Invalid Form Test",
+          is_instance_admin: 0,
+          created_at: Date.now(),
+          deleted_at: null,
+        })
+        .execute();
+      const audit = new AuditService(database.db, join(rootPath, "audit"));
+      const workspaces = new WorkspaceService(database.db, audit);
+      const environments = new EnvironmentService(
+        database.db,
+        workspaces,
+        audit,
+      );
+      const variables = new VariableService(
+        database.db,
+        workspaces,
+        environments,
+        audit,
+      );
+      const requests = new RequestService(
+        database.db,
+        workspaces,
+        variables,
+        audit,
+      );
+      const workspace = await workspaces.create(userId, "Workspace");
+      const input = {
+        method: "POST" as const,
+        targetUrl: "https://example.test/forms",
+        query: [],
+        headers: [],
+        body: "",
+      };
+
+      await expect(
+        requests.prepareTemporaryExecution(
+          userId,
+          createEntityId(),
+          workspace.workspaceId,
+          null,
+          {
+            ...input,
+            requestBody: {
+              kind: "multipart",
+              contentType: null,
+              boundary: "CollisionBoundary",
+              fields: [
+                {
+                  name: "field",
+                  value: "contains CollisionBoundary here",
+                  enabled: true,
+                },
+              ],
+            },
+          },
+        ),
+      ).rejects.toThrow("boundary collides");
+      await expect(
+        requests.prepareTemporaryExecution(
+          userId,
+          createEntityId(),
+          workspace.workspaceId,
+          null,
+          {
+            ...input,
+            requestBody: {
+              kind: "multipart",
+              contentType: null,
+              boundary: "SafeBoundary",
+              fields: [{ name: "bad\r\nname", value: "value", enabled: true }],
+            },
+          },
+        ),
+      ).rejects.toThrow("field name is invalid");
+      await expect(
+        requests.prepareTemporaryExecution(
+          userId,
+          createEntityId(),
+          workspace.workspaceId,
+          null,
+          {
+            ...input,
+            requestBody: {
+              kind: "multipart",
+              contentType: "multipart/form-data; boundary=ConflictingBoundary",
+              boundary: "SafeBoundary",
+              fields: [],
+            },
+          },
+        ),
+      ).rejects.toThrow("must not declare a boundary");
+    } finally {
+      await database.close();
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the current revision when normalized draft content is unchanged", async () => {
     const rootPath = await mkdtemp(join(tmpdir(), "apinteract-request-"));
     const database = await SqliteDatabase.open(

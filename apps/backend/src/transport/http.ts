@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Application } from "../bootstrap/application.js";
 import type { BackendConfiguration } from "../config.js";
 import { AuthenticationFailedError } from "../identity/identity-service.js";
+import { RequestAttachmentValidationError } from "../requests/request-attachment-service.js";
 import {
   type IssuedSession,
   type SessionIdentity,
@@ -29,6 +30,11 @@ export async function registerHttpRoutes(
   configuration: BackendConfiguration,
 ): Promise<void> {
   await server.register(cookie);
+  server.addContentTypeParser(
+    "application/octet-stream",
+    { parseAs: "buffer", bodyLimit: 786_432 },
+    (_request, body, done) => done(null, body),
+  );
 
   /** Reports backend readiness, including proxy and audit-outbox dependencies. */
   server.get("/health", async (_request, reply) => {
@@ -148,6 +154,84 @@ export async function registerHttpRoutes(
     },
   );
 
+  /** Stores one immutable workspace-owned file for multipart request reuse. */
+  server.post<{
+    Params: { workspaceId: string };
+    Headers: {
+      "x-apinteract-file-name"?: string;
+      "x-apinteract-file-type"?: string;
+    };
+    Body: Buffer;
+  }>(
+    "/api/workspaces/:workspaceId/request-attachments",
+    {
+      preHandler: authenticateAccess(application),
+      /** Converts parser size failures to the public problem contract. */
+      errorHandler(error, _request, reply) {
+        if (error.code === "FST_ERR_CTP_BODY_TOO_LARGE") {
+          sendProblem(reply, {
+            status: 413,
+            code: "request_attachment_too_large",
+            title: "Request attachment too large",
+            detail: "The request attachment exceeds the 768 KiB limit.",
+          });
+          return;
+        }
+        throw error;
+      },
+    },
+    async (request, reply) => {
+      const identity = request.sessionIdentity;
+      if (identity === undefined) return unauthorized(reply);
+      const fileName = decodeUploadHeader(
+        request.headers["x-apinteract-file-name"],
+      );
+      const contentType = decodeUploadHeader(
+        request.headers["x-apinteract-file-type"],
+        "application/octet-stream",
+      );
+      if (fileName === null || contentType === null) {
+        return sendProblem(reply, {
+          status: 400,
+          code: "invalid_request_attachment",
+          title: "Invalid request attachment",
+          detail: "The request attachment metadata is invalid.",
+        });
+      }
+      try {
+        const attachment = await application.requestAttachments.upload(
+          identity.user.id,
+          request.params.workspaceId,
+          fileName,
+          contentType,
+          request.body,
+        );
+        return reply.code(201).send(attachment);
+      } catch (cause) {
+        if (
+          cause instanceof ResourceNotFoundError ||
+          cause instanceof AccessDeniedError
+        ) {
+          return sendProblem(reply, {
+            status: 404,
+            code: "workspace_not_found",
+            title: "Workspace not found",
+            detail: "The workspace does not exist or is not editable.",
+          });
+        }
+        if (cause instanceof RequestAttachmentValidationError) {
+          return sendProblem(reply, {
+            status: 400,
+            code: "invalid_request_attachment",
+            title: "Invalid request attachment",
+            detail: cause.message,
+          });
+        }
+        throw cause;
+      }
+    },
+  );
+
   /** Streams exact stored response bytes after execution ownership is verified. */
   server.get<{ Params: { executionId: string } }>(
     "/api/executions/:executionId/body",
@@ -183,6 +267,19 @@ export async function registerHttpRoutes(
       }
     },
   );
+}
+
+/** Decodes one percent-encoded ASCII upload header without throwing. */
+function decodeUploadHeader(
+  value: string | undefined,
+  fallback?: string,
+): string | null {
+  if (value === undefined) return fallback ?? null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
 }
 
 /** Creates a Fastify pre-handler that authenticates a bearer access token. */

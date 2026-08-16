@@ -7,7 +7,113 @@ import { useApplicationStore } from "../src/control/state/application-store";
 import type { BackendWebSocketClient } from "../src/control/transport/websocket-client";
 import { isRequestTabDirty } from "../src/model/domain/application";
 
-describe("ApplicationController request variable saves", () => {
+describe("ApplicationController requests", () => {
+  it("opens persisted form bodies without sharing fields or becoming dirty", async () => {
+    setActivePinia(createPinia());
+    const requestId = "019facab-1eee-765f-bd9f-ac2449151bf1";
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151bf2";
+    const request = {
+      requestId,
+      workspaceId,
+      parentCollectionId: null,
+      name: "Multipart request",
+      method: "POST" as const,
+      targetMode: "absolute" as const,
+      targetUrl: "https://example.test/forms",
+      inheritedTarget: "",
+      queryMode: "structured" as const,
+      query: [],
+      headers: [],
+      inheritedHeaders: [],
+      body: '--PersistedBoundary\r\nContent-Disposition: form-data; name="field"\r\n\r\nvalue\r\n--PersistedBoundary--\r\n',
+      requestBody: {
+        kind: "multipart" as const,
+        contentType: null,
+        boundary: "PersistedBoundary",
+        fields: [
+          { name: "field", value: "value", enabled: true },
+          {
+            kind: "file" as const,
+            name: "upload",
+            enabled: true,
+            attachment: {
+              attachmentId: "019facab-1eee-765f-bd9f-ac2449151bf3",
+              workspaceId,
+              fileName: "payload.bin",
+              contentType: "application/octet-stream",
+              byteLength: 4,
+              sha256: "a".repeat(64),
+            },
+          },
+        ],
+      },
+      preRequestScript: "",
+      postResponseScript: "",
+      draftRevision: 2,
+    };
+    const webSocket = {
+      command: vi.fn().mockResolvedValue(request),
+      onEvent: vi.fn(),
+    } as unknown as BackendWebSocketClient;
+    const controller = new ApplicationController(
+      {} as SessionController,
+      webSocket,
+    );
+
+    await controller.selectRequest(requestId);
+
+    const tab = useApplicationStore().requestTabs[0];
+    if (tab === undefined) throw new Error("Missing opened request tab");
+    expect(tab.draft).toMatchObject({
+      body: "",
+      requestBody: request.requestBody,
+    });
+    expect(isRequestTabDirty(tab)).toBe(false);
+    if (
+      tab.baseline === null ||
+      tab.draft.requestBody?.kind !== "multipart" ||
+      tab.baseline.requestBody?.kind !== "multipart"
+    ) {
+      throw new Error("Missing multipart draft");
+    }
+    expect(tab.draft.requestBody.fields).not.toBe(request.requestBody.fields);
+    expect(tab.baseline.requestBody.fields).not.toBe(
+      tab.draft.requestBody.fields,
+    );
+    const draftFile = tab.draft.requestBody.fields[1];
+    const requestFile = request.requestBody.fields[1];
+    if (
+      draftFile === undefined ||
+      !("kind" in draftFile) ||
+      requestFile === undefined ||
+      !("kind" in requestFile)
+    ) {
+      throw new Error("Missing multipart file fixture");
+    }
+    expect(draftFile.attachment).not.toBe(requestFile.attachment);
+    controller.updateRequestDraft(tab.tabId, {
+      ...tab.draft,
+      requestBody: {
+        ...tab.draft.requestBody,
+        fields: tab.draft.requestBody.fields.map((field, index) =>
+          index === 0 ? { ...field, value: "changed" } : field,
+        ),
+      },
+    });
+    const changedTab = useApplicationStore().requestTabs[0]!;
+    if (
+      changedTab.baseline === null ||
+      changedTab.baseline.requestBody?.kind !== "multipart"
+    ) {
+      throw new Error("Missing multipart baseline");
+    }
+    expect(changedTab.baseline.requestBody.fields[0]).toMatchObject({
+      value: "value",
+    });
+    expect(request.requestBody.fields[0]).toMatchObject({ value: "value" });
+    expect(isRequestTabDirty(changedTab)).toBe(true);
+  });
+
   it("persists dirty variables with the request and advances both baselines", async () => {
     setActivePinia(createPinia());
     const requestId = "019facab-1eee-765f-bd9f-ac2449151be1";

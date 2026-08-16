@@ -30,6 +30,11 @@ import {
   ResourceNotFoundError,
   validateBaseUrlTemplate,
 } from "../workspaces/workspace-service.js";
+import {
+  MAX_REQUEST_ATTACHMENT_BYTES,
+  type RequestAttachmentService,
+  type RequestAttachmentView,
+} from "./request-attachment-service.js";
 
 export interface TreeNodeView {
   readonly nodeId: EntityId;
@@ -59,6 +64,16 @@ export interface RequestField {
   readonly mode?: "override" | "append";
 }
 
+/** One immutable uploaded file positioned among multipart text fields. */
+export interface RequestMultipartFileField {
+  readonly kind: "file";
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly attachment: RequestAttachmentView;
+}
+
+export type RequestMultipartField = RequestField | RequestMultipartFileField;
+
 /** Describes an editable request body before interpolation and byte encoding. */
 export type RequestBodyDefinition =
   | { readonly kind: "none" }
@@ -66,6 +81,17 @@ export type RequestBodyDefinition =
       readonly kind: "text";
       readonly contentType: string | null;
       readonly text: string;
+    }
+  | {
+      readonly kind: "urlencoded";
+      readonly contentType: string | null;
+      readonly fields: readonly RequestField[];
+    }
+  | {
+      readonly kind: "multipart";
+      readonly contentType: string | null;
+      readonly boundary: string;
+      readonly fields: readonly RequestMultipartField[];
     };
 
 export interface CollectionView {
@@ -246,17 +272,20 @@ export class RequestService {
   readonly #workspaces: WorkspaceService;
   readonly #variables: VariableService;
   readonly #audit: AuditService;
+  readonly #attachments: RequestAttachmentService | null;
 
   constructor(
     database: Kysely<DatabaseSchema>,
     workspaces: WorkspaceService,
     variables: VariableService,
     audit: AuditService,
+    attachments: RequestAttachmentService | null = null,
   ) {
     this.#database = database;
     this.#workspaces = workspaces;
     this.#variables = variables;
     this.#audit = audit;
+    this.#attachments = attachments;
   }
 
   /** Lists ordered collection and request children under one authorized parent. */
@@ -1473,15 +1502,27 @@ export class RequestService {
           request.requestBody,
         ),
         targetComponents,
-        bodyPresent: request.requestBody.kind === "text",
+        bodyPresent: request.requestBody.kind !== "none",
       };
-      const eagerlyComposed =
-        request.preRequestScript === "" && request.postResponseScript === ""
+      const composed =
+        (request.preRequestScript === "" &&
+          request.postResponseScript === "") ||
+        hasEnabledMultipartFile(request.requestBody)
           ? composeWithVariables(
               executionRequest,
               new VariableResolver(variableProfile.variables),
             )
           : undefined;
+      const eagerlyComposed =
+        composed === undefined
+          ? undefined
+          : {
+              ...composed,
+              request: await this.#materializeAttachments(
+                composed.request,
+                transaction,
+              ),
+            };
       const revisionId = await this.#ensureRevision(
         transaction,
         row,
@@ -1584,7 +1625,7 @@ export class RequestService {
         body: content.body,
         bodyPresent:
           (content.requestBody ?? validateRequestBody(undefined, content.body))
-            .kind === "text",
+            .kind !== "none",
         preRequestScript: content.preRequestScript,
         postResponseScript: content.postResponseScript,
       };
@@ -1597,13 +1638,25 @@ export class RequestService {
           : bytesToId(row.parent_collection_id),
         requestId,
       );
-      const eagerlyComposed =
-        request.preRequestScript === "" && request.postResponseScript === ""
+      const composed =
+        (request.preRequestScript === "" &&
+          request.postResponseScript === "") ||
+        hasEnabledMultipartFile(request.requestBody ?? { kind: "none" })
           ? composeWithVariables(
               request,
               new VariableResolver(variableProfile.variables),
             )
           : undefined;
+      const eagerlyComposed =
+        composed === undefined
+          ? undefined
+          : {
+              ...composed,
+              request: await this.#materializeAttachments(
+                composed.request,
+                transaction,
+              ),
+            };
       const executionId = createEntityId();
       const createdAt = Date.now();
       await transaction
@@ -1696,16 +1749,27 @@ export class RequestService {
           localRequest.requestBody,
         ),
         targetComponents,
-        bodyPresent: localRequest.requestBody.kind === "text",
+        bodyPresent: localRequest.requestBody.kind !== "none",
       };
-      const eagerlyComposed =
-        localRequest.preRequestScript === "" &&
-        localRequest.postResponseScript === ""
+      const composed =
+        (localRequest.preRequestScript === "" &&
+          localRequest.postResponseScript === "") ||
+        hasEnabledMultipartFile(localRequest.requestBody)
           ? composeWithVariables(
               executionRequest,
               new VariableResolver(variableProfile.variables),
             )
           : undefined;
+      const eagerlyComposed =
+        composed === undefined
+          ? undefined
+          : {
+              ...composed,
+              request: await this.#materializeAttachments(
+                composed.request,
+                transaction,
+              ),
+            };
       const executionId = createEntityId();
       const createdAt = Date.now();
       const snapshot = JSON.stringify({
@@ -2447,6 +2511,96 @@ export class RequestService {
     return row.position === null ? 0 : Number(row.position) + 1;
   }
 
+  /** Replaces multipart file references with exact bounded provider bytes. */
+  async #materializeAttachments(
+    request: ExecutionRequestSnapshot,
+    executor: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+  ): Promise<ExecutionRequestSnapshot> {
+    const body = request.requestBody;
+    if (body?.kind !== "multipart" || !hasEnabledMultipartFile(body)) {
+      return request;
+    }
+    if (this.#attachments === null) {
+      throw new Error("Request attachment storage is unavailable");
+    }
+    const chunks: Buffer[] = [];
+    let byteLength = 0;
+    /** Appends one multipart segment while enforcing the final proxy limit. */
+    const append = (bytes: Buffer): void => {
+      byteLength += bytes.byteLength;
+      if (byteLength > MAX_REQUEST_ATTACHMENT_BYTES) {
+        throw new Error("Multipart request body is too large");
+      }
+      chunks.push(bytes);
+    };
+    const canonicalFields: RequestMultipartField[] = [];
+    for (const field of body.fields) {
+      if (!field.enabled) {
+        canonicalFields.push(field);
+        continue;
+      }
+      validateMultipartFieldName(field.name);
+      if (!isMultipartFileField(field)) {
+        if (
+          field.name.includes(body.boundary) ||
+          field.value.includes(body.boundary)
+        ) {
+          throw new Error(
+            "Multipart form boundary collides with field content",
+          );
+        }
+        append(
+          Buffer.from(
+            `--${body.boundary}\r\nContent-Disposition: form-data; name="${escapeDispositionParameter(field.name)}"\r\n\r\n${field.value}\r\n`,
+            "utf8",
+          ),
+        );
+        canonicalFields.push(field);
+        continue;
+      }
+      const attachment = await this.#attachments.materialize(
+        request.workspaceId,
+        field.attachment.attachmentId,
+        executor,
+      );
+      if (
+        field.name.includes(body.boundary) ||
+        attachment.fileName.includes(body.boundary) ||
+        attachment.bytes.includes(Buffer.from(body.boundary, "utf8"))
+      ) {
+        throw new Error("Multipart form boundary collides with file content");
+      }
+      append(
+        Buffer.from(
+          `--${body.boundary}\r\nContent-Disposition: form-data; name="${escapeDispositionParameter(field.name)}"; filename="${escapeDispositionParameter(attachment.fileName)}"\r\nContent-Type: ${attachment.contentType}\r\n\r\n`,
+          "utf8",
+        ),
+      );
+      append(attachment.bytes);
+      append(Buffer.from("\r\n", "utf8"));
+      canonicalFields.push({
+        kind: "file",
+        name: field.name,
+        enabled: true,
+        attachment: {
+          attachmentId: attachment.attachmentId,
+          workspaceId: attachment.workspaceId,
+          fileName: attachment.fileName,
+          contentType: attachment.contentType,
+          byteLength: attachment.byteLength,
+          sha256: attachment.sha256,
+        },
+      });
+    }
+    append(Buffer.from(`--${body.boundary}--\r\n`, "utf8"));
+    return {
+      ...request,
+      body: "",
+      bodyBytes: Buffer.concat(chunks),
+      requestBody: { ...body, fields: canonicalFields },
+    };
+  }
+
   /** Returns the optimistic ordering revision shared by one sibling list. */
   async #currentOrderRevision(
     transaction: Transaction<DatabaseSchema>,
@@ -2468,6 +2622,14 @@ export class RequestService {
     const row = await query.executeTakeFirstOrThrow();
     return row.order_revision === null ? 0 : Number(row.order_revision);
   }
+}
+
+/** Reports whether multipart execution must retrieve at least one file blob. */
+function hasEnabledMultipartFile(body: RequestBodyDefinition): boolean {
+  return (
+    body.kind === "multipart" &&
+    body.fields.some((field) => field.enabled && isMultipartFileField(field))
+  );
 }
 
 /** Normalizes an absolute HTTP target URL without query or fragment data. */
@@ -2657,16 +2819,94 @@ function withRequestBodyContentType(
   headers: readonly RequestField[],
   body: RequestBodyDefinition,
 ): readonly RequestField[] {
-  if (body.kind !== "text" || body.contentType === null) return headers;
+  const contentType = requestBodyContentType(body);
+  if (contentType === null) return headers;
   return [
     ...headers.filter((header) => header.name.toLowerCase() !== "content-type"),
     {
       name: "Content-Type",
-      value: body.contentType,
+      value: contentType,
       enabled: true,
       mode: "override",
     },
   ];
+}
+
+/** Returns the effective body-owned media type, including multipart framing. */
+function requestBodyContentType(body: RequestBodyDefinition): string | null {
+  if (body.kind === "none") return null;
+  if (body.kind === "text") return body.contentType;
+  if (body.kind === "urlencoded") {
+    return body.contentType ?? "application/x-www-form-urlencoded";
+  }
+  const mediaType = body.contentType ?? "multipart/form-data";
+  return `${mediaType}; boundary=${body.boundary}`;
+}
+
+/** Serializes the editable body definition into its canonical UTF-8 text. */
+function serializeRequestBody(body: RequestBodyDefinition): string {
+  if (body.kind === "none") return "";
+  if (body.kind === "text") return body.text;
+  if (body.kind === "urlencoded") {
+    const parameters = new URLSearchParams();
+    for (const field of body.fields) {
+      if (field.enabled) parameters.append(field.name, field.value);
+    }
+    return parameters.toString();
+  }
+  const chunks: string[] = [];
+  for (const field of body.fields) {
+    if (!field.enabled) continue;
+    validateMultipartFieldName(field.name);
+    const escapedName = escapeDispositionParameter(field.name);
+    if (isMultipartFileField(field)) {
+      if (
+        field.name.includes(body.boundary) ||
+        field.attachment.fileName.includes(body.boundary)
+      ) {
+        throw new Error("Multipart form boundary collides with field content");
+      }
+      chunks.push(
+        `--${body.boundary}\r\nContent-Disposition: form-data; name="${escapedName}"; filename="${escapeDispositionParameter(field.attachment.fileName)}"\r\nContent-Type: ${field.attachment.contentType}\r\n\r\n[attachment:${field.attachment.attachmentId}]\r\n`,
+      );
+    } else {
+      if (
+        field.name.includes(body.boundary) ||
+        field.value.includes(body.boundary)
+      ) {
+        throw new Error("Multipart form boundary collides with field content");
+      }
+      chunks.push(
+        `--${body.boundary}\r\nContent-Disposition: form-data; name="${escapedName}"\r\n\r\n${field.value}\r\n`,
+      );
+    }
+  }
+  chunks.push(`--${body.boundary}--\r\n`);
+  return chunks.join("");
+}
+
+/** Distinguishes immutable file parts from editable multipart text fields. */
+function isMultipartFileField(
+  field: RequestMultipartField,
+): field is RequestMultipartFileField {
+  return "kind" in field && field.kind === "file";
+}
+
+/** Rejects multipart names that could inject additional MIME headers. */
+function validateMultipartFieldName(value: string): void {
+  if (
+    [...value].some((character) => {
+      const code = character.charCodeAt(0);
+      return code === 0 || code === 10 || code === 13;
+    })
+  ) {
+    throw new Error("Multipart form field name is invalid");
+  }
+}
+
+/** Escapes one quoted Content-Disposition parameter without changing bytes. */
+function escapeDispositionParameter(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
 /** Bounds the raw UTF-8 request body to the control-channel payload limit. */
@@ -2713,7 +2953,99 @@ function validateRequestBody(
       text: validateBody(requestBody.text),
     };
   }
+  if (requestBody.kind === "urlencoded") {
+    const normalized: RequestBodyDefinition = {
+      kind: "urlencoded",
+      contentType: validateBodyContentType(requestBody.contentType),
+      fields: validateQuery(requestBody.fields),
+    };
+    validateBody(serializeRequestBody(normalized));
+    return normalized;
+  }
+  if (requestBody.kind === "multipart") {
+    const contentType = validateBodyContentType(requestBody.contentType);
+    if (
+      typeof requestBody.boundary !== "string" ||
+      !/^[0-9A-Za-z'()+_,./:=?-]{1,70}$/u.test(requestBody.boundary)
+    ) {
+      throw new Error("Multipart form boundary is invalid");
+    }
+    if (contentType !== null && /(?:^|;)\s*boundary\s*=/iu.test(contentType)) {
+      throw new Error("Multipart content type must not declare a boundary");
+    }
+    const normalized: RequestBodyDefinition = {
+      kind: "multipart",
+      contentType,
+      boundary: requestBody.boundary,
+      fields: validateMultipartFields(requestBody.fields),
+    };
+    validateBody(serializeRequestBody(normalized));
+    return normalized;
+  }
   throw new Error("Request body kind is not supported");
+}
+
+/** Validates ordered multipart text/file fields and immutable upload metadata. */
+function validateMultipartFields(fields: unknown): RequestMultipartField[] {
+  if (!Array.isArray(fields)) {
+    throw new Error("Multipart form fields are invalid");
+  }
+  return fields.map((candidate: unknown) => {
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      Array.isArray(candidate)
+    ) {
+      throw new Error("Multipart form fields are invalid");
+    }
+    const item = candidate as Record<string, unknown>;
+    if (item.kind !== "file") {
+      return validateQuery([candidate as RequestField])[0]!;
+    }
+    const attachment = item.attachment as
+      | Partial<RequestAttachmentView>
+      | null
+      | undefined;
+    if (
+      typeof item.name !== "string" ||
+      typeof item.enabled !== "boolean" ||
+      typeof attachment !== "object" ||
+      attachment === null ||
+      typeof attachment.attachmentId !== "string" ||
+      typeof attachment.workspaceId !== "string" ||
+      typeof attachment.fileName !== "string" ||
+      typeof attachment.contentType !== "string" ||
+      attachment.fileName.length === 0 ||
+      attachment.fileName.length > 255 ||
+      /[\0\r\n]/u.test(attachment.fileName) ||
+      attachment.contentType.length === 0 ||
+      attachment.contentType.length > 255 ||
+      /[\0\r\n]/u.test(attachment.contentType) ||
+      typeof attachment.byteLength !== "number" ||
+      !Number.isSafeInteger(attachment.byteLength) ||
+      attachment.byteLength < 0 ||
+      typeof attachment.sha256 !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(attachment.sha256)
+    ) {
+      throw new Error("Multipart file field is invalid");
+    }
+    idToBytes(attachment.attachmentId);
+    idToBytes(attachment.workspaceId);
+    validateMultipartFieldName(item.name);
+    return {
+      kind: "file",
+      name: item.name,
+      enabled: item.enabled,
+      attachment: {
+        attachmentId: attachment.attachmentId,
+        workspaceId: attachment.workspaceId,
+        fileName: attachment.fileName,
+        contentType: attachment.contentType,
+        byteLength: attachment.byteLength,
+        sha256: attachment.sha256,
+      },
+    };
+  });
 }
 
 /** Parses persisted semantic body JSON with a legacy-text recovery path. */
@@ -2761,7 +3093,7 @@ function normalizeExecutionInput(input: RequestExecutionInput): Omit<
     query: validateQuery(input.query),
     headers: validateHeaders(input.headers),
     requestBody,
-    body: requestBody.kind === "text" ? requestBody.text : "",
+    body: validateBody(serializeRequestBody(requestBody)),
     preRequestScript: validateScript(input.preRequestScript ?? ""),
     postResponseScript: validateScript(input.postResponseScript ?? ""),
   };
@@ -2816,29 +3148,108 @@ export function composeWithVariables(
       persisted: { ...field, value: value.secret ? "[secret]" : value.value },
     };
   });
-  const body =
-    request.bodyBytes === undefined && request.bodyPresent
-      ? resolver.interpolate(request.body)
-      : null;
-  if (body !== null) retain(body.secretReferences);
+  let materializedBody: RequestBodyDefinition;
+  let persistedBody: RequestBodyDefinition;
+  if (request.bodyBytes !== undefined || !request.bodyPresent) {
+    materializedBody = { kind: "none" };
+    persistedBody = { kind: "none" };
+  } else if (
+    request.requestBody?.kind === "urlencoded" ||
+    request.requestBody?.kind === "multipart"
+  ) {
+    const fields = request.requestBody.fields.map((field) => {
+      if (!field.enabled) return { materialized: field, persisted: field };
+      const name = resolver.interpolate(field.name);
+      if (isMultipartFileField(field)) {
+        retain(name.secretReferences);
+        return {
+          materialized: { ...field, name: name.value },
+          persisted: {
+            ...field,
+            name: name.secret ? "[secret]" : name.value,
+          },
+        };
+      }
+      const value = resolver.interpolate(field.value);
+      retain(name.secretReferences);
+      retain(value.secretReferences);
+      return {
+        materialized: { ...field, name: name.value, value: value.value },
+        persisted: {
+          ...field,
+          name: name.secret ? "[secret]" : name.value,
+          value: value.secret ? "[secret]" : value.value,
+        },
+      };
+    });
+    const common = {
+      contentType: request.requestBody.contentType,
+      fields: fields.map((field) => field.materialized),
+    };
+    const persistedCommon = {
+      contentType: request.requestBody.contentType,
+      fields: fields.map((field) => field.persisted),
+    };
+    materializedBody =
+      request.requestBody.kind === "urlencoded"
+        ? {
+            kind: "urlencoded",
+            contentType: common.contentType,
+            fields: common.fields as RequestField[],
+          }
+        : {
+            kind: "multipart",
+            boundary: request.requestBody.boundary,
+            ...common,
+          };
+    persistedBody =
+      request.requestBody.kind === "urlencoded"
+        ? {
+            kind: "urlencoded",
+            contentType: persistedCommon.contentType,
+            fields: persistedCommon.fields as RequestField[],
+          }
+        : {
+            kind: "multipart",
+            boundary: request.requestBody.boundary,
+            ...persistedCommon,
+          };
+  } else {
+    const body = resolver.interpolate(request.body);
+    retain(body.secretReferences);
+    const contentType =
+      request.requestBody?.kind === "text"
+        ? request.requestBody.contentType
+        : null;
+    materializedBody = {
+      kind: "text",
+      contentType,
+      text: validateBody(body.value),
+    };
+    persistedBody = {
+      kind: "text",
+      contentType,
+      text: body.secret ? "[secret]" : body.value,
+    };
+  }
+  materializedBody = validateRequestBody(materializedBody, "");
+  persistedBody = validateRequestBody(persistedBody, "");
+  const materializedBodyText =
+    request.bodyBytes === undefined
+      ? serializeRequestBody(materializedBody)
+      : "";
+  const persistedBodyText =
+    request.bodyBytes === undefined
+      ? serializeRequestBody(persistedBody)
+      : `[binary:${Buffer.from(request.bodyBytes).toString("base64")}]`;
   const materialized: ExecutionRequestSnapshot = {
     ...request,
     targetMode: "absolute",
     targetUrl: validateTargetUrl(targetValue),
     query: validateQuery(query.map((field) => field.materialized)),
     headers: validateHeaders(headers.map((field) => field.materialized)),
-    body: body === null ? "" : validateBody(body.value),
-    requestBody:
-      body === null
-        ? { kind: "none" }
-        : {
-            kind: "text",
-            contentType:
-              request.requestBody?.kind === "text"
-                ? request.requestBody.contentType
-                : null,
-            text: validateBody(body.value),
-          },
+    body: materializedBodyText,
+    requestBody: materializedBody,
   };
   return {
     request: materialized,
@@ -2848,23 +3259,8 @@ export function composeWithVariables(
       targetUrl: targetSecret ? "[secret]" : materialized.targetUrl,
       query: query.map((field) => field.persisted),
       headers: headers.map((field) => field.persisted),
-      requestBody:
-        request.bodyPresent && request.bodyBytes === undefined
-          ? {
-              kind: "text",
-              contentType:
-                request.requestBody?.kind === "text"
-                  ? request.requestBody.contentType
-                  : null,
-              text: body?.secret ? "[secret]" : (body?.value ?? ""),
-            }
-          : { kind: "none" },
-      body:
-        request.bodyBytes === undefined
-          ? body?.secret
-            ? "[secret]"
-            : (body?.value ?? "")
-          : `[binary:${Buffer.from(request.bodyBytes).toString("base64")}]`,
+      requestBody: persistedBody,
+      body: persistedBodyText,
       preRequestScript: materialized.preRequestScript,
       postResponseScript: materialized.postResponseScript,
     },

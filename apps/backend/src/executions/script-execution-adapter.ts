@@ -100,11 +100,13 @@ function isSensitiveTemplate(
 export function preRequestScriptView(
   request: PreparedExecution["request"],
   resolver: VariableResolver,
+  template: PreparedExecution["request"] = request,
 ): ScriptRequest {
   const targetTemplate =
     request.targetMode === "composed"
       ? joinTargetComponents(request.targetComponents ?? [request.targetUrl])
       : request.targetUrl;
+  const bodySensitive = isSensitiveBodyTemplate(template, resolver);
   return {
     method: request.method,
     url: {
@@ -126,13 +128,13 @@ export function preRequestScriptView(
               kind: "text",
               text: request.body,
               readable: true,
-              sensitive: isSensitiveTemplate(request.body, resolver),
+              sensitive: bodySensitive,
             }
           : {
               kind: "binary",
               bytes: request.bodyBytes,
               readable: true,
-              sensitive: false,
+              sensitive: bodySensitive,
             },
   };
 }
@@ -183,6 +185,17 @@ export function executionRequestFromScript(
     return { name: header.name, value: header.value, enabled: true };
   });
   const body = scripted.body;
+  const scriptedText = body.kind === "text" ? (body.text ?? "") : "";
+  const preserveStructuredForm =
+    body.kind === "text" &&
+    (original.requestBody?.kind === "urlencoded" ||
+      original.requestBody?.kind === "multipart") &&
+    scriptedText === original.body;
+  const bodyContentType =
+    original.headers.find(
+      (header) =>
+        header.enabled && header.name.toLowerCase() === "content-type",
+    )?.value ?? null;
   const { bodyBytes: previousBodyBytes, ...originalWithoutBodyBytes } =
     original;
   void previousBodyBytes;
@@ -194,17 +207,15 @@ export function executionRequestFromScript(
     targetComponents: [targetUrl],
     query,
     headers,
-    body: body.kind === "text" ? (body.text ?? "") : "",
+    body: scriptedText,
     bodyPresent: body.kind !== "none",
-    requestBody:
-      body.kind === "text"
+    requestBody: preserveStructuredForm
+      ? original.requestBody
+      : body.kind === "text"
         ? {
             kind: "text",
-            contentType:
-              original.requestBody?.kind === "text"
-                ? original.requestBody.contentType
-                : null,
-            text: body.text ?? "",
+            contentType: bodyContentType,
+            text: scriptedText,
           }
         : { kind: "none" },
     ...(body.kind === "binary" && body.bytes !== undefined
@@ -232,7 +243,7 @@ export function postResponseScriptView(
     materialized.targetUrl,
     materialized.query,
   );
-  const bodySensitive = isSensitiveTemplate(template.body, resolver);
+  const bodySensitive = isSensitiveBodyTemplate(template, resolver);
   return {
     method: materialized.method,
     url: {
@@ -262,11 +273,30 @@ export function postResponseScriptView(
           }
         : {
             kind: "binary",
-            bytes: materialized.bodyBytes,
-            readable: true,
-            sensitive: false,
+            readable: !bodySensitive,
+            sensitive: bodySensitive,
+            ...(bodySensitive ? {} : { bytes: materialized.bodyBytes }),
           },
   };
+}
+
+/** Detects secrets in raw text or structured text-form body templates. */
+function isSensitiveBodyTemplate(
+  request: PreparedExecution["request"],
+  resolver: VariableResolver,
+): boolean {
+  if (
+    request.requestBody?.kind === "urlencoded" ||
+    request.requestBody?.kind === "multipart"
+  ) {
+    return request.requestBody.fields.some(
+      (field) =>
+        field.enabled &&
+        (isSensitiveTemplate(field.name, resolver) ||
+          (!("kind" in field) && isSensitiveTemplate(field.value, resolver))),
+    );
+  }
+  return isSensitiveTemplate(request.body, resolver);
 }
 
 /** Converts a sandbox failure to an execution-phase error without diagnostics. */

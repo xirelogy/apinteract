@@ -20,6 +20,7 @@ const REQUEST_VERSIONS_MIGRATION = "0010_request_versions";
 const COMPOSED_TARGETS_MIGRATION = "0011_composed_targets";
 const ENVIRONMENT_COMPOSITION_MIGRATION = "0012_environment_composition";
 const REQUEST_BODY_DEFINITION_MIGRATION = "0013_request_body_definition";
+const REQUEST_ATTACHMENTS_MIGRATION = "0014_request_attachments";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -166,6 +167,22 @@ CREATE TABLE blob_references (
   created_at INTEGER NOT NULL,
   PRIMARY KEY(blob_id, owner_kind, owner_id)
 ) WITHOUT ROWID, STRICT;
+
+CREATE TABLE request_attachments (
+  id BLOB PRIMARY KEY CHECK(length(id) = 16),
+  workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  provider_id TEXT NOT NULL,
+  storage_key TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK(state IN ('available', 'missing')),
+  file_name TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  byte_length INTEGER NOT NULL CHECK(byte_length >= 0),
+  sha256 TEXT NOT NULL,
+  created_by BLOB NOT NULL REFERENCES users(id),
+  created_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX request_attachments_workspace_created
+  ON request_attachments(workspace_id, created_at, id);
 
 CREATE TABLE audit_outbox (
   id BLOB PRIMARY KEY CHECK(length(id) = 16),
@@ -360,6 +377,16 @@ export class SqliteDatabase {
     ) {
       this.#migrateRequestBodyDefinition();
     }
+
+    const requestAttachmentsApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(REQUEST_ATTACHMENTS_MIGRATION);
+    if (
+      requestAttachmentsApplied === undefined ||
+      !this.#tableExists("request_attachments")
+    ) {
+      this.#migrateRequestAttachments();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -401,8 +428,21 @@ export class SqliteDatabase {
         COMPOSED_TARGETS_MIGRATION,
         ENVIRONMENT_COMPOSITION_MIGRATION,
         REQUEST_BODY_DEFINITION_MIGRATION,
+        REQUEST_ATTACHMENTS_MIGRATION,
       ].some((identifier) => !identifiers.has(identifier)) ||
-      !this.#columnExists("request_drafts", "body_json")
+      !this.#columnExists("request_drafts", "body_json") ||
+      !this.#tableExists("request_attachments")
+    );
+  }
+
+  /** Reports whether one physical table exists in the current database. */
+  #tableExists(table: string): boolean {
+    return (
+      this.#driver
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+        )
+        .get(table) !== undefined
     );
   }
 
@@ -888,6 +928,37 @@ export class SqliteDatabase {
         .get(REQUEST_BODY_DEFINITION_MIGRATION);
       if (applied === undefined) {
         this.#recordMigration(REQUEST_BODY_DEFINITION_MIGRATION);
+      }
+    })();
+  }
+
+  /** Adds immutable workspace-owned file uploads referenced by request bodies. */
+  #migrateRequestAttachments(): void {
+    this.#driver.transaction(() => {
+      if (!this.#tableExists("request_attachments")) {
+        this.#driver.exec(`
+          CREATE TABLE request_attachments (
+            id BLOB PRIMARY KEY CHECK(length(id) = 16),
+            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            provider_id TEXT NOT NULL,
+            storage_key TEXT NOT NULL UNIQUE,
+            state TEXT NOT NULL CHECK(state IN ('available', 'missing')),
+            file_name TEXT NOT NULL,
+            content_type TEXT NOT NULL,
+            byte_length INTEGER NOT NULL CHECK(byte_length >= 0),
+            sha256 TEXT NOT NULL,
+            created_by BLOB NOT NULL REFERENCES users(id),
+            created_at INTEGER NOT NULL
+          ) STRICT;
+          CREATE INDEX request_attachments_workspace_created
+            ON request_attachments(workspace_id, created_at, id);
+        `);
+      }
+      const applied = this.#driver
+        .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+        .get(REQUEST_ATTACHMENTS_MIGRATION);
+      if (applied === undefined) {
+        this.#recordMigration(REQUEST_ATTACHMENTS_MIGRATION);
       }
     })();
   }

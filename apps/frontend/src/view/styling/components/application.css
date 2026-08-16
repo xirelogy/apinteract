@@ -1306,6 +1306,98 @@
   background: var(--surface-code);
 }
 
+.request-form-fields {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.form-value-field {
+  position: relative;
+  min-width: 0;
+}
+
+.form-value-field > :is(.field-template-input, .request-file-part) {
+  width: 100%;
+}
+
+.form-value-field > .form-value-type-toggle {
+  position: absolute;
+  z-index: 2;
+  inset-block-start: 0.0625rem;
+  inset-inline-start: 0.0625rem;
+  width: calc(var(--control-height-compact) - 0.125rem);
+  min-height: calc(var(--control-height-compact) - 0.125rem);
+}
+
+.form-value-field.has-value-type-toggle
+  :is(
+    .template-text-control-input,
+    .template-text-control-mirror-content,
+    .request-file-part
+  ) {
+  padding-inline-start: calc(var(--control-height-compact) + var(--space-1));
+}
+
+.form-value-type-toggle[data-type="file"] {
+  color: var(--accent-primary);
+  background: var(--surface-selected);
+}
+
+.request-file-part {
+  display: grid;
+  align-content: center;
+  text-align: start;
+  min-width: 0;
+  min-height: var(--control-height-compact);
+  padding-inline: var(--space-2);
+  color: inherit;
+  font: inherit;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-secondary);
+  cursor: pointer;
+}
+
+.request-file-part:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.request-file-part-empty {
+  display: block;
+  overflow: hidden;
+  color: var(--accent-primary);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.request-file-name,
+.request-file-metadata {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.request-file-name {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.request-file-metadata {
+  color: var(--text-secondary);
+  font-size: var(--font-size-2xs);
+}
+
+.request-form-fields .request-field-heading {
+  padding-block: var(--space-1);
+  background: var(--surface-primary);
+}
+
 .request-body-empty {
   margin: 0;
   padding: var(--space-4);
