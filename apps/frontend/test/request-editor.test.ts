@@ -285,6 +285,103 @@ describe("RequestEditor", () => {
     });
   });
 
+  it("uses an uploaded file as the complete body with an overridable media type", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const attachment = {
+      attachmentId: "019facab-1eee-765f-bd9f-ac2449151cf4",
+      workspaceId: "019facab-1eee-765f-bd9f-ac2449151cf5",
+      fileName: "pixel.png",
+      contentType: "image/png",
+      byteLength: 4,
+      sha256: "b".repeat(64),
+    };
+    const uploadAttachment = vi.fn().mockResolvedValue(attachment);
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft: {
+          name: "Binary request",
+          method: "POST",
+          targetMode: "absolute",
+          targetUrl: "https://example.test/binary",
+          query: [],
+          headers: [],
+          body: "",
+          requestBody: { kind: "none" },
+          preRequestScript: "",
+          postResponseScript: "",
+        },
+        execution: null,
+        tabId: "019facab-1eee-765f-bd9f-ac2449151cf6",
+        temporary: true,
+        inheritedHeaders: [],
+        busy: false,
+        uploadAttachment,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Body"))
+      ?.trigger("click");
+    const bodyType = wrapper
+      .findAllComponents(SelectMenu)
+      .find((select) => select.props("label") === "Content type");
+    const bodyTypeOptions = bodyType?.props("options") as
+      | Array<{ value: string; label: string }>
+      | undefined;
+    expect(bodyTypeOptions?.at(-1)).toEqual({
+      value: "file",
+      label: "Binary File",
+    });
+    bodyType?.vm.$emit("update:modelValue", "file");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.text()).toContain("Choose file");
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Choose file"))
+      ?.trigger("click");
+
+    const file = new File([new Uint8Array([137, 80, 78, 71])], "pixel.png", {
+      type: "image/png",
+    });
+    const fileInput = wrapper.get<HTMLInputElement>('input[type="file"]');
+    Object.defineProperty(fileInput.element, "files", {
+      configurable: true,
+      value: [file],
+    });
+    await fileInput.trigger("change");
+    await flushPromises();
+
+    expect(uploadAttachment).toHaveBeenCalledWith(file);
+    expect(wrapper.get(".request-file-name").text()).toBe("pixel.png");
+    const contentType = wrapper.get<HTMLInputElement>(
+      'input[aria-label="Content type override"]',
+    );
+    expect(contentType.attributes("placeholder")).toBe("image/png");
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      requestBody: {
+        kind: "file",
+        contentType: null,
+        attachment,
+      },
+    });
+
+    await contentType.setValue("application/vnd.example.payload");
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      requestBody: {
+        kind: "file",
+        contentType: "application/vnd.example.payload",
+        attachment,
+      },
+    });
+  });
+
   it("edits URL-encoded and multipart bodies as ordered form fields", async () => {
     const i18n = createI18n({
       legacy: false,

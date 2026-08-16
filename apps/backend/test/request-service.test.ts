@@ -279,7 +279,84 @@ describe("RequestService draft updates", () => {
           ],
         },
       });
+      const directFile = await requests.prepareTemporaryExecution(
+        userId,
+        createEntityId(),
+        workspace.workspaceId,
+        null,
+        {
+          method: "POST",
+          targetUrl: "https://example.test/binary-body",
+          query: [],
+          headers: [],
+          body: "",
+          requestBody: {
+            kind: "file",
+            contentType: null,
+            attachment,
+          },
+        },
+      );
+      expect(Buffer.from(directFile.request.bodyBytes ?? [])).toEqual(
+        attachmentBytes,
+      );
+      expect(directFile.request.requestBody).toEqual({
+        kind: "file",
+        contentType: null,
+        attachment,
+      });
+      expect(directFile.request.headers).toContainEqual({
+        name: "Content-Type",
+        value: "application/octet-stream",
+        enabled: true,
+        mode: "override",
+      });
+
+      const overriddenDirectFile = await requests.prepareTemporaryExecution(
+        userId,
+        createEntityId(),
+        workspace.workspaceId,
+        null,
+        {
+          method: "POST",
+          targetUrl: "https://example.test/custom-binary-body",
+          query: [],
+          headers: [],
+          body: "",
+          requestBody: {
+            kind: "file",
+            contentType: "application/vnd.example.payload",
+            attachment,
+          },
+        },
+      );
+      expect(overriddenDirectFile.request.headers).toContainEqual({
+        name: "Content-Type",
+        value: "application/vnd.example.payload",
+        enabled: true,
+        mode: "override",
+      });
       const otherWorkspace = await workspaces.create(userId, "Other workspace");
+      await expect(
+        requests.prepareTemporaryExecution(
+          userId,
+          createEntityId(),
+          otherWorkspace.workspaceId,
+          null,
+          {
+            method: "POST",
+            targetUrl: "https://example.test/cross-workspace-file-body",
+            query: [],
+            headers: [],
+            body: "",
+            requestBody: {
+              kind: "file",
+              contentType: null,
+              attachment,
+            },
+          },
+        ),
+      ).rejects.toThrow("attachment is unavailable");
       await expect(
         requests.prepareTemporaryExecution(
           userId,

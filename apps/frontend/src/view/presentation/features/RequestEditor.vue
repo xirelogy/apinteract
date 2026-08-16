@@ -141,6 +141,7 @@ const bodyTypeOptions = computed(() => [
   { value: "json", label: t("request.bodyTypes.json") },
   { value: "urlencoded", label: t("request.bodyTypes.urlencoded") },
   { value: "multipart", label: t("request.bodyTypes.multipart") },
+  { value: "file", label: t("request.bodyTypes.file") },
 ]);
 const requestTabs = [
   "query",
@@ -157,10 +158,19 @@ const targetMode = ref<"absolute" | "composed">("composed");
 const targetUrl = ref("");
 const query = ref<RequestField[]>([]);
 const headers = ref<RequestField[]>([]);
-type BodyEditorKind = "none" | "text" | "json" | "urlencoded" | "multipart";
+type BodyEditorKind =
+  | "none"
+  | "text"
+  | "json"
+  | "file"
+  | "urlencoded"
+  | "multipart";
 const bodyKind = ref<BodyEditorKind>("none");
 const bodyText = ref("");
 const bodyContentType = ref("");
+const bodyFileAttachment = ref<RequestAttachment | null>(null);
+const bodyFileInput = ref<HTMLInputElement | null>(null);
+const uploadingBodyFile = ref(false);
 interface PendingMultipartFileField {
   readonly kind: "pending-file";
   name: string;
@@ -209,6 +219,8 @@ watch(
     const requestBody = bodyDefinitionFromSource(source);
     bodyKind.value = bodyEditorKind(requestBody);
     bodyText.value = requestBody.kind === "text" ? requestBody.text : "";
+    bodyFileAttachment.value =
+      requestBody.kind === "file" ? { ...requestBody.attachment } : null;
     bodyContentType.value =
       requestBody.kind === "none" ? "" : (requestBody.contentType ?? "");
     formFields.value = editableFormFields(
@@ -274,12 +286,20 @@ const generatedContentType = computed(() => {
   if (bodyKind.value === "text" || bodyKind.value === "json") {
     return override || null;
   }
+  if (bodyKind.value === "file") {
+    return override || bodyFileAttachment.value?.contentType || null;
+  }
   const contentType = override || defaultContentType(bodyKind.value);
   if (contentType === "") return null;
   return bodyKind.value === "multipart"
     ? `${contentType}; boundary=${multipartBoundary.value}`
     : contentType;
 });
+const bodyContentTypePlaceholder = computed(() =>
+  bodyKind.value === "file"
+    ? (bodyFileAttachment.value?.contentType ?? "application/octet-stream")
+    : defaultContentType(bodyKind.value),
+);
 const overriddenInheritedHeaderNames = computed(() => {
   const names = new Set<string>();
   for (const header of meaningfulRequestFields(headers.value)) {
@@ -725,6 +745,15 @@ function currentRequestBody(): RequestBodyDefinition {
       text: bodyText.value,
     };
   }
+  if (bodyKind.value === "file") {
+    return bodyFileAttachment.value === null
+      ? { kind: "none" }
+      : {
+          kind: "file",
+          contentType,
+          attachment: { ...bodyFileAttachment.value },
+        };
+  }
   return bodyKind.value === "urlencoded"
     ? {
         kind: "urlencoded",
@@ -797,9 +826,16 @@ function selectBodyKind(value: string): void {
     value !== "none" &&
     value !== "text" &&
     value !== "json" &&
+    value !== "file" &&
     value !== "urlencoded" &&
     value !== "multipart"
   ) {
+    return;
+  }
+  if (value === "file" && bodyKind.value !== "file") {
+    bodyKind.value = "file";
+    bodyContentType.value = "";
+    bodyFileAttachment.value = null;
     return;
   }
   if (bodyKind.value !== value && value !== "none") {
@@ -809,7 +845,49 @@ function selectBodyKind(value: string): void {
         : defaultContentType(value);
   }
   bodyKind.value = value;
+  if (value !== "file") bodyFileAttachment.value = null;
   emitChange();
+}
+
+/** Publishes a media-type override once the selected body has actual bytes. */
+function updateBodyContentType(): void {
+  if (bodyKind.value === "file" && bodyFileAttachment.value === null) return;
+  emitChange();
+}
+
+/** Reports whether complete-body file selection is currently unavailable. */
+function bodyFileSelectionDisabled(): boolean {
+  return (
+    editorDisabled.value ||
+    uploadingBodyFile.value ||
+    props.uploadAttachment === null
+  );
+}
+
+/** Opens the native picker for the complete binary request body. */
+function chooseBodyFile(): void {
+  bodyFileInput.value?.click();
+}
+
+/** Uploads one file and assigns its immutable bytes as the complete body. */
+async function attachBodyFile(event: Event): Promise<void> {
+  const input = event.currentTarget;
+  if (!(input instanceof HTMLInputElement) || props.uploadAttachment === null) {
+    return;
+  }
+  const file = input.files?.[0];
+  input.value = "";
+  if (file === undefined) return;
+  uploadingBodyFile.value = true;
+  try {
+    bodyFileAttachment.value = await props.uploadAttachment(file);
+    bodyKind.value = "file";
+    emitChange();
+  } catch {
+    // The controller publishes the safe application error; keep replacement usable.
+  } finally {
+    uploadingBodyFile.value = false;
+  }
 }
 
 /** Returns the translated label for a request settings tab. */
@@ -1367,11 +1445,11 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 density="compact"
                 font="mono"
                 :aria-label="t('request.contentTypeOverride')"
-                :placeholder="defaultContentType(bodyKind)"
+                :placeholder="bodyContentTypePlaceholder"
                 autocomplete="off"
                 spellcheck="false"
                 :disabled="editorDisabled"
-                @input="emitChange"
+                @input="updateBodyContentType"
               />
             </div>
             <p v-if="bodyKind === 'none'" class="request-body-empty">
@@ -1386,6 +1464,48 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               :disabled="editorDisabled"
               @input="emitChange"
             />
+            <div v-else-if="bodyKind === 'file'" class="request-body-file">
+              <input
+                ref="bodyFileInput"
+                class="visually-hidden"
+                type="file"
+                tabindex="-1"
+                aria-hidden="true"
+                :disabled="bodyFileSelectionDisabled()"
+                @change="attachBodyFile"
+              />
+              <ButtonControl
+                v-if="bodyFileAttachment === null"
+                size="compact"
+                variant="secondary"
+                :busy="uploadingBodyFile"
+                :disabled="bodyFileSelectionDisabled()"
+                @click="chooseBodyFile"
+              >
+                {{ t("request.chooseBodyFile") }}
+              </ButtonControl>
+              <button
+                v-else
+                type="button"
+                class="request-file-part"
+                :aria-label="
+                  t('request.replaceBodyFile', {
+                    fileName: bodyFileAttachment.fileName,
+                  })
+                "
+                :title="bodyFileAttachment.fileName"
+                :disabled="bodyFileSelectionDisabled()"
+                @click="chooseBodyFile"
+              >
+                <span class="request-file-name">
+                  {{ bodyFileAttachment.fileName }}
+                </span>
+                <span class="request-file-metadata">
+                  {{ bodyFileAttachment.contentType }} ·
+                  {{ formatAttachmentSize(bodyFileAttachment.byteLength) }}
+                </span>
+              </button>
+            </div>
             <div v-else class="request-form-fields">
               <input
                 v-if="bodyKind === 'multipart'"

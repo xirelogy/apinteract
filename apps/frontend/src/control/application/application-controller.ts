@@ -1411,6 +1411,9 @@ function cloneDraft(draft: RequestDraftInput): RequestDraftInput {
 
 /** Clones semantic body definitions, including ordered structured form fields. */
 function cloneRequestBody(body: RequestBodyDefinition): RequestBodyDefinition {
+  if (body.kind === "file") {
+    return { ...body, attachment: { ...body.attachment } };
+  }
   if (body.kind === "urlencoded") {
     return { ...body, fields: body.fields.map((field) => ({ ...field })) };
   }

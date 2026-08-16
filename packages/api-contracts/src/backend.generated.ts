@@ -100,7 +100,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Upload an immutable file for multipart request bodies */
+    /** Upload an immutable file for request bodies */
     post: operations["uploadRequestAttachment"];
     delete?: never;
     options?: never;
@@ -1041,10 +1041,11 @@ export interface components {
       effectiveHeaders: components["schemas"]["RequestField"][];
       revision: number;
     };
-    /** @description Editable request body semantics before interpolation and UTF-8 encoding. */
+    /** @description Editable request body semantics before interpolation or attachment byte retrieval. */
     RequestBodyDefinition:
       | components["schemas"]["NoRequestBody"]
       | components["schemas"]["TextRequestBody"]
+      | components["schemas"]["FileRequestBody"]
       | components["schemas"]["UrlEncodedRequestBody"]
       | components["schemas"]["MultipartRequestBody"];
     NoRequestBody: {
@@ -1057,6 +1058,14 @@ export interface components {
       /** @description Optional body-owned media type applied as the effective Content-Type during execution. */
       contentType: string | null;
       text: string;
+    };
+    /** @description An immutable uploaded file used as the complete binary request body. */
+    FileRequestBody: {
+      /** @constant */
+      kind: "file";
+      /** @description Optional media type override; the attachment media type is used by default. */
+      contentType: string | null;
+      attachment: components["schemas"]["RequestAttachment"];
     };
     /** @description Ordered text fields encoded as application/x-www-form-urlencoded after interpolation. */
     UrlEncodedRequestBody: {
@@ -1077,7 +1086,7 @@ export interface components {
         | components["schemas"]["MultipartFileField"]
       )[];
     };
-    /** @description Immutable workspace-owned upload metadata referenced by multipart file fields. */
+    /** @description Immutable workspace-owned upload metadata referenced by request bodies or multipart file fields. */
     RequestAttachment: {
       attachmentId: components["schemas"]["RequestAttachmentId"];
       workspaceId: components["schemas"]["WorkspaceId"];

@@ -154,7 +154,7 @@ export async function registerHttpRoutes(
     },
   );
 
-  /** Stores one immutable workspace-owned file for multipart request reuse. */
+  /** Stores one immutable workspace-owned file for request-body reuse. */
   server.post<{
     Params: { workspaceId: string };
     Headers: {

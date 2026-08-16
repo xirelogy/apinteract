@@ -196,7 +196,7 @@
       "post": {
         "tags": ["Requests"],
         "operationId": "uploadRequestAttachment",
-        "summary": "Upload an immutable file for multipart request bodies",
+        "summary": "Upload an immutable file for request bodies",
         "security": [{ "accessToken": [] }],
         "parameters": [
           {
@@ -2594,10 +2594,11 @@
         }
       },
       "RequestBodyDefinition": {
-        "description": "Editable request body semantics before interpolation and UTF-8 encoding.",
+        "description": "Editable request body semantics before interpolation or attachment byte retrieval.",
         "oneOf": [
           { "$ref": "#/components/schemas/NoRequestBody" },
           { "$ref": "#/components/schemas/TextRequestBody" },
+          { "$ref": "#/components/schemas/FileRequestBody" },
           { "$ref": "#/components/schemas/UrlEncodedRequestBody" },
           { "$ref": "#/components/schemas/MultipartRequestBody" }
         ]
@@ -2624,6 +2625,23 @@
             "description": "Optional body-owned media type applied as the effective Content-Type during execution."
           },
           "text": { "type": "string", "maxLength": 786432 }
+        }
+      },
+      "FileRequestBody": {
+        "description": "An immutable uploaded file used as the complete binary request body.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "contentType", "attachment"],
+        "properties": {
+          "kind": { "type": "string", "const": "file" },
+          "contentType": {
+            "description": "Optional media type override; the attachment media type is used by default.",
+            "oneOf": [
+              { "type": "string", "minLength": 1, "maxLength": 512 },
+              { "type": "null" }
+            ]
+          },
+          "attachment": { "$ref": "#/components/schemas/RequestAttachment" }
         }
       },
       "UrlEncodedRequestBody": {
@@ -2677,7 +2695,7 @@
         }
       },
       "RequestAttachment": {
-        "description": "Immutable workspace-owned upload metadata referenced by multipart file fields.",
+        "description": "Immutable workspace-owned upload metadata referenced by request bodies or multipart file fields.",
         "type": "object",
         "additionalProperties": false,
         "required": [

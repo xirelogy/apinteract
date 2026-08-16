@@ -1306,6 +1306,16 @@
   background: var(--surface-code);
 }
 
+.request-body-file {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.request-body-file > .request-file-part {
+  width: 100%;
+}
+
 .request-form-fields {
   min-width: 0;
   min-height: 0;

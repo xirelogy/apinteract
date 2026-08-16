@@ -13,6 +13,7 @@ import {
 } from "../environments/environment-service.js";
 import { VariableResolutionError } from "../environments/variable-resolver.js";
 import { createEntityId } from "../foundation/id.js";
+import type { RequestAttachmentView } from "../requests/request-attachment-service.js";
 import {
   CollectionProfileConflictError,
   DraftConflictError,
@@ -886,6 +887,7 @@ function optionalRequestBody(
   }
   if (
     body.kind !== "text" &&
+    body.kind !== "file" &&
     body.kind !== "urlencoded" &&
     body.kind !== "multipart"
   ) {
@@ -899,6 +901,23 @@ function optionalRequestBody(
       "validation_failed",
       "requestBody.contentType must be a string or null.",
     );
+  }
+  if (body.kind === "file") {
+    if (
+      Object.keys(body).some(
+        (key) => !["kind", "contentType", "attachment"].includes(key),
+      )
+    ) {
+      throw new CommandError(
+        "validation_failed",
+        "A file requestBody contains an unsupported field.",
+      );
+    }
+    return {
+      kind: "file",
+      contentType: body.contentType,
+      attachment: requireRequestAttachment(body.attachment),
+    };
   }
   if (body.kind === "urlencoded" || body.kind === "multipart") {
     const allowed =
@@ -970,35 +989,44 @@ function requireMultipartFields(value: unknown): RequestMultipartField[] {
     if (item.kind !== "file") {
       return requireRequestFields([field], "requestBody.fields")[0]!;
     }
-    const attachment = item.attachment;
-    if (
-      typeof item.name !== "string" ||
-      typeof item.enabled !== "boolean" ||
-      typeof attachment !== "object" ||
-      attachment === null ||
-      Array.isArray(attachment)
-    ) {
+    if (typeof item.name !== "string" || typeof item.enabled !== "boolean") {
       throw new CommandError(
         "validation_failed",
         "requestBody.fields contains an invalid file field.",
       );
     }
-    const metadata = attachment as Record<string, unknown>;
-    if (
-      typeof metadata.attachmentId !== "string" ||
-      typeof metadata.workspaceId !== "string" ||
-      typeof metadata.fileName !== "string" ||
-      typeof metadata.contentType !== "string" ||
-      typeof metadata.byteLength !== "number" ||
-      typeof metadata.sha256 !== "string"
-    ) {
-      throw new CommandError(
-        "validation_failed",
-        "requestBody.fields contains invalid attachment metadata.",
-      );
-    }
-    return field as RequestMultipartField;
+    return {
+      kind: "file",
+      name: item.name,
+      enabled: item.enabled,
+      attachment: requireRequestAttachment(item.attachment),
+    };
   });
+}
+
+/** Validates immutable upload metadata embedded in a request definition. */
+function requireRequestAttachment(value: unknown): RequestAttachmentView {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new CommandError(
+      "validation_failed",
+      "requestBody contains invalid attachment metadata.",
+    );
+  }
+  const metadata = value as Record<string, unknown>;
+  if (
+    typeof metadata.attachmentId !== "string" ||
+    typeof metadata.workspaceId !== "string" ||
+    typeof metadata.fileName !== "string" ||
+    typeof metadata.contentType !== "string" ||
+    typeof metadata.byteLength !== "number" ||
+    typeof metadata.sha256 !== "string"
+  ) {
+    throw new CommandError(
+      "validation_failed",
+      "requestBody contains invalid attachment metadata.",
+    );
+  }
+  return value as RequestAttachmentView;
 }
 
 /** Requires a bounded JavaScript source string, including a disabled blank. */

@@ -11,7 +11,7 @@ export const MAX_REQUEST_ATTACHMENT_BYTES = 786_432;
 /** Raised when upload metadata or bytes violate the public attachment contract. */
 export class RequestAttachmentValidationError extends Error {}
 
-/** Public immutable metadata stored inside multipart request definitions. */
+/** Public immutable metadata referenced by structured request definitions. */
 export interface RequestAttachmentView {
   readonly attachmentId: EntityId;
   readonly workspaceId: EntityId;
