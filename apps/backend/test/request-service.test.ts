@@ -73,6 +73,7 @@ describe("RequestService draft updates", () => {
         [],
         "",
       );
+      expect(original.requestBody).toEqual({ kind: "none" });
 
       const unchanged = await requests.update(
         userId,
@@ -119,6 +120,11 @@ describe("RequestService draft updates", () => {
           expectedRevision: variableProfile.revision,
           variables: [{ ...sourceVariable, value: "after" }],
         },
+        {
+          kind: "text",
+          contentType: "application/merge-patch+json",
+          text: '{"hello":"<<source>>"}',
+        },
       );
 
       expect(changed.draftRevision).toBe(1);
@@ -135,7 +141,12 @@ describe("RequestService draft updates", () => {
           mode: "override",
         },
       ]);
-      expect(changed.body).toBe('{"hello":"world"}');
+      expect(changed.body).toBe('{"hello":"<<source>>"}');
+      expect(changed.requestBody).toEqual({
+        kind: "text",
+        contentType: "application/merge-patch+json",
+        text: '{"hello":"<<source>>"}',
+      });
       await expect(
         variables.get(userId, "request", original.requestId),
       ).resolves.toMatchObject({
@@ -145,6 +156,22 @@ describe("RequestService draft updates", () => {
         ],
       });
       expect(await audit.pendingCount()).toBe(5);
+
+      const savedExecution = await requests.prepareExecution(
+        userId,
+        createEntityId(),
+        original.requestId,
+      );
+      expect(savedExecution.request.bodyPresent).toBe(true);
+      expect(savedExecution.request.body).toBe('{"hello":"after"}');
+      expect(savedExecution.request.headers).toEqual([
+        {
+          name: "Content-Type",
+          value: "application/merge-patch+json",
+          enabled: true,
+          mode: "override",
+        },
+      ]);
 
       await expect(
         requests.update(
@@ -183,7 +210,21 @@ describe("RequestService draft updates", () => {
           targetUrl: "https://example.test/temporary",
           query: [],
           headers: [],
-          body: "temporary body",
+          requestBody: { kind: "text", contentType: null, text: "" },
+          body: "",
+        },
+      );
+      const noBody = await requests.prepareTemporaryExecution(
+        userId,
+        createEntityId(),
+        workspace.workspaceId,
+        null,
+        {
+          method: "POST",
+          targetUrl: "https://example.test/no-body",
+          query: [],
+          headers: [],
+          body: "",
         },
       );
       const execution = await database.db
@@ -193,10 +234,12 @@ describe("RequestService draft updates", () => {
         .executeTakeFirstOrThrow();
 
       expect(temporary.request.requestId).toBeUndefined();
+      expect(temporary.request.bodyPresent).toBe(true);
+      expect(noBody.request.bodyPresent).toBe(false);
       expect(bytesToId(execution.workspace_id)).toBe(workspace.workspaceId);
       expect(execution.request_id).toBeNull();
       expect(execution.request_revision_id).toBeNull();
-      expect(await audit.pendingCount()).toBe(6);
+      expect(await audit.pendingCount()).toBe(8);
     } finally {
       await database.close();
       await rm(rootPath, { recursive: true, force: true });
@@ -701,7 +744,12 @@ describe("RequestService draft updates", () => {
         "https://example.test/second",
         [{ name: "page", value: "2", enabled: true }],
         [{ name: "X-Local", value: "second", enabled: true }],
-        "second",
+        "",
+        "",
+        "",
+        "absolute",
+        null,
+        { kind: "text", contentType: "application/json", text: "" },
       );
       const [firstRevision] = await requests.listRevisions(
         userId,
@@ -730,7 +778,12 @@ describe("RequestService draft updates", () => {
         request: {
           method: "POST",
           targetUrl: "https://example.test/second",
-          body: "second",
+          body: "",
+          requestBody: {
+            kind: "text",
+            contentType: "application/json",
+            text: "",
+          },
           headers: [{ name: "X-Local", value: "second", enabled: true }],
         },
       });
@@ -754,7 +807,12 @@ describe("RequestService draft updates", () => {
       expect(restored).toMatchObject({
         method: "POST",
         targetUrl: "https://example.test/second",
-        body: "second",
+        body: "",
+        requestBody: {
+          kind: "text",
+          contentType: "application/json",
+          text: "",
+        },
       });
       const prepared = await requests.prepareRevisionExecution(
         userId,
@@ -766,7 +824,19 @@ describe("RequestService draft updates", () => {
       expect(prepared.request).toMatchObject({
         method: "POST",
         targetUrl: "https://example.test/second",
-        body: "second",
+        body: "",
+        bodyPresent: true,
+        requestBody: {
+          kind: "text",
+          contentType: "application/json",
+          text: "",
+        },
+      });
+      expect(prepared.request.headers).toContainEqual({
+        name: "Content-Type",
+        value: "application/json",
+        enabled: true,
+        mode: "override",
       });
       expect(
         await requests.listRevisions(userId, request.requestId),

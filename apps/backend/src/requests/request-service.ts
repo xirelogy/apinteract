@@ -59,6 +59,15 @@ export interface RequestField {
   readonly mode?: "override" | "append";
 }
 
+/** Describes an editable request body before interpolation and byte encoding. */
+export type RequestBodyDefinition =
+  | { readonly kind: "none" }
+  | {
+      readonly kind: "text";
+      readonly contentType: string | null;
+      readonly text: string;
+    };
+
 export interface CollectionView {
   readonly collectionId: EntityId;
   readonly workspaceId: EntityId;
@@ -90,6 +99,9 @@ export interface RequestView {
   readonly headers: readonly RequestField[];
   /** Contains effective collection headers before request-local overrides. */
   readonly inheritedHeaders: readonly RequestField[];
+  /** Preferred semantic body representation for current clients. */
+  readonly requestBody: RequestBodyDefinition;
+  /** Legacy text projection retained for protocol compatibility. */
   readonly body: string;
   readonly preRequestScript: string;
   readonly postResponseScript: string;
@@ -116,6 +128,7 @@ export interface RequestExecutionInput {
   readonly targetUrl: string;
   readonly query: readonly RequestField[];
   readonly headers: readonly RequestField[];
+  readonly requestBody?: RequestBodyDefinition;
   readonly body: string;
   readonly preRequestScript?: string;
   readonly postResponseScript?: string;
@@ -132,6 +145,8 @@ export interface ExecutionRequestSnapshot extends RequestExecutionInput {
   readonly requestId?: EntityId;
   readonly targetMode: "absolute" | "composed";
   readonly targetComponents?: readonly string[];
+  /** Distinguishes an absent body from a present zero-length text body. */
+  readonly bodyPresent: boolean;
   readonly bodyBytes?: Uint8Array;
   readonly preRequestScript: string;
   readonly postResponseScript: string;
@@ -164,6 +179,7 @@ interface RequestRow {
   readonly query_json: string;
   readonly headers_json: string;
   readonly body_text: string;
+  readonly body_json: string;
   readonly pre_request_script: string;
   readonly post_response_script: string;
   readonly draft_revision: number;
@@ -182,6 +198,7 @@ interface RevisionContent {
   readonly headers: readonly RequestField[];
   readonly localHeaders?: readonly RequestField[];
   readonly inheritedHeaders?: readonly RequestField[];
+  readonly requestBody?: RequestBodyDefinition;
   readonly body: string;
   readonly preRequestScript: string;
   readonly postResponseScript: string;
@@ -816,6 +833,7 @@ export class RequestService {
     preRequestScript = "",
     postResponseScript = "",
     targetMode: "absolute" | "composed" = "absolute",
+    requestBody?: RequestBodyDefinition,
   ): Promise<RequestView> {
     const content = normalizeExecutionInput({
       method,
@@ -823,6 +841,7 @@ export class RequestService {
       targetUrl,
       query,
       headers,
+      ...(requestBody === undefined ? {} : { requestBody }),
       body,
       preRequestScript,
       postResponseScript,
@@ -869,6 +888,7 @@ export class RequestService {
           query_json: JSON.stringify(content.query),
           headers_json: JSON.stringify(content.headers),
           body_text: content.body,
+          body_json: JSON.stringify(content.requestBody),
           pre_request_script: content.preRequestScript,
           post_response_script: content.postResponseScript,
           updated_by: idToBytes(userId),
@@ -921,6 +941,7 @@ export class RequestService {
         query: content.query,
         headers: content.headers,
         inheritedHeaders,
+        requestBody: content.requestBody,
         body: content.body,
         preRequestScript: content.preRequestScript,
         postResponseScript: content.postResponseScript,
@@ -1110,6 +1131,8 @@ export class RequestService {
       content.preRequestScript,
       content.postResponseScript,
       content.targetMode,
+      null,
+      content.requestBody,
     );
   }
 
@@ -1184,6 +1207,7 @@ export class RequestService {
           query_json: source.query_json,
           headers_json: source.headers_json,
           body_text: source.body_text,
+          body_json: source.body_json,
           pre_request_script: source.pre_request_script,
           post_response_script: source.post_response_script,
           updated_by: idToBytes(userId),
@@ -1239,6 +1263,7 @@ export class RequestService {
     postResponseScript = "",
     targetMode: "absolute" | "composed" = "absolute",
     variableProfileUpdate: RequestVariableProfileUpdate | null = null,
+    requestBody?: RequestBodyDefinition,
   ): Promise<RequestView> {
     const normalizedName = normalizeName(name);
     const content = normalizeExecutionInput({
@@ -1247,12 +1272,14 @@ export class RequestService {
       targetUrl,
       query,
       headers,
+      ...(requestBody === undefined ? {} : { requestBody }),
       body,
       preRequestScript,
       postResponseScript,
     });
     const queryJson = JSON.stringify(content.query);
     const headersJson = JSON.stringify(content.headers);
+    const bodyJson = JSON.stringify(content.requestBody);
     return this.#database.transaction().execute(async (transaction) => {
       const row = await this.#requestRow(transaction, requestId);
       const workspaceId = bytesToId(row.workspace_id);
@@ -1277,7 +1304,7 @@ export class RequestService {
         row.target_url === content.targetUrl &&
         row.query_json === queryJson &&
         row.headers_json === headersJson &&
-        row.body_text === content.body &&
+        row.body_json === bodyJson &&
         row.pre_request_script === content.preRequestScript &&
         row.post_response_script === content.postResponseScript
       ) {
@@ -1298,6 +1325,7 @@ export class RequestService {
           query_json: queryJson,
           headers_json: headersJson,
           body_text: content.body,
+          body_json: bodyJson,
           pre_request_script: content.preRequestScript,
           post_response_script: content.postResponseScript,
           draft_revision: expectedDraftRevision + 1,
@@ -1334,6 +1362,7 @@ export class RequestService {
             : "",
         query: content.query,
         headers: content.headers,
+        requestBody: content.requestBody,
         body: content.body,
         preRequestScript: content.preRequestScript,
         postResponseScript: content.postResponseScript,
@@ -1350,6 +1379,7 @@ export class RequestService {
           query_json: queryJson,
           headers_json: headersJson,
           body_text: content.body,
+          body_json: bodyJson,
           pre_request_script: content.preRequestScript,
           post_response_script: content.postResponseScript,
           draft_revision: expectedDraftRevision + 1,
@@ -1438,8 +1468,12 @@ export class RequestService {
       );
       const executionRequest: ExecutionRequestSnapshot = {
         ...request,
-        headers: resolvedHeaders,
+        headers: withRequestBodyContentType(
+          resolvedHeaders,
+          request.requestBody,
+        ),
         targetComponents,
+        bodyPresent: request.requestBody.kind === "text",
       };
       const eagerlyComposed =
         request.preRequestScript === "" && request.postResponseScript === ""
@@ -1453,7 +1487,7 @@ export class RequestService {
         row,
         userId,
         "execution",
-        resolvedHeaders,
+        executionRequest.headers,
         targetComponents,
       );
       const executionId = createEntityId();
@@ -1541,8 +1575,16 @@ export class RequestService {
           content.targetUrl,
         ],
         query: content.query,
-        headers: effectiveHeaders,
+        headers: withRequestBodyContentType(
+          effectiveHeaders,
+          content.requestBody ?? validateRequestBody(undefined, content.body),
+        ),
+        requestBody:
+          content.requestBody ?? validateRequestBody(undefined, content.body),
         body: content.body,
+        bodyPresent:
+          (content.requestBody ?? validateRequestBody(undefined, content.body))
+            .kind === "text",
         preRequestScript: content.preRequestScript,
         postResponseScript: content.postResponseScript,
       };
@@ -1649,8 +1691,12 @@ export class RequestService {
       );
       const executionRequest: ExecutionRequestSnapshot = {
         ...localRequest,
-        headers: resolvedHeaders,
+        headers: withRequestBodyContentType(
+          resolvedHeaders,
+          localRequest.requestBody,
+        ),
         targetComponents,
+        bodyPresent: localRequest.requestBody.kind === "text",
       };
       const eagerlyComposed =
         localRequest.preRequestScript === "" &&
@@ -1859,6 +1905,7 @@ export class RequestService {
         "draft.query_json",
         "draft.headers_json",
         "draft.body_text",
+        "draft.body_json",
         "draft.pre_request_script",
         "draft.post_response_script",
         "node.workspace_id",
@@ -2605,12 +2652,84 @@ function hasInvalidHeaderValue(value: string): boolean {
   return false;
 }
 
+/** Applies the body-owned Content-Type as the final request-level header. */
+function withRequestBodyContentType(
+  headers: readonly RequestField[],
+  body: RequestBodyDefinition,
+): readonly RequestField[] {
+  if (body.kind !== "text" || body.contentType === null) return headers;
+  return [
+    ...headers.filter((header) => header.name.toLowerCase() !== "content-type"),
+    {
+      name: "Content-Type",
+      value: body.contentType,
+      enabled: true,
+      mode: "override",
+    },
+  ];
+}
+
 /** Bounds the raw UTF-8 request body to the control-channel payload limit. */
 function validateBody(value: string): string {
   if (Buffer.byteLength(value, "utf8") > 786_432) {
     throw new Error("Request body is too large");
   }
   return value;
+}
+
+/** Validates one text media type without interpreting it as interpolation policy. */
+function validateBodyContentType(value: string | null): string | null {
+  if (value === null) return null;
+  const normalized = value.trim();
+  if (
+    normalized.length === 0 ||
+    normalized.length > 512 ||
+    [...normalized].some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || code === 127;
+    })
+  ) {
+    throw new Error("Request body content type is invalid");
+  }
+  return normalized;
+}
+
+/** Normalizes a semantic body or maps the legacy text projection losslessly. */
+function validateRequestBody(
+  requestBody: RequestBodyDefinition | undefined,
+  legacyBody: string,
+): RequestBodyDefinition {
+  if (requestBody === undefined) {
+    const text = validateBody(legacyBody);
+    return text === ""
+      ? { kind: "none" }
+      : { kind: "text", contentType: null, text };
+  }
+  if (requestBody.kind === "none") return { kind: "none" };
+  if (requestBody.kind === "text") {
+    return {
+      kind: "text",
+      contentType: validateBodyContentType(requestBody.contentType),
+      text: validateBody(requestBody.text),
+    };
+  }
+  throw new Error("Request body kind is not supported");
+}
+
+/** Parses persisted semantic body JSON with a legacy-text recovery path. */
+function parseRequestBodyDefinition(
+  value: string | undefined,
+  legacyBody: string,
+): RequestBodyDefinition {
+  if (value === undefined) return validateRequestBody(undefined, legacyBody);
+  try {
+    return validateRequestBody(
+      JSON.parse(value) as RequestBodyDefinition,
+      legacyBody,
+    );
+  } catch {
+    throw new Error("Stored request body is invalid");
+  }
 }
 
 /** Bounds one request script before it is persisted or sent to a worker. */
@@ -2624,12 +2743,14 @@ function validateScript(value: string): string {
 /** Normalizes and validates content shared by saved and temporary executions. */
 function normalizeExecutionInput(input: RequestExecutionInput): Omit<
   RequestExecutionInput,
-  "targetMode"
+  "targetMode" | "requestBody" | "preRequestScript" | "postResponseScript"
 > & {
   readonly targetMode: "absolute" | "composed";
+  readonly requestBody: RequestBodyDefinition;
   readonly preRequestScript: string;
   readonly postResponseScript: string;
 } {
+  const requestBody = validateRequestBody(input.requestBody, input.body);
   return {
     method: validateMethod(input.method),
     targetMode: input.targetMode ?? "absolute",
@@ -2639,7 +2760,8 @@ function normalizeExecutionInput(input: RequestExecutionInput): Omit<
         : validateTargetTemplate(input.targetUrl),
     query: validateQuery(input.query),
     headers: validateHeaders(input.headers),
-    body: validateBody(input.body),
+    requestBody,
+    body: requestBody.kind === "text" ? requestBody.text : "",
     preRequestScript: validateScript(input.preRequestScript ?? ""),
     postResponseScript: validateScript(input.postResponseScript ?? ""),
   };
@@ -2695,7 +2817,9 @@ export function composeWithVariables(
     };
   });
   const body =
-    request.bodyBytes === undefined ? resolver.interpolate(request.body) : null;
+    request.bodyBytes === undefined && request.bodyPresent
+      ? resolver.interpolate(request.body)
+      : null;
   if (body !== null) retain(body.secretReferences);
   const materialized: ExecutionRequestSnapshot = {
     ...request,
@@ -2704,6 +2828,17 @@ export function composeWithVariables(
     query: validateQuery(query.map((field) => field.materialized)),
     headers: validateHeaders(headers.map((field) => field.materialized)),
     body: body === null ? "" : validateBody(body.value),
+    requestBody:
+      body === null
+        ? { kind: "none" }
+        : {
+            kind: "text",
+            contentType:
+              request.requestBody?.kind === "text"
+                ? request.requestBody.contentType
+                : null,
+            text: validateBody(body.value),
+          },
   };
   return {
     request: materialized,
@@ -2713,6 +2848,17 @@ export function composeWithVariables(
       targetUrl: targetSecret ? "[secret]" : materialized.targetUrl,
       query: query.map((field) => field.persisted),
       headers: headers.map((field) => field.persisted),
+      requestBody:
+        request.bodyPresent && request.bodyBytes === undefined
+          ? {
+              kind: "text",
+              contentType:
+                request.requestBody?.kind === "text"
+                  ? request.requestBody.contentType
+                  : null,
+              text: body?.secret ? "[secret]" : (body?.value ?? ""),
+            }
+          : { kind: "none" },
       body:
         request.bodyBytes === undefined
           ? body?.secret
@@ -2739,6 +2885,7 @@ function mapRequest(row: {
   readonly query_json: string;
   readonly headers_json: string;
   readonly body_text: string;
+  readonly body_json: string;
   readonly pre_request_script: string;
   readonly post_response_script: string;
   readonly draft_revision: number;
@@ -2757,6 +2904,7 @@ function mapRequest(row: {
     queryMode: row.query_mode,
     query: JSON.parse(row.query_json) as RequestField[],
     headers: JSON.parse(row.headers_json) as RequestField[],
+    requestBody: parseRequestBodyDefinition(row.body_json, row.body_text),
     body: row.body_text,
     preRequestScript: row.pre_request_script,
     postResponseScript: row.post_response_script,
@@ -2783,6 +2931,7 @@ function revisionContent(
     headers: effectiveHeaders,
     localHeaders: request.headers,
     inheritedHeaders,
+    requestBody: request.requestBody,
     body: request.body,
     preRequestScript: request.preRequestScript,
     postResponseScript: request.postResponseScript,
@@ -2798,6 +2947,9 @@ function parseRevisionContent(value: string): RevisionContent {
     targetUrl: parsed.targetUrl ?? "",
     query: parsed.query ?? [],
     headers: parsed.headers ?? [],
+    ...(parsed.requestBody === undefined
+      ? {}
+      : { requestBody: parsed.requestBody }),
     body: parsed.body ?? "",
     preRequestScript: parsed.preRequestScript ?? "",
     postResponseScript: parsed.postResponseScript ?? "",
@@ -2823,6 +2975,7 @@ function parseRevisionContent(value: string): RevisionContent {
     ...(parsed.inheritedHeaders === undefined
       ? {}
       : { inheritedHeaders: validateHeaders(parsed.inheritedHeaders) }),
+    requestBody: normalized.requestBody,
     body: normalized.body,
     preRequestScript: normalized.preRequestScript,
     postResponseScript: normalized.postResponseScript,
@@ -2862,6 +3015,8 @@ function revisionRequestView(
         : content.headers.filter(
             (header) => !localHeaderNames.has(header.name.toLowerCase()),
           )),
+    requestBody:
+      content.requestBody ?? validateRequestBody(undefined, content.body),
     body: content.body,
     preRequestScript: content.preRequestScript,
     postResponseScript: content.postResponseScript,

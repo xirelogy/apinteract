@@ -627,6 +627,7 @@ export interface components {
         query: components["schemas"]["RequestField"][];
         headers: components["schemas"]["RequestField"][];
         body: string;
+        requestBody?: components["schemas"]["RequestBodyDefinition"];
         preRequestScript?: string;
         postResponseScript?: string;
       };
@@ -737,6 +738,7 @@ export interface components {
         query: components["schemas"]["RequestField"][];
         headers: components["schemas"]["RequestField"][];
         body: string;
+        requestBody?: components["schemas"]["RequestBodyDefinition"];
         preRequestScript?: string;
         postResponseScript?: string;
         variableProfile?: components["schemas"]["RequestVariableProfileUpdate"];
@@ -1019,6 +1021,21 @@ export interface components {
       effectiveHeaders: components["schemas"]["RequestField"][];
       revision: number;
     };
+    /** @description Editable request body semantics before interpolation and UTF-8 encoding. */
+    RequestBodyDefinition:
+      | components["schemas"]["NoRequestBody"]
+      | components["schemas"]["TextRequestBody"];
+    NoRequestBody: {
+      /** @constant */
+      kind: "none";
+    };
+    TextRequestBody: {
+      /** @constant */
+      kind: "text";
+      /** @description Optional body-owned media type applied as the effective Content-Type during execution. */
+      contentType: string | null;
+      text: string;
+    };
     RequestView: {
       requestId: components["schemas"]["RequestId"];
       workspaceId: components["schemas"]["WorkspaceId"];
@@ -1038,6 +1055,8 @@ export interface components {
       /** @description Effective enabled headers inherited from the request's collection ancestry before request-local overrides. */
       inheritedHeaders: components["schemas"]["RequestField"][];
       body: string;
+      /** @description Preferred semantic body definition. Older responses may omit it, in which case clients use the legacy body projection. */
+      requestBody?: components["schemas"]["RequestBodyDefinition"];
       preRequestScript: string;
       postResponseScript: string;
       draftRevision: number;
@@ -1115,6 +1134,7 @@ export interface components {
       query: components["schemas"]["RequestField"][];
       headers: components["schemas"]["RequestField"][];
       body: string;
+      requestBody?: components["schemas"]["RequestBodyDefinition"];
       preRequestScript?: string;
       postResponseScript?: string;
     };

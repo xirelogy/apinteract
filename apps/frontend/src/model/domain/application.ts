@@ -4,6 +4,7 @@ import type {
   ExecutionView,
   HttpMethod,
   RequestField,
+  RequestBodyDefinition,
   RequestRevisionSummary,
   RequestRevisionView,
   RequestView,
@@ -32,6 +33,8 @@ export interface RequestDraftInput {
   readonly targetUrl: string;
   readonly query: readonly RequestField[];
   readonly headers: readonly RequestField[];
+  /** Preferred semantic body shape; legacy drafts may omit it. */
+  readonly requestBody?: RequestBodyDefinition;
   readonly body: string;
   readonly preRequestScript: string;
   readonly postResponseScript: string;

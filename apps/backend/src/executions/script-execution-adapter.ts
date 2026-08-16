@@ -119,19 +119,21 @@ export function preRequestScriptView(
       sensitive: isSensitiveTemplate(header.value, resolver),
     })),
     body:
-      request.bodyBytes === undefined
-        ? {
-            kind: "text",
-            text: request.body,
-            readable: true,
-            sensitive: isSensitiveTemplate(request.body, resolver),
-          }
-        : {
-            kind: "binary",
-            bytes: request.bodyBytes,
-            readable: true,
-            sensitive: false,
-          },
+      request.bodyBytes === undefined && !request.bodyPresent
+        ? { kind: "none", readable: true, sensitive: false }
+        : request.bodyBytes === undefined
+          ? {
+              kind: "text",
+              text: request.body,
+              readable: true,
+              sensitive: isSensitiveTemplate(request.body, resolver),
+            }
+          : {
+              kind: "binary",
+              bytes: request.bodyBytes,
+              readable: true,
+              sensitive: false,
+            },
   };
 }
 
@@ -181,8 +183,11 @@ export function executionRequestFromScript(
     return { name: header.name, value: header.value, enabled: true };
   });
   const body = scripted.body;
+  const { bodyBytes: previousBodyBytes, ...originalWithoutBodyBytes } =
+    original;
+  void previousBodyBytes;
   return {
-    ...original,
+    ...originalWithoutBodyBytes,
     method: scripted.method as PreparedExecution["request"]["method"],
     targetMode: "absolute",
     targetUrl,
@@ -190,6 +195,18 @@ export function executionRequestFromScript(
     query,
     headers,
     body: body.kind === "text" ? (body.text ?? "") : "",
+    bodyPresent: body.kind !== "none",
+    requestBody:
+      body.kind === "text"
+        ? {
+            kind: "text",
+            contentType:
+              original.requestBody?.kind === "text"
+                ? original.requestBody.contentType
+                : null,
+            text: body.text ?? "",
+          }
+        : { kind: "none" },
     ...(body.kind === "binary" && body.bytes !== undefined
       ? { bodyBytes: body.bytes }
       : {}),

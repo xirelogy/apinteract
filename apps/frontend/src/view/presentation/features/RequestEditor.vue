@@ -4,6 +4,7 @@ import {
   defineAsyncComponent,
   onBeforeUnmount,
   ref,
+  useId,
   watch,
 } from "vue";
 import {
@@ -22,6 +23,7 @@ import { defaultHeaderMergeMode } from "@/app/preferences/header-preferences";
 import type {
   ExecutionView,
   HttpMethod,
+  RequestBodyDefinition,
   RequestField,
   RequestRevisionSummary,
   RequestRevisionView,
@@ -57,6 +59,9 @@ import VariableFieldsEditor from "./VariableFieldsEditor.vue";
 
 const ScriptEditor = defineAsyncComponent(
   () => import("@/view/presentation/controls/ScriptEditor.vue"),
+);
+const CodeEditor = defineAsyncComponent(
+  () => import("@/view/presentation/controls/CodeEditor.vue"),
 );
 
 const props = withDefaults(
@@ -122,6 +127,11 @@ const targetModeOptions = computed(() => [
   { value: "composed", label: t("request.targetModes.composed") },
   { value: "absolute", label: t("request.targetModes.absolute") },
 ]);
+const bodyTypeOptions = computed(() => [
+  { value: "none", label: t("request.bodyTypes.none") },
+  { value: "text", label: t("request.bodyTypes.text") },
+  { value: "json", label: t("request.bodyTypes.json") },
+]);
 const requestTabs = [
   "query",
   "headers",
@@ -137,7 +147,10 @@ const targetMode = ref<"absolute" | "composed">("composed");
 const targetUrl = ref("");
 const query = ref<RequestField[]>([]);
 const headers = ref<RequestField[]>([]);
-const body = ref("");
+const bodyKind = ref<"none" | "text" | "json">("none");
+const bodyText = ref("");
+const bodyContentType = ref("");
+const bodyTypeControlId = useId();
 const preRequestScript = ref("");
 const postResponseScript = ref("");
 const activeTab = ref<(typeof requestTabs)[number]>("query");
@@ -166,7 +179,16 @@ watch(
       true,
       createBlankHeaderField,
     );
-    body.value = source?.body ?? "";
+    const requestBody = bodyDefinitionFromSource(source);
+    bodyKind.value =
+      requestBody.kind === "none"
+        ? "none"
+        : isJsonMediaType(requestBody.contentType)
+          ? "json"
+          : "text";
+    bodyText.value = requestBody.kind === "text" ? requestBody.text : "";
+    bodyContentType.value =
+      requestBody.kind === "text" ? (requestBody.contentType ?? "") : "";
     preRequestScript.value = source?.preRequestScript ?? "";
     postResponseScript.value = source?.postResponseScript ?? "";
   },
@@ -212,8 +234,14 @@ const queryCount = computed(() => meaningfulRequestFields(query.value).length);
 const headerCount = computed(
   () =>
     meaningfulRequestFields(headers.value).length +
-    props.inheritedHeaders.length,
+    props.inheritedHeaders.length +
+    (generatedContentType.value === null ? 0 : 1),
 );
+const generatedContentType = computed(() => {
+  if (bodyKind.value === "none") return null;
+  const contentType = bodyContentType.value.trim();
+  return contentType === "" ? null : contentType;
+});
 const overriddenInheritedHeaderNames = computed(() => {
   const names = new Set<string>();
   for (const header of meaningfulRequestFields(headers.value)) {
@@ -221,6 +249,7 @@ const overriddenInheritedHeaderNames = computed(() => {
       names.add(header.name.toLowerCase());
     }
   }
+  if (generatedContentType.value !== null) names.add("content-type");
   return names;
 });
 const referencedVariableNames = computed(() =>
@@ -230,7 +259,7 @@ const referencedVariableNames = computed(() =>
     ...query.value.map((field) => field.value),
     ...headers.value.map((field) => field.value),
     ...props.inheritedHeaders.map((field) => field.value),
-    body.value,
+    bodyKind.value === "none" ? "" : bodyText.value,
   ]),
 );
 const previewSignature = computed(() =>
@@ -389,6 +418,44 @@ function isInheritedHeaderOverridden(field: RequestField): boolean {
   return overriddenInheritedHeaderNames.value.has(field.name.toLowerCase());
 }
 
+/** Reports whether the body-owned media type replaces this local header. */
+function isHeaderOverriddenByBody(field: RequestField): boolean {
+  return (
+    generatedContentType.value !== null &&
+    field.enabled &&
+    field.name.toLowerCase() === "content-type"
+  );
+}
+
+/** Recognizes JSON and structured-syntax JSON media types for editor syntax. */
+function isJsonMediaType(contentType: string | null): boolean {
+  if (contentType === null) return false;
+  const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  return mediaType === "application/json" || mediaType.endsWith("+json");
+}
+
+/** Normalizes a legacy or semantic request view into the editable body model. */
+function bodyDefinitionFromSource(
+  source: RequestDraftInput | RequestView | null | undefined,
+): RequestBodyDefinition {
+  if (source === null || source === undefined) return { kind: "none" };
+  if (source.requestBody !== undefined) return source.requestBody;
+  return "body" in source && source.body !== ""
+    ? { kind: "text", contentType: null, text: source.body }
+    : { kind: "none" };
+}
+
+/** Builds the semantic body represented by the body controls. */
+function currentRequestBody(): RequestBodyDefinition {
+  return bodyKind.value === "none"
+    ? { kind: "none" }
+    : {
+        kind: "text",
+        contentType: generatedContentType.value,
+        text: bodyText.value,
+      };
+}
+
 /** Builds an immutable draft payload from the current editor controls. */
 function currentDraft(): RequestDraftInput {
   return {
@@ -398,7 +465,8 @@ function currentDraft(): RequestDraftInput {
     targetUrl: targetUrl.value,
     query: meaningfulRequestFields(query.value),
     headers: meaningfulRequestFields(headers.value),
-    body: body.value,
+    requestBody: currentRequestBody(),
+    body: bodyKind.value === "none" ? "" : bodyText.value,
     preRequestScript: preRequestScript.value,
     postResponseScript: postResponseScript.value,
   };
@@ -413,7 +481,8 @@ function emitChange(): void {
     targetUrl: targetUrl.value,
     query: meaningfulRequestFields(query.value),
     headers: meaningfulRequestFields(headers.value),
-    body: body.value,
+    requestBody: currentRequestBody(),
+    body: bodyKind.value === "none" ? "" : bodyText.value,
     preRequestScript: preRequestScript.value,
     postResponseScript: postResponseScript.value,
   });
@@ -431,6 +500,22 @@ function selectTargetMode(value: string): void {
     targetMode.value = value;
     emitChange();
   }
+}
+
+/** Applies a frontend body preset without changing the current text. */
+function selectBodyKind(value: string): void {
+  if (value !== "none" && value !== "text" && value !== "json") return;
+  bodyKind.value = value;
+  if (value === "json" && !isJsonMediaType(bodyContentType.value || null)) {
+    bodyContentType.value = "application/json";
+  } else if (
+    value === "text" &&
+    (bodyContentType.value.trim() === "" ||
+      isJsonMediaType(bodyContentType.value))
+  ) {
+    bodyContentType.value = "text/plain";
+  }
+  emitChange();
 }
 
 /** Returns the translated label for a request settings tab. */
@@ -794,10 +879,55 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               </span>
             </div>
             <div
+              v-if="activeTab === 'headers' && generatedContentType !== null"
+              class="request-field-row generated-header-row"
+            >
+              <CheckboxControl
+                :model-value="true"
+                visually-hidden-label
+                :label="t('request.generatedContentType')"
+                disabled
+              />
+              <TextInput
+                model-value="Content-Type"
+                class="field-cell-input"
+                density="compact"
+                font="mono"
+                :aria-label="t('request.generatedHeaderName')"
+                disabled
+              />
+              <div class="header-value-field">
+                <HeaderMergeModeToggle model-value="override" readonly />
+                <TemplateTextControl
+                  :model-value="generatedContentType"
+                  class="field-template-input"
+                  density="compact"
+                  font="mono"
+                  :previews="[]"
+                  :aria-label="t('request.generatedHeaderValue')"
+                  readonly
+                />
+              </div>
+              <span
+                class="inherited-header-indicator"
+                role="img"
+                :aria-label="t('request.generatedContentType')"
+                :title="t('request.generatedContentType')"
+              >
+                <Lock :size="14" aria-hidden="true" />
+              </span>
+            </div>
+            <div
               v-for="(field, index) in activeTab === 'query' ? query : headers"
               :key="index"
               class="request-field-row"
-              :class="fieldReorder.classes(index)"
+              :class="[
+                fieldReorder.classes(index),
+                {
+                  'is-header-overridden':
+                    activeTab === 'headers' && isHeaderOverriddenByBody(field),
+                },
+              ]"
               @dragover.stop="fieldReorder.updateDropTarget($event, index)"
               @drop.stop="fieldReorder.finishDrop($event)"
             >
@@ -919,15 +1049,46 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
             value="body"
             class="request-body-editor"
           >
-            <TemplateTextControl
-              v-model="body"
-              class="body-template-input"
-              multiline
-              font="mono"
-              :previews="variablePreviews"
-              :aria-label="t('request.rawBody')"
-              :placeholder="t('request.rawBody')"
-              spellcheck="false"
+            <div class="request-body-controls">
+              <label
+                class="request-body-content-type-label"
+                :for="bodyTypeControlId"
+              >
+                {{ t("request.contentType") }}
+              </label>
+              <SelectMenu
+                class="body-type-picker"
+                :input-id="bodyTypeControlId"
+                :model-value="bodyKind"
+                :options="bodyTypeOptions"
+                :label="t('request.contentType')"
+                density="compact"
+                :disabled="editorDisabled"
+                @update:model-value="selectBodyKind"
+              />
+              <TextInput
+                v-if="bodyKind !== 'none'"
+                v-model="bodyContentType"
+                class="body-content-type-input"
+                density="compact"
+                font="mono"
+                :aria-label="t('request.contentTypeOverride')"
+                placeholder="text/plain"
+                autocomplete="off"
+                spellcheck="false"
+                :disabled="editorDisabled"
+                @input="emitChange"
+              />
+            </div>
+            <p v-if="bodyKind === 'none'" class="request-body-empty">
+              {{ t("request.noBodyDescription") }}
+            </p>
+            <CodeEditor
+              v-else
+              v-model="bodyText"
+              class="body-code-editor"
+              :language="bodyKind === 'json' ? 'json' : 'plain'"
+              :label="t('request.rawBody')"
               :disabled="editorDisabled"
               @input="emitChange"
             />

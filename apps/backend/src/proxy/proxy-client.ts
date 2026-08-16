@@ -90,15 +90,15 @@ export class ProxyClient {
     headers: readonly HeaderField[],
     body: Buffer,
     sink: ProxyResponseSink,
+    bodyPresent = body.byteLength > 0,
   ): Promise<void> {
-    const bodyDescriptor: TargetRequest["body"] =
-      body.byteLength === 0
-        ? { mode: "none", length: 0, sha256: null }
-        : {
-            mode: "stream",
-            length: body.byteLength,
-            sha256: createHash("sha256").update(body).digest("hex"),
-          };
+    const bodyDescriptor: TargetRequest["body"] = !bodyPresent
+      ? { mode: "none", length: 0, sha256: null }
+      : {
+          mode: "stream",
+          length: body.byteLength,
+          sha256: createHash("sha256").update(body).digest("hex"),
+        };
     const creation = await fetch(`${this.#endpoint}/executions`, {
       method: "POST",
       headers: {
@@ -135,7 +135,7 @@ export class ProxyClient {
     };
 
     try {
-      if (body.byteLength > 0) {
+      if (bodyPresent) {
         const upload = await fetch(
           `${this.#endpoint}/executions/${session.executionId}/request-body`,
           {
@@ -144,7 +144,7 @@ export class ProxyClient {
               Authorization: `Bearer ${this.#bearerToken}`,
               "Content-Type": "application/octet-stream",
             },
-            body: body.toString("utf8"),
+            body: new Uint8Array(body),
             signal: AbortSignal.timeout(CONTROL_REQUEST_TIMEOUT_MS),
           },
         );

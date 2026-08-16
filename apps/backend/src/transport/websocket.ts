@@ -19,6 +19,7 @@ import {
   TreeMoveInvalidError,
   TreeOrderConflictError,
   type HttpMethod,
+  type RequestBodyDefinition,
   type RequestExecutionInput,
   type RequestField,
   type RequestVariableProfileUpdate,
@@ -352,6 +353,7 @@ async function dispatch(
           "postResponseScript",
         ),
         requireTargetMode(command.payload.targetMode),
+        optionalRequestBody(command.payload.requestBody),
       );
     case "request.get":
       return application.requests.get(
@@ -415,6 +417,7 @@ async function dispatch(
         ),
         requireTargetMode(command.payload.targetMode),
         optionalRequestVariableProfileUpdate(command.payload.variableProfile),
+        optionalRequestBody(command.payload.requestBody),
       );
     case "request.delete":
       return application.requests.delete(
@@ -859,6 +862,62 @@ function requireBody(value: unknown): string {
   return value;
 }
 
+/** Validates the additive semantic request-body shape when supplied by a client. */
+function optionalRequestBody(
+  value: unknown,
+): RequestBodyDefinition | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new CommandError(
+      "validation_failed",
+      "requestBody must be an object.",
+    );
+  }
+  const body = value as Record<string, unknown>;
+  if (body.kind === "none") {
+    if (Object.keys(body).some((key) => key !== "kind")) {
+      throw new CommandError(
+        "validation_failed",
+        "A none requestBody cannot contain content fields.",
+      );
+    }
+    return { kind: "none" };
+  }
+  if (body.kind !== "text") {
+    throw new CommandError(
+      "validation_failed",
+      "requestBody.kind must be none or text.",
+    );
+  }
+  if (
+    Object.keys(body).some(
+      (key) => !["kind", "contentType", "text"].includes(key),
+    )
+  ) {
+    throw new CommandError(
+      "validation_failed",
+      "A text requestBody contains an unsupported field.",
+    );
+  }
+  if (typeof body.text !== "string") {
+    throw new CommandError(
+      "validation_failed",
+      "requestBody.text must be a string.",
+    );
+  }
+  if (body.contentType !== null && typeof body.contentType !== "string") {
+    throw new CommandError(
+      "validation_failed",
+      "requestBody.contentType must be a string or null.",
+    );
+  }
+  return {
+    kind: "text",
+    contentType: body.contentType,
+    text: body.text,
+  };
+}
+
 /** Requires a bounded JavaScript source string, including a disabled blank. */
 function requireScript(value: unknown, name: string): string {
   if (typeof value !== "string") {
@@ -881,12 +940,14 @@ function requireExecutionInput(value: unknown): RequestExecutionInput {
     throw new CommandError("validation_failed", "request must be an object.");
   }
   const request = value as Record<string, unknown>;
+  const requestBody = optionalRequestBody(request.requestBody);
   return {
     method: requireMethod(request.method),
     targetMode: requireTargetMode(request.targetMode),
     targetUrl: requireStringAllowEmpty(request.targetUrl, "targetUrl"),
     query: requireRequestFields(request.query, "query"),
     headers: requireRequestFields(request.headers, "headers"),
+    ...(requestBody === undefined ? {} : { requestBody }),
     body: requireBody(request.body),
     preRequestScript: optionalScript(
       request.preRequestScript,

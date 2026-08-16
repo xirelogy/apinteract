@@ -5,6 +5,8 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
+import CodeEditor from "../src/view/presentation/controls/CodeEditor.vue";
+import SelectMenu from "../src/view/presentation/controls/SelectMenu.vue";
 import ScriptEditor from "../src/view/presentation/controls/ScriptEditor.vue";
 import RequestEditor from "../src/view/presentation/features/RequestEditor.vue";
 
@@ -123,6 +125,7 @@ describe("RequestEditor", () => {
           query: [],
           headers: [],
           body: "",
+          requestBody: { kind: "none" },
           preRequestScript: "",
           postResponseScript: "",
         },
@@ -185,6 +188,102 @@ describe("RequestEditor", () => {
     wrapper.unmount();
   });
 
+  it("edits JSON as semantic text and shows its generated Content-Type", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft: {
+          name: "JSON request",
+          method: "POST",
+          targetMode: "absolute",
+          targetUrl: "https://example.test/json",
+          query: [],
+          headers: [
+            {
+              name: "Content-Type",
+              value: "text/custom",
+              enabled: true,
+            },
+          ],
+          body: "",
+          requestBody: { kind: "none" },
+          preRequestScript: "",
+          postResponseScript: "",
+        },
+        execution: null,
+        tabId: "019facab-1eee-765f-bd9f-ac2449151cf0",
+        temporary: true,
+        inheritedHeaders: [],
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Body"))
+      ?.trigger("click");
+    const bodyType = wrapper
+      .findAllComponents(SelectMenu)
+      .find((select) => select.props("label") === "Content type");
+    bodyType?.vm.$emit("update:modelValue", "json");
+    await flushPromises();
+    await vi.waitFor(() => {
+      expect(wrapper.find(".body-code-editor").exists()).toBe(true);
+    });
+    const editor = wrapper.getComponent(CodeEditor);
+    expect(editor.props("language")).toBe("json");
+    editor.vm.$emit("update:modelValue", "{");
+    editor.vm.$emit("input");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      body: "{",
+      requestBody: {
+        kind: "text",
+        contentType: "application/json",
+        text: "{",
+      },
+    });
+    bodyType?.vm.$emit("update:modelValue", "text");
+    await wrapper.vm.$nextTick();
+    expect(editor.props("language")).toBe("plain");
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      body: "{",
+      requestBody: { contentType: "text/plain", text: "{" },
+    });
+    bodyType?.vm.$emit("update:modelValue", "json");
+    await wrapper.vm.$nextTick();
+    expect(editor.props("language")).toBe("json");
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      body: "{",
+      requestBody: { contentType: "application/json", text: "{" },
+    });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Headers"))
+      ?.trigger("click");
+    expect(
+      wrapper.get('input[aria-label="Generated header name"]').element,
+    ).toHaveProperty("value", "Content-Type");
+    expect(
+      wrapper.find(".request-field-row.is-header-overridden").exists(),
+    ).toBe(true);
+
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Send"))
+      ?.trigger("click");
+    expect(wrapper.emitted("execute")?.at(-1)?.[0]).toMatchObject({
+      requestBody: { kind: "text", text: "{" },
+    });
+  });
+
   it("keeps one trailing blank query and header row out of draft changes", async () => {
     const i18n = createI18n({
       legacy: false,
@@ -202,6 +301,7 @@ describe("RequestEditor", () => {
           query: [],
           headers: [],
           body: "",
+          requestBody: { kind: "none" },
           preRequestScript: "",
           postResponseScript: "",
         },
@@ -479,6 +579,7 @@ describe("RequestEditor", () => {
           query: [],
           headers: [],
           body: "",
+          requestBody: { kind: "none" },
           preRequestScript: "",
           postResponseScript: "",
         },

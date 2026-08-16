@@ -1566,6 +1566,9 @@
                     "type": "string",
                     "maxLength": 786432
                   },
+                  "requestBody": {
+                    "$ref": "#/components/schemas/RequestBodyDefinition"
+                  },
                   "preRequestScript": {
                     "type": "string",
                     "maxLength": 65536
@@ -1791,6 +1794,9 @@
                   "body": {
                     "type": "string",
                     "maxLength": 786432
+                  },
+                  "requestBody": {
+                    "$ref": "#/components/schemas/RequestBodyDefinition"
                   },
                   "preRequestScript": {
                     "type": "string",
@@ -2515,6 +2521,37 @@
           }
         }
       },
+      "RequestBodyDefinition": {
+        "description": "Editable request body semantics before interpolation and UTF-8 encoding.",
+        "oneOf": [
+          { "$ref": "#/components/schemas/NoRequestBody" },
+          { "$ref": "#/components/schemas/TextRequestBody" }
+        ]
+      },
+      "NoRequestBody": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {
+          "kind": { "type": "string", "const": "none" }
+        }
+      },
+      "TextRequestBody": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "contentType", "text"],
+        "properties": {
+          "kind": { "type": "string", "const": "text" },
+          "contentType": {
+            "oneOf": [
+              { "type": "string", "minLength": 1, "maxLength": 512 },
+              { "type": "null" }
+            ],
+            "description": "Optional body-owned media type applied as the effective Content-Type during execution."
+          },
+          "text": { "type": "string", "maxLength": 786432 }
+        }
+      },
       "RequestView": {
         "type": "object",
         "additionalProperties": false,
@@ -2598,6 +2635,10 @@
           "body": {
             "type": "string",
             "maxLength": 786432
+          },
+          "requestBody": {
+            "$ref": "#/components/schemas/RequestBodyDefinition",
+            "description": "Preferred semantic body definition. Older responses may omit it, in which case clients use the legacy body projection."
           },
           "preRequestScript": {
             "type": "string",
@@ -2839,6 +2880,9 @@
           "body": {
             "type": "string",
             "maxLength": 786432
+          },
+          "requestBody": {
+            "$ref": "#/components/schemas/RequestBodyDefinition"
           },
           "preRequestScript": {
             "type": "string",

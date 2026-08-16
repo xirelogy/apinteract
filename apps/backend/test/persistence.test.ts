@@ -181,6 +181,7 @@ describe("SqliteDatabase migrations", () => {
         .select([
           "target_mode",
           "target_url",
+          "body_json",
           "pre_request_script",
           "post_response_script",
           "updated_by",
@@ -190,6 +191,7 @@ describe("SqliteDatabase migrations", () => {
       expect(draft).toEqual({
         target_mode: "absolute",
         target_url: "https://example.test/legacy",
+        body_json: '{"kind":"text","contentType":null,"text":"legacy body"}',
         pre_request_script: 'asdk.log.info("before");',
         post_response_script: 'asdk.test("after", () => {});',
         updated_by: userId,

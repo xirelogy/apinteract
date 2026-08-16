@@ -148,6 +148,7 @@ export interface RequestDraftTable {
   query_json: string;
   headers_json: string;
   body_text: string;
+  body_json: Generated<string>;
   pre_request_script: string;
   post_response_script: string;
   updated_by: BinaryId;

@@ -871,7 +871,8 @@ export class ApplicationController {
         {
           requestId: tab.request?.requestId,
           expectedDraftRevision: tab.request?.draftRevision,
-          ...draft,
+          name: draft.name,
+          ...executableDraft(draft),
           ...(variableUpdate === null
             ? {}
             : { variableProfile: variableUpdate }),
@@ -923,8 +924,8 @@ export class ApplicationController {
         {
           workspaceId: tab.workspaceId,
           parentCollectionId,
-          ...tab.draft,
           name,
+          ...executableDraft(tab.draft),
         },
       );
       const savedDraft = requestToDraft(request);
@@ -1356,6 +1357,7 @@ function emptyDraft(): RequestDraftInput {
     targetUrl: "",
     query: [],
     headers: [],
+    requestBody: { kind: "none" },
     body: "",
     preRequestScript: "",
     postResponseScript: "",
@@ -1371,6 +1373,11 @@ function requestToDraft(request: RequestView): RequestDraftInput {
     targetUrl: request.targetUrl,
     query: request.query.map((field) => ({ ...field })),
     headers: request.headers.map((field) => ({ ...field })),
+    requestBody:
+      request.requestBody ??
+      (request.body === ""
+        ? { kind: "none" }
+        : { kind: "text", contentType: null, text: request.body }),
     body: request.body,
     preRequestScript: request.preRequestScript,
     postResponseScript: request.postResponseScript,
@@ -1381,6 +1388,9 @@ function requestToDraft(request: RequestView): RequestDraftInput {
 function cloneDraft(draft: RequestDraftInput): RequestDraftInput {
   return {
     ...draft,
+    ...(draft.requestBody === undefined
+      ? {}
+      : { requestBody: { ...draft.requestBody } }),
     query: draft.query.map((field) => ({ ...field })),
     headers: draft.headers.map((field) => ({ ...field })),
   };
@@ -1421,13 +1431,19 @@ function joinTargetPreview(prefix: string, path: string): string {
 
 /** Removes the editor-only name from a temporary execution snapshot. */
 function executableDraft(draft: RequestDraftInput) {
+  const requestBody =
+    draft.requestBody ??
+    (draft.body === ""
+      ? { kind: "none" as const }
+      : { kind: "text" as const, contentType: null, text: draft.body });
   return {
     method: draft.method,
     targetMode: draft.targetMode,
     targetUrl: draft.targetUrl,
     query: draft.query,
     headers: draft.headers,
-    body: draft.body,
+    requestBody,
+    body: requestBody.kind === "text" ? requestBody.text : "",
     preRequestScript: draft.preRequestScript,
     postResponseScript: draft.postResponseScript,
   };

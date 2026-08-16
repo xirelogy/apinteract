@@ -19,6 +19,7 @@ const RESOURCE_DELETION_MIGRATION = "0009_resource_deletion";
 const REQUEST_VERSIONS_MIGRATION = "0010_request_versions";
 const COMPOSED_TARGETS_MIGRATION = "0011_composed_targets";
 const ENVIRONMENT_COMPOSITION_MIGRATION = "0012_environment_composition";
+const REQUEST_BODY_DEFINITION_MIGRATION = "0013_request_body_definition";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -349,6 +350,16 @@ export class SqliteDatabase {
     if (environmentCompositionApplied === undefined) {
       this.#migrateEnvironmentComposition();
     }
+
+    const requestBodyDefinitionApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(REQUEST_BODY_DEFINITION_MIGRATION);
+    if (
+      requestBodyDefinitionApplied === undefined ||
+      !this.#columnExists("request_drafts", "body_json")
+    ) {
+      this.#migrateRequestBodyDefinition();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -375,20 +386,34 @@ export class SqliteDatabase {
       .prepare("SELECT id FROM schema_migrations")
       .all() as { readonly id: string }[];
     const identifiers = new Set(applied.map((migration) => migration.id));
-    return [
-      INITIAL_MIGRATION,
-      EXPANDED_REQUEST_MIGRATION,
-      TEMPORARY_EXECUTION_MIGRATION,
-      COLLECTION_PROFILES_MIGRATION,
-      ENVIRONMENTS_MIGRATION,
-      VARIABLE_SCOPES_MIGRATION,
-      WORKSPACE_HEADERS_MIGRATION,
-      REQUEST_SCRIPTS_MIGRATION,
-      RESOURCE_DELETION_MIGRATION,
-      REQUEST_VERSIONS_MIGRATION,
-      COMPOSED_TARGETS_MIGRATION,
-      ENVIRONMENT_COMPOSITION_MIGRATION,
-    ].some((identifier) => !identifiers.has(identifier));
+    return (
+      [
+        INITIAL_MIGRATION,
+        EXPANDED_REQUEST_MIGRATION,
+        TEMPORARY_EXECUTION_MIGRATION,
+        COLLECTION_PROFILES_MIGRATION,
+        ENVIRONMENTS_MIGRATION,
+        VARIABLE_SCOPES_MIGRATION,
+        WORKSPACE_HEADERS_MIGRATION,
+        REQUEST_SCRIPTS_MIGRATION,
+        RESOURCE_DELETION_MIGRATION,
+        REQUEST_VERSIONS_MIGRATION,
+        COMPOSED_TARGETS_MIGRATION,
+        ENVIRONMENT_COMPOSITION_MIGRATION,
+        REQUEST_BODY_DEFINITION_MIGRATION,
+      ].some((identifier) => !identifiers.has(identifier)) ||
+      !this.#columnExists("request_drafts", "body_json")
+    );
+  }
+
+  /** Reports whether a table currently contains one named physical column. */
+  #columnExists(table: string, column: string): boolean {
+    const columns = this.#driver
+      .prepare(`PRAGMA table_info(${table})`)
+      .all() as {
+      readonly name: string;
+    }[];
+    return columns.some((entry) => entry.name === column);
   }
 
   /** Rebuilds GET-only drafts with expanded request content columns. */
@@ -837,6 +862,33 @@ export class SqliteDatabase {
           ON environment_includes(included_environment_id, environment_id);
       `);
       this.#recordMigration(ENVIRONMENT_COMPOSITION_MIGRATION);
+    })();
+  }
+
+  /** Adds semantic none/text request bodies while retaining the legacy projection. */
+  #migrateRequestBodyDefinition(): void {
+    this.#driver.transaction(() => {
+      if (!this.#columnExists("request_drafts", "body_json")) {
+        this.#driver.exec(`
+          ALTER TABLE request_drafts
+            ADD COLUMN body_json TEXT NOT NULL DEFAULT '{"kind":"none"}';
+          UPDATE request_drafts
+          SET body_json = CASE
+            WHEN body_text = '' THEN '{"kind":"none"}'
+            ELSE json_object(
+              'kind', 'text',
+              'contentType', NULL,
+              'text', body_text
+            )
+          END;
+        `);
+      }
+      const applied = this.#driver
+        .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+        .get(REQUEST_BODY_DEFINITION_MIGRATION);
+      if (applied === undefined) {
+        this.#recordMigration(REQUEST_BODY_DEFINITION_MIGRATION);
+      }
     })();
   }
 

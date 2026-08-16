@@ -444,6 +444,7 @@ export class ExecutionService {
             );
           },
         },
+        working.request.bodyPresent,
       );
     } catch (cause) {
       await this.#fail(

@@ -1225,11 +1225,11 @@
   background: var(--surface-selected);
 }
 
-.inherited-header-row.is-header-overridden {
+.request-field-row.is-header-overridden {
   opacity: 0.65;
 }
 
-.inherited-header-row.is-header-overridden
+.request-field-row.is-header-overridden
   :is(
     .field-cell-input,
     .template-text-control-input,
@@ -1268,44 +1268,51 @@
   background: var(--surface-secondary);
 }
 
-.request-body-editor {
-  height: 100%;
-  min-height: 8rem;
+.request-settings-tabs > .request-body-editor:not([hidden]) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   padding-top: var(--space-3);
 }
 
-.raw-body-input {
-  width: 100%;
-  height: 100%;
-  min-height: 8rem;
-  resize: vertical;
-  padding: var(--space-3);
-  font-family: var(--font-mono);
+.request-body-controls {
+  display: grid;
+  grid-template-columns: max-content minmax(6.5rem, 8rem) minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.request-body-content-type-label {
+  color: var(--text-secondary);
   font-size: var(--font-size-xs);
-  line-height: var(--line-height-code);
+  font-weight: var(--font-weight-semibold);
+}
+
+.body-type-picker,
+.body-content-type-input {
+  width: 100%;
+}
+
+.body-code-editor {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
   background: var(--surface-code);
 }
 
-.body-template-input {
-  width: 100%;
-  height: 100%;
-  min-height: 8rem;
-  font-family: var(--font-mono);
-  font-size: var(--font-size-xs);
-}
-
-.body-template-input .template-text-control-input {
-  width: 100%;
-  height: 100%;
-  min-height: 8rem;
-  resize: vertical;
-  padding: var(--space-3);
-  line-height: var(--line-height-code);
-  border: 1px solid var(--border-subtle);
+.request-body-empty {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--text-secondary);
+  border: 1px dashed var(--border-subtle);
   border-radius: var(--radius-control);
-  background: transparent;
+  background: var(--surface-secondary);
 }
 
 .request-settings-tabs > .request-script-editor:not([hidden]) {
