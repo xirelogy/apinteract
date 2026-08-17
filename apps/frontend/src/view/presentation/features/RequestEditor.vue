@@ -1033,13 +1033,12 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               :disabled="editorDisabled"
               @input="emitChange"
             />
-            <span class="draft-revision">
-              {{ draftRevisionLabel }}
-            </span>
           </div>
           <div class="command-bar">
             <ButtonControl
               variant="secondary"
+              :aria-label="t('common.actions.save')"
+              :title="t('common.actions.save')"
               :disabled="busy || !canSave"
               @click="emit('save', currentDraft())"
             >
@@ -1050,6 +1049,8 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
             </ButtonControl>
             <ButtonControl
               variant="primary"
+              :aria-label="t('request.send')"
+              :title="t('request.send')"
               :disabled="busy || !validTarget"
               @click="
                 viewingRevision === null

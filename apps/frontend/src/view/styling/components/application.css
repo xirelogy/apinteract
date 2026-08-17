@@ -950,7 +950,7 @@
 }
 
 .request-name-input {
-  max-width: 40ch;
+  max-width: none;
   padding-inline-start: 0;
   font-size: var(--font-size-xl);
   font-weight: var(--font-weight-semibold);
@@ -959,13 +959,7 @@
 
 .request-title {
   min-width: 0;
-}
-
-.draft-revision {
-  display: block;
-  margin-top: var(--space-1);
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  flex: 1 1 auto;
 }
 
 .command-bar,
@@ -2109,17 +2103,17 @@
   }
 
   .request-title-row {
-    align-items: stretch;
-    flex-direction: column;
+    align-items: center;
     gap: var(--space-2);
   }
 
-  .request-name-input {
-    max-width: none;
+  .command-bar > button {
+    width: var(--control-height);
+    padding-inline: 0;
   }
 
-  .command-bar > button {
-    flex: 1 1 0;
+  .command-bar .button-control-label {
+    display: none;
   }
 
   .target-row {

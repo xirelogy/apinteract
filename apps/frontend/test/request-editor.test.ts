@@ -734,6 +734,9 @@ describe("RequestEditor", () => {
     const buttons = wrapper.findAll(".command-bar button");
     const save = buttons.find((button) => button.text().includes("Save"));
     const send = buttons.find((button) => button.text().includes("Send"));
+    expect(wrapper.find(".draft-revision").exists()).toBe(false);
+    expect(save?.attributes("aria-label")).toBe("Save");
+    expect(send?.attributes("aria-label")).toBe("Send");
     expect(save?.attributes("disabled")).toBeUndefined();
     expect(send?.attributes("disabled")).toBeUndefined();
     await send?.trigger("click");

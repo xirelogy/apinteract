@@ -157,8 +157,7 @@ test("creates, restores, and sends the first workspace request", async ({
       page.getByRole("button", { name: "Open workspace navigator" }),
     ).toBeVisible();
   }
-  const draftRevision = page.locator(".draft-revision");
-  await expect(draftRevision).toHaveText("Temporary");
+  await expect(page.locator(".draft-revision")).toHaveCount(0);
   await page.getByLabel("Request name", { exact: true }).fill(requestName);
   await page.getByLabel("Target URL").fill("<<base_url>>/echo");
   await expect(
@@ -216,7 +215,6 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.locator(".body-preview")).toContainText(
     `"body":"payload-environment-${suffix}-workspace-${suffix}-collection-${suffix}-collection"`,
   );
-  await expect(draftRevision).toHaveText("Temporary");
   await expect(
     workspaceTree.getByRole("treeitem", {
       name: `POST ${requestName}`,
@@ -314,7 +312,6 @@ test("creates, restores, and sends the first workspace request", async ({
   });
   await expect(requestNode).toHaveClass(/is-selected/u);
   await expect(subcollection.locator("..")).not.toHaveClass(/is-selected/u);
-  await expect(draftRevision).toHaveText("Draft 0");
 
   await page.getByRole("tab", { name: "Variables" }).click();
   const requestVariables = page.locator(".request-variables-editor");
@@ -380,7 +377,6 @@ test("creates, restores, and sends the first workspace request", async ({
     `Request: ${requestName}`,
   );
   await expect(page.getByRole("tooltip")).toContainText(`request-${suffix}`);
-  await expect(draftRevision).toHaveText("Draft 0");
 
   await openNavigator(page, mobile);
   const selectedLeaf = workspaceTree.getByRole("treeitem", {
@@ -421,7 +417,6 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.locator(".body-preview")).toContainText(
     `"body":"payload-request-${suffix}-workspace-${suffix}-collection-${suffix}-request"`,
   );
-  await expect(draftRevision).toHaveText("Draft 0");
 
   const freshRequestName = `Fresh save ${suffix}`;
   await page.getByRole("button", { name: "New temporary request" }).click();
@@ -443,7 +438,7 @@ test("creates, restores, and sends the first workspace request", async ({
       .locator(".."),
   ).toHaveClass(/is-selected/u);
   await freshSaveDialog.getByRole("button", { name: "Save" }).click();
-  await expect(page.locator(".draft-revision")).toHaveText("Draft 0");
+  await expect(page.locator(".draft-revision")).toHaveCount(0);
   await expect(page.getByLabel("Request name", { exact: true })).toHaveValue(
     freshRequestName,
   );
