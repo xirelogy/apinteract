@@ -28,6 +28,11 @@
   --space-4: 1rem;
   --space-5: 1.5rem;
   --space-6: 2rem;
+  --focus-outline-width: 0.125rem;
+  --focus-outline-offset: 0.125rem;
+  --focus-outline-clearance: calc(
+    var(--focus-outline-width) + var(--focus-outline-offset)
+  );
   --control-height-compact: 1.875rem;
   --control-height-dense: 2.125rem;
   --control-height: 2.25rem;

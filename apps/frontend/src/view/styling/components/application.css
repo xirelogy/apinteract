@@ -425,6 +425,11 @@
   scrollbar-width: thin;
 }
 
+/* Edge-to-edge tab controls cannot reserve an external focus-ring gutter. */
+.request-tab-strip button:focus-visible {
+  outline-offset: calc(-1 * var(--focus-outline-width));
+}
+
 .request-tab-mobile {
   display: none;
 }
@@ -623,7 +628,9 @@
 
 .workspace-tree {
   min-width: 0;
+  margin: calc(-1 * var(--focus-outline-clearance));
   overflow-x: auto;
+  padding: var(--focus-outline-clearance);
 }
 
 .workspace-tree-root,
@@ -692,7 +699,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  margin: calc(-1 * var(--focus-outline-clearance));
   overflow: auto;
+  padding: var(--focus-outline-clearance);
 }
 
 .request-version-card {
@@ -1061,7 +1070,11 @@
 .request-settings-tabs > .tabs-panel {
   min-width: 0;
   min-height: 0;
+  margin-inline: calc(-1 * var(--focus-outline-clearance));
+  margin-block-end: calc(-1 * var(--focus-outline-clearance));
   overflow: auto;
+  padding-inline: var(--focus-outline-clearance);
+  padding-block-end: var(--focus-outline-clearance);
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
@@ -1301,15 +1314,35 @@
 .request-body-file {
   min-width: 0;
   min-height: 0;
+  margin: calc(-1 * var(--focus-outline-clearance));
   overflow: auto;
+  padding: var(--focus-outline-clearance);
 }
 
 .request-form-fields {
   min-width: 0;
   min-height: 0;
+  margin: calc(-1 * var(--focus-outline-clearance));
   overflow: auto;
+  padding: var(--focus-outline-clearance);
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+/* Focus scrolling must account for decorations painted outside the control. */
+:where(
+    .workspace-tree,
+    .request-version-list,
+    .request-settings-tabs > .tabs-panel,
+    .request-body-file,
+    .request-form-fields,
+    .collection-properties-tabs > .tabs-panel,
+    .collection-picker
+  )
+  :focus-visible {
+  scroll-margin: calc(
+    var(--focus-outline-clearance) + var(--focus-outline-width)
+  );
 }
 
 .form-value-field {
@@ -1512,6 +1545,11 @@
 
 .response-tabs {
   border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Response tabs sit directly against an intentionally clipped panel edge. */
+.response-tabs .tab-button:focus-visible {
+  outline-offset: calc(-1 * var(--focus-outline-width));
 }
 
 .response-headers,
@@ -1817,12 +1855,18 @@
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
+  margin: calc(-1 * var(--focus-outline-clearance));
   overflow: hidden;
+  padding: var(--focus-outline-clearance);
 }
 
 .collection-properties-tabs > .tabs-panel {
   min-height: 0;
+  margin-inline: calc(-1 * var(--focus-outline-clearance));
+  margin-block-end: calc(-1 * var(--focus-outline-clearance));
   overflow-y: auto;
+  padding-inline: var(--focus-outline-clearance);
+  padding-block-end: var(--focus-outline-clearance);
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
