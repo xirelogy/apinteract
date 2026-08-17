@@ -1,5 +1,13 @@
 import { v7 as uuidV7 } from "uuid";
 
+import {
+  BrowserRequestSessionStorage,
+  redactSecretVariableWrites,
+  type LocalRequestSessionSnapshot,
+  type LocalRequestTabSnapshot,
+  type RequestSessionStorage,
+  type RestoredRequestTabEntry,
+} from "@/control/persistence/request-session-storage";
 import type {
   CollectionView,
   EnvironmentListView,
@@ -24,11 +32,13 @@ import type {
 import { useApplicationStore } from "@/control/state/application-store";
 import type { SessionController } from "@/control/session/session-controller";
 import type { BackendWebSocketClient } from "@/control/transport/websocket-client";
-import type {
-  ApplicationError,
-  ApplicationErrorCode,
-  RequestDraftInput,
-  RequestTab,
+import {
+  isRequestTabDirty,
+  type RequestRecoveryWarning,
+  type ApplicationError,
+  type ApplicationErrorCode,
+  type RequestDraftInput,
+  type RequestTab,
 } from "@/model/domain/application";
 
 class WorkflowError extends Error {
@@ -49,6 +59,7 @@ class WorkflowError extends Error {
 export class ApplicationController {
   readonly session: SessionController;
   readonly #webSocket: BackendWebSocketClient;
+  readonly #requestSessionStorage: RequestSessionStorage;
   #previewNames: readonly string[] = [];
   #previewContext: {
     readonly parentCollectionId: string | null;
@@ -56,10 +67,20 @@ export class ApplicationController {
     readonly requestTabId: string | null;
   } | null = null;
   #previewSequence = 0;
+  #persistenceUserId: string | null = null;
+  #persistenceTimer: ReturnType<typeof setTimeout> | null = null;
+  #stopPersistenceSubscription: (() => void) | null = null;
+  #persistenceQueue: Promise<void> = Promise.resolve();
+  #lastPersistenceSignature: string | null = null;
 
-  constructor(session: SessionController, webSocket: BackendWebSocketClient) {
+  constructor(
+    session: SessionController,
+    webSocket: BackendWebSocketClient,
+    requestSessionStorage: RequestSessionStorage = new BrowserRequestSessionStorage(),
+  ) {
     this.session = session;
     this.#webSocket = webSocket;
+    this.#requestSessionStorage = requestSessionStorage;
     this.#webSocket.onEvent((event) => {
       if (
         event.type === "execution.response_head" ||
@@ -78,8 +99,218 @@ export class ApplicationController {
       const result = await this.#webSocket.command<{
         workspaces: WorkspaceSummary[];
       }>("workspace.list", {});
-      useApplicationStore().workspaces = result.workspaces;
+      const store = useApplicationStore();
+      store.workspaces = result.workspaces;
+      const userId = store.session?.user.userId;
+      if (userId !== undefined) {
+        await this.#restoreLocalRequestSession(userId, result.workspaces);
+      }
     });
+    const userId = useApplicationStore().session?.user.userId;
+    if (userId !== undefined) {
+      this.#startLocalSessionPersistence(userId);
+    }
+  }
+
+  /** Logs out and removes request drafts retained for the current local user. */
+  async logout(): Promise<void> {
+    const userId = useApplicationStore().session?.user.userId ?? null;
+    await this.#stopLocalSessionPersistence();
+    try {
+      await this.session.logout();
+    } catch (cause) {
+      if (userId !== null) this.#startLocalSessionPersistence(userId);
+      throw cause;
+    }
+    if (userId !== null) {
+      await this.#requestSessionStorage.clear(userId).catch(() => undefined);
+    }
+  }
+
+  /** Restores valid local tabs and reconciles saved requests with backend state. */
+  async #restoreLocalRequestSession(
+    userId: string,
+    workspaces: readonly WorkspaceSummary[],
+  ): Promise<void> {
+    const restored = await this.#requestSessionStorage
+      .load(userId)
+      .catch(() => null);
+    if (restored === null) return;
+    const workspaceIds = new Set(
+      workspaces.map((workspace) => workspace.workspaceId),
+    );
+    let selectedWorkspaceId =
+      restored.selectedWorkspaceId !== null &&
+      workspaceIds.has(restored.selectedWorkspaceId)
+        ? restored.selectedWorkspaceId
+        : null;
+    if (selectedWorkspaceId !== null) {
+      try {
+        await this.#selectWorkspace(selectedWorkspaceId);
+      } catch {
+        selectedWorkspaceId = null;
+        this.#clearWorkspaceSelection();
+      }
+    }
+    const tabs = await Promise.all(
+      restored.tabs.map((entry) =>
+        this.#restoreLocalRequestTab(entry, workspaceIds),
+      ),
+    );
+    const store = useApplicationStore();
+    store.requestTabs = tabs.filter((tab): tab is RequestTab => tab !== null);
+    store.activeRequestTabId = store.requestTabs.some(
+      (tab) => tab.tabId === restored.activeRequestTabId,
+    )
+      ? restored.activeRequestTabId
+      : (store.requestTabs.find(
+          (tab) => tab.workspaceId === selectedWorkspaceId,
+        )?.tabId ?? null);
+    if (selectedWorkspaceId !== null) {
+      await this.#refreshOpenRequestContexts(selectedWorkspaceId).catch(
+        () => undefined,
+      );
+    }
+  }
+
+  /** Rebuilds one local tab without trusting derived or transient browser state. */
+  async #restoreLocalRequestTab(
+    entry: RestoredRequestTabEntry,
+    workspaceIds: ReadonlySet<string>,
+  ): Promise<RequestTab | null> {
+    if (!workspaceIds.has(entry.workspaceId)) return null;
+    if (entry.requestId === null) {
+      const snapshot = entry.snapshot;
+      if (snapshot === null || snapshot.requestId !== null) return null;
+      return {
+        tabId: entry.tabId,
+        workspaceId: entry.workspaceId,
+        request: null,
+        draft: cloneDraft(snapshot.draft),
+        baseline: null,
+        variableProfile: null,
+        variableDraft: cloneVariableWrites(snapshot.variableDraft ?? []),
+        variableBaseline: [],
+        pendingParentCollectionId: snapshot.pendingParentCollectionId,
+        inheritedTarget: "",
+        inheritedHeaders: [],
+        execution: null,
+        revisions: [],
+        viewingRevision: null,
+        recoveryWarnings: snapshotRecoveryWarnings(snapshot),
+        busy: false,
+      };
+    }
+    try {
+      const request = await this.#webSocket.command<RequestView>(
+        "request.get",
+        { requestId: entry.requestId },
+      );
+      if (request.workspaceId !== entry.workspaceId) return null;
+      const baseline = requestToDraft(request);
+      const snapshot = entry.snapshot;
+      const warnings = new Set<RequestRecoveryWarning>(
+        snapshot === null ? [] : snapshotRecoveryWarnings(snapshot),
+      );
+      const draft =
+        snapshot?.draftDirty === true ? cloneDraft(snapshot.draft) : baseline;
+      if (
+        snapshot?.draftDirty === true &&
+        snapshot.baseDraftRevision !== request.draftRevision
+      ) {
+        warnings.add("stale");
+      }
+      let variableProfile: VariableProfileView | null = null;
+      let variableDraft: VariableWrite[] | null = null;
+      let variableBaseline: VariableWrite[] | null = null;
+      if (snapshot?.variableDirty === true && snapshot.variableDraft !== null) {
+        variableProfile = await this.#webSocket.command<VariableProfileView>(
+          "variable_profile.get",
+          { scopeKind: "request", scopeId: request.requestId },
+        );
+        variableBaseline = variableViewsToWrites(variableProfile.variables);
+        variableDraft = cloneVariableWrites(snapshot.variableDraft);
+        if (snapshot.baseVariableRevision !== variableProfile.revision) {
+          warnings.add("stale");
+        }
+      }
+      return {
+        tabId: entry.tabId,
+        workspaceId: entry.workspaceId,
+        request,
+        draft,
+        baseline: cloneDraft(baseline),
+        variableProfile,
+        variableDraft,
+        variableBaseline,
+        pendingParentCollectionId: null,
+        inheritedTarget: request.inheritedTarget,
+        inheritedHeaders: request.inheritedHeaders.map((field) => ({
+          ...field,
+        })),
+        execution: null,
+        revisions: [],
+        viewingRevision: null,
+        recoveryWarnings: [...warnings],
+        busy: false,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Starts debounced persistence after restoration has finished mutating state. */
+  #startLocalSessionPersistence(userId: string): void {
+    if (this.#persistenceUserId === userId) return;
+    this.#stopPersistenceSubscription?.();
+    this.#persistenceUserId = userId;
+    this.#lastPersistenceSignature = null;
+    this.#stopPersistenceSubscription = useApplicationStore().$subscribe(
+      () => this.#scheduleLocalSessionPersistence(),
+      { detached: true, flush: "sync" },
+    );
+    this.#scheduleLocalSessionPersistence();
+  }
+
+  /** Stops future writes and waits for any already queued write to settle. */
+  async #stopLocalSessionPersistence(): Promise<void> {
+    this.#stopPersistenceSubscription?.();
+    this.#stopPersistenceSubscription = null;
+    this.#persistenceUserId = null;
+    if (this.#persistenceTimer !== null) {
+      clearTimeout(this.#persistenceTimer);
+      this.#persistenceTimer = null;
+    }
+    await this.#persistenceQueue;
+  }
+
+  /** Coalesces rapid editor mutations into one local database transaction. */
+  #scheduleLocalSessionPersistence(): void {
+    if (this.#persistenceUserId === null) return;
+    if (this.#persistenceTimer !== null) {
+      clearTimeout(this.#persistenceTimer);
+    }
+    this.#persistenceTimer = setTimeout(() => {
+      this.#persistenceTimer = null;
+      this.#persistLocalRequestSession();
+    }, 150);
+  }
+
+  /** Queues the latest serializable workbench projection in mutation order. */
+  #persistLocalRequestSession(): void {
+    const userId = this.#persistenceUserId;
+    if (userId === null) return;
+    const snapshot = localRequestSessionSnapshot(useApplicationStore());
+    const signature = JSON.stringify(snapshot);
+    if (signature === this.#lastPersistenceSignature) return;
+    this.#lastPersistenceSignature = signature;
+    this.#persistenceQueue = this.#persistenceQueue
+      .then(() => this.#requestSessionStorage.save(userId, snapshot))
+      .catch(() => {
+        if (this.#lastPersistenceSignature === signature) {
+          this.#lastPersistenceSignature = null;
+        }
+      });
   }
 
   /** Uploads one immutable multipart attachment with shared workflow errors. */
@@ -168,6 +399,11 @@ export class ApplicationController {
       store.activeRequestTabId =
         store.requestTabs.find((tab) => tab.workspaceId === workspaceId)
           ?.tabId ?? null;
+    }
+    if (store.requestTabs.some((tab) => tab.workspaceId === workspaceId)) {
+      await this.#refreshOpenRequestContexts(workspaceId).catch(
+        () => undefined,
+      );
     }
   }
 
@@ -973,6 +1209,7 @@ export class ApplicationController {
         variableDraft: savedVariables,
         variableBaseline:
           savedVariables === null ? null : cloneVariableWrites(savedVariables),
+        recoveryWarnings: [],
       }));
       if (updatedVariableProfile !== null) {
         useApplicationStore().selectedVariableProfile = updatedVariableProfile;
@@ -1020,6 +1257,7 @@ export class ApplicationController {
         variableBaseline: cloneVariableWrites(pendingVariables),
         revisions: [],
         viewingRevision: null,
+        recoveryWarnings: [],
       }));
       const variableProfile =
         await this.#webSocket.command<VariableProfileView>(
@@ -1230,6 +1468,7 @@ export class ApplicationController {
       execution: null,
       revisions: [],
       viewingRevision: null,
+      recoveryWarnings: [],
       busy: false,
     };
     store.requestTabs.push(tab);
@@ -1408,6 +1647,54 @@ export class ApplicationController {
       }));
     }
   }
+}
+
+/** Projects workbench state into the versioned, secret-safe persistence shape. */
+function localRequestSessionSnapshot(
+  store: ReturnType<typeof useApplicationStore>,
+): LocalRequestSessionSnapshot {
+  return {
+    selectedWorkspaceId: store.selectedWorkspaceId,
+    activeRequestTabId: store.activeRequestTabId,
+    tabs: store.requestTabs.map((tab): LocalRequestTabSnapshot => {
+      const safeVariables = redactSecretVariableWrites(tab.variableDraft);
+      const warnings = new Set<RequestRecoveryWarning>(
+        tab.recoveryWarnings ?? [],
+      );
+      if (safeVariables.omittedSecretValues) {
+        warnings.add("secrets-omitted");
+      }
+      const draftDirty =
+        tab.baseline === null ||
+        JSON.stringify(tab.draft) !== JSON.stringify(tab.baseline);
+      const variableDirty =
+        JSON.stringify(tab.variableDraft) !==
+        JSON.stringify(tab.variableBaseline);
+      return {
+        tabId: tab.tabId,
+        workspaceId: tab.workspaceId,
+        requestId: tab.request?.requestId ?? null,
+        baseDraftRevision: tab.request?.draftRevision ?? null,
+        baseVariableRevision: tab.variableProfile?.revision ?? null,
+        pendingParentCollectionId: tab.pendingParentCollectionId,
+        draft: cloneDraft(tab.draft),
+        draftDirty: isRequestTabDirty(tab) && draftDirty,
+        variableDraft: safeVariables.variables,
+        variableDirty: isRequestTabDirty(tab) && variableDirty,
+        omittedSecretValues: safeVariables.omittedSecretValues,
+        recoveryWarnings: [...warnings],
+      };
+    }),
+  };
+}
+
+/** Reconstructs persistent recovery warnings without duplicating entries. */
+function snapshotRecoveryWarnings(
+  snapshot: LocalRequestTabSnapshot,
+): RequestRecoveryWarning[] {
+  const warnings = new Set(snapshot.recoveryWarnings);
+  if (snapshot.omittedSecretValues) warnings.add("secrets-omitted");
+  return [...warnings];
 }
 
 /** Returns a required selection or raises a user-facing workflow error. */

@@ -983,8 +983,15 @@
 }
 
 .request-title {
+  display: grid;
   min-width: 0;
   flex: 1 1 auto;
+  gap: var(--space-1);
+}
+
+.request-recovery-warning {
+  color: var(--warning);
+  font-size: var(--font-size-xs);
 }
 
 .command-bar,

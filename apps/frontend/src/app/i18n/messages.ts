@@ -288,6 +288,12 @@ export const enUsMessages = {
     rawBody: "Raw request body",
     removeField: "Remove {kind} field {index}",
     removeFieldTitle: "Remove {kind} field",
+    recovery: {
+      "secrets-omitted":
+        "Unsaved secret values were not stored locally and must be entered again.",
+      stale:
+        "This recovered draft was based on an older saved request. Review it before saving.",
+    },
     requestSettings: "Request settings",
     resizePanes: "Resize request and response panes",
     saveDialog: "Save request",

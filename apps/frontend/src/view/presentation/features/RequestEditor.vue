@@ -35,7 +35,10 @@ import type {
   VariablePreview,
   VariableWrite,
 } from "@/model/contracts/backend";
-import type { RequestDraftInput } from "@/model/domain/application";
+import type {
+  RequestDraftInput,
+  RequestRecoveryWarning,
+} from "@/model/domain/application";
 import {
   createBlankHeaderField,
   editableRequestFields,
@@ -87,6 +90,7 @@ const props = withDefaults(
     canEdit?: boolean;
     revisions?: readonly RequestRevisionSummary[];
     viewingRevision?: RequestRevisionView | null;
+    recoveryWarnings?: readonly RequestRecoveryWarning[];
     uploadAttachment?: ((file: File) => Promise<RequestAttachment>) | null;
   }>(),
   {
@@ -98,6 +102,7 @@ const props = withDefaults(
     canEdit: true,
     revisions: () => [],
     viewingRevision: null,
+    recoveryWarnings: () => [],
     uploadAttachment: null,
   },
 );
@@ -1032,6 +1037,14 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               :disabled="editorDisabled"
               @input="emitChange"
             />
+            <p
+              v-for="warning in recoveryWarnings"
+              :key="warning"
+              class="request-recovery-warning"
+              role="status"
+            >
+              {{ t(`request.recovery.${warning}`) }}
+            </p>
           </div>
           <div class="command-bar">
             <ButtonControl

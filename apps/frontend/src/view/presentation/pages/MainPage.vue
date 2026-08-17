@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -160,24 +160,12 @@ const errorMessage = computed(() => {
 });
 
 onMounted(async () => {
-  window.addEventListener("beforeunload", protectUnsavedTabs);
   await controller.initializeWorkspace().catch(() => undefined);
 });
 
-onBeforeUnmount(() => {
-  window.removeEventListener("beforeunload", protectUnsavedTabs);
-});
-
-/** Warns before browser navigation would discard unsaved request tabs. */
-function protectUnsavedTabs(event: BeforeUnloadEvent): void {
-  if (requestTabs.value.some(isRequestTabDirty)) {
-    event.preventDefault();
-  }
-}
-
 /** Ends the current session and returns to the login view. */
 async function logout(): Promise<void> {
-  await controller.session.logout();
+  await controller.logout();
   await router.push("/login");
 }
 
@@ -768,6 +756,7 @@ function discardRequestTab(): void {
             :can-edit="canEditWorkspace"
             :revisions="activeTab?.revisions ?? []"
             :viewing-revision="activeTab?.viewingRevision ?? null"
+            :recovery-warnings="activeTab?.recoveryWarnings ?? []"
             :upload-attachment="uploadActiveRequestAttachment"
             @change="updateActiveRequestDraft"
             @save="saveRequest"

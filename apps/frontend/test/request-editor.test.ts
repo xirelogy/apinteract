@@ -17,6 +17,45 @@ Object.defineProperty(Range.prototype, "getClientRects", {
 });
 
 describe("RequestEditor", () => {
+  it("shows warnings for stale drafts and omitted secret values", () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft: {
+          name: "Recovered request",
+          method: "GET",
+          targetMode: "absolute",
+          targetUrl: "https://example.test",
+          query: [],
+          headers: [],
+          requestBody: { kind: "none" },
+          body: "",
+          preRequestScript: "",
+          postResponseScript: "",
+        },
+        execution: null,
+        tabId: "recovered-tab",
+        temporary: true,
+        inheritedHeaders: [],
+        busy: false,
+        recoveryWarnings: ["stale", "secrets-omitted"],
+      },
+      global: { plugins: [i18n] },
+    });
+
+    expect(wrapper.text()).toContain(
+      "This recovered draft was based on an older saved request.",
+    );
+    expect(wrapper.text()).toContain(
+      "Unsaved secret values were not stored locally",
+    );
+  });
+
   it("switches the whole editor to a read-only immutable version", async () => {
     const i18n = createI18n({
       legacy: false,

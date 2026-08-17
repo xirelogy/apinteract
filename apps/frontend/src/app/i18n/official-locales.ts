@@ -277,6 +277,10 @@ const zhHansMessages = {
     rawBody: "原始请求体",
     removeField: "移除第 {index} 个{kind}字段",
     removeFieldTitle: "移除{kind}字段",
+    recovery: {
+      "secrets-omitted": "未保存的密钥值不会存储在本地，请重新输入。",
+      stale: "此恢复的草稿基于较旧的已保存请求，请在保存前检查。",
+    },
     requestSettings: "请求设置",
     resizePanes: "调整请求和响应窗格大小",
     saveDialog: "保存请求",
@@ -693,6 +697,10 @@ const zhHantMessages = {
     rawBody: "原始請求本文",
     removeField: "移除第 {index} 個{kind}欄位",
     removeFieldTitle: "移除{kind}欄位",
+    recovery: {
+      "secrets-omitted": "未儲存的密鑰值不會儲存在本機，請重新輸入。",
+      stale: "此復原的草稿基於較舊的已儲存請求，請在儲存前檢查。",
+    },
     requestSettings: "請求設定",
     resizePanes: "調整請求和回應窗格大小",
     saveDialog: "儲存請求",

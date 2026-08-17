@@ -40,6 +40,8 @@ export interface RequestDraftInput {
   readonly postResponseScript: string;
 }
 
+export type RequestRecoveryWarning = "stale" | "secrets-omitted";
+
 export interface RequestTab {
   readonly tabId: string;
   readonly workspaceId: string;
@@ -55,6 +57,7 @@ export interface RequestTab {
   readonly execution: ExecutionView | null;
   readonly revisions: readonly RequestRevisionSummary[];
   readonly viewingRevision: RequestRevisionView | null;
+  readonly recoveryWarnings?: readonly RequestRecoveryWarning[];
   readonly busy: boolean;
 }
 

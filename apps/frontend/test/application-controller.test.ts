@@ -1,11 +1,47 @@
 import { createPinia, setActivePinia } from "pinia";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApplicationController } from "../src/control/application/application-controller";
+import type {
+  LocalRequestSessionSnapshot,
+  RequestSessionStorage,
+  RestoredRequestSession,
+} from "../src/control/persistence/request-session-storage";
 import type { SessionController } from "../src/control/session/session-controller";
 import { useApplicationStore } from "../src/control/state/application-store";
 import type { BackendWebSocketClient } from "../src/control/transport/websocket-client";
 import { isRequestTabDirty } from "../src/model/domain/application";
+
+class FakeRequestSessionStorage implements RequestSessionStorage {
+  readonly saves: LocalRequestSessionSnapshot[] = [];
+  readonly clearedUserIds: string[] = [];
+  restored: RestoredRequestSession | null;
+
+  constructor(restored: RestoredRequestSession | null = null) {
+    this.restored = restored;
+  }
+
+  /** Returns the test's configured local session. */
+  load(): Promise<RestoredRequestSession | null> {
+    return Promise.resolve(this.restored);
+  }
+
+  /** Captures a detached copy of one persistence projection. */
+  save(_userId: string, snapshot: LocalRequestSessionSnapshot): Promise<void> {
+    this.saves.push(structuredClone(snapshot));
+    return Promise.resolve();
+  }
+
+  /** Records local cleanup for the supplied user. */
+  clear(userId: string): Promise<void> {
+    this.clearedUserIds.push(userId);
+    return Promise.resolve();
+  }
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("ApplicationController workspaces", () => {
   it("loads visible workspaces without selecting a default", async () => {
@@ -86,6 +122,221 @@ describe("ApplicationController workspaces", () => {
     expect(store.selectedCollectionId).toBeNull();
     expect(store.expandedCollectionIds).toEqual([]);
     expect(command).not.toHaveBeenCalled();
+  });
+});
+
+describe("ApplicationController local request recovery", () => {
+  it("restores selected workspace, tab order, drafts, and stale warnings", async () => {
+    setActivePinia(createPinia());
+    const userId = "019facab-1eee-765f-bd9f-ac2449151db1";
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151db2";
+    const requestId = "019facab-1eee-765f-bd9f-ac2449151db3";
+    const savedTabId = "019facab-1eee-765f-bd9f-ac2449151db4";
+    const temporaryTabId = "019facab-1eee-765f-bd9f-ac2449151db5";
+    const request = {
+      requestId,
+      workspaceId,
+      parentCollectionId: null,
+      name: "Backend request",
+      method: "GET" as const,
+      targetMode: "absolute" as const,
+      targetUrl: "https://example.test/backend",
+      inheritedTarget: "",
+      queryMode: "structured" as const,
+      query: [],
+      headers: [],
+      inheritedHeaders: [],
+      body: "",
+      requestBody: { kind: "none" as const },
+      preRequestScript: "",
+      postResponseScript: "",
+      draftRevision: 3,
+    };
+    const recoveredDraft = {
+      name: "Recovered request",
+      method: "POST" as const,
+      targetMode: "absolute" as const,
+      targetUrl: "https://example.test/recovered",
+      query: [],
+      headers: [],
+      requestBody: { kind: "text" as const, contentType: null, text: "draft" },
+      body: "draft",
+      preRequestScript: "",
+      postResponseScript: "",
+    };
+    const temporaryDraft = {
+      ...recoveredDraft,
+      name: "Temporary request",
+    };
+    const storage = new FakeRequestSessionStorage({
+      selectedWorkspaceId: workspaceId,
+      activeRequestTabId: temporaryTabId,
+      tabs: [
+        {
+          tabId: savedTabId,
+          workspaceId,
+          requestId,
+          snapshot: {
+            tabId: savedTabId,
+            workspaceId,
+            requestId,
+            baseDraftRevision: 2,
+            baseVariableRevision: null,
+            pendingParentCollectionId: null,
+            draft: recoveredDraft,
+            draftDirty: true,
+            variableDraft: null,
+            variableDirty: false,
+            omittedSecretValues: false,
+            recoveryWarnings: [],
+          },
+        },
+        {
+          tabId: temporaryTabId,
+          workspaceId,
+          requestId: null,
+          snapshot: {
+            tabId: temporaryTabId,
+            workspaceId,
+            requestId: null,
+            baseDraftRevision: null,
+            baseVariableRevision: null,
+            pendingParentCollectionId: null,
+            draft: temporaryDraft,
+            draftDirty: true,
+            variableDraft: [],
+            variableDirty: false,
+            omittedSecretValues: true,
+            recoveryWarnings: ["secrets-omitted"],
+          },
+        },
+      ],
+    });
+    const command = vi.fn((type: string) => {
+      if (type === "workspace.list") {
+        return {
+          workspaces: [{ workspaceId, name: "Workspace", role: "owner" }],
+        };
+      }
+      if (type === "tree.list") return { children: [] };
+      if (type === "environment.list") {
+        return { environments: [], selectedEnvironmentId: null };
+      }
+      if (type === "workspace.get") {
+        return {
+          workspaceId,
+          name: "Workspace",
+          role: "owner",
+          baseUrl: "https://example.test",
+          headers: [],
+          revision: 1,
+        };
+      }
+      if (type === "request.get") return request;
+      throw new Error(`Unexpected command ${type}`);
+    });
+    const session = { logout: vi.fn().mockResolvedValue(undefined) };
+    const controller = new ApplicationController(
+      session as unknown as SessionController,
+      { command, onEvent: vi.fn() } as unknown as BackendWebSocketClient,
+      storage,
+    );
+    const store = useApplicationStore();
+    store.session = {
+      sessionId: "019facab-1eee-765f-bd9f-ac2449151db6",
+      user: { userId, username: "alice", displayName: "Alice" },
+      createdAt: "2026-08-17T01:00:00.000Z",
+      absoluteExpiresAt: "2026-08-18T01:00:00.000Z",
+    };
+
+    await controller.initializeWorkspace();
+
+    expect(store.selectedWorkspaceId).toBe(workspaceId);
+    expect(store.requestTabs.map((tab) => tab.tabId)).toEqual([
+      savedTabId,
+      temporaryTabId,
+    ]);
+    expect(store.activeRequestTabId).toBe(temporaryTabId);
+    expect(store.requestTabs[0]?.draft.name).toBe("Recovered request");
+    expect(store.requestTabs[0]?.recoveryWarnings).toContain("stale");
+    expect(store.requestTabs[1]?.inheritedTarget).toBe("https://example.test");
+    expect(store.requestTabs[1]?.recoveryWarnings).toContain("secrets-omitted");
+
+    await controller.logout();
+    expect(session.logout).toHaveBeenCalledOnce();
+    expect(storage.clearedUserIds).toEqual([userId]);
+  });
+
+  it("persists tab manifests and redacts plaintext secret drafts", async () => {
+    vi.useFakeTimers();
+    setActivePinia(createPinia());
+    const userId = "019facab-1eee-765f-bd9f-ac2449151dc1";
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151dc2";
+    const tabId = "019facab-1eee-765f-bd9f-ac2449151dc3";
+    const storage = new FakeRequestSessionStorage();
+    const session = { logout: vi.fn().mockResolvedValue(undefined) };
+    const controller = new ApplicationController(
+      session as unknown as SessionController,
+      {
+        command: vi.fn().mockResolvedValue({ workspaces: [] }),
+        onEvent: vi.fn(),
+      } as unknown as BackendWebSocketClient,
+      storage,
+    );
+    const store = useApplicationStore();
+    store.session = {
+      sessionId: "019facab-1eee-765f-bd9f-ac2449151dc4",
+      user: { userId, username: "alice", displayName: "Alice" },
+      createdAt: "2026-08-17T01:00:00.000Z",
+      absoluteExpiresAt: "2026-08-18T01:00:00.000Z",
+    };
+    await controller.initializeWorkspace();
+    store.$patch({
+      activeRequestTabId: tabId,
+      requestTabs: [
+        {
+          tabId,
+          workspaceId,
+          request: null,
+          draft: {
+            name: "Secret request",
+            method: "GET",
+            targetMode: "absolute",
+            targetUrl: "https://example.test",
+            query: [],
+            headers: [],
+            requestBody: { kind: "none" },
+            body: "",
+            preRequestScript: "",
+            postResponseScript: "",
+          },
+          baseline: null,
+          variableProfile: null,
+          variableDraft: [
+            { name: "token", kind: "secret", value: "do-not-store" },
+          ],
+          variableBaseline: [],
+          pendingParentCollectionId: null,
+          inheritedTarget: "",
+          inheritedHeaders: [],
+          execution: null,
+          revisions: [],
+          viewingRevision: null,
+          busy: false,
+        },
+      ],
+    });
+
+    await vi.advanceTimersByTimeAsync(151);
+    await Promise.resolve();
+
+    const persistedTab = storage.saves.at(-1)?.tabs[0];
+    expect(persistedTab?.variableDraft).toEqual([
+      { name: "token", kind: "secret" },
+    ]);
+    expect(persistedTab?.omittedSecretValues).toBe(true);
+    expect(persistedTab?.recoveryWarnings).toContain("secrets-omitted");
+    await controller.logout();
   });
 });
 
