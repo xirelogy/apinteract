@@ -289,6 +289,11 @@ function save(): void {
               :previews="variablePreviews"
               :aria-describedby="describedBy"
               :aria-label="t('collection.pathPrefix')"
+              :placeholder="
+                collection.inheritedTarget === ''
+                  ? t('request.targetUrlPlaceholder')
+                  : t('request.requestPathPlaceholder')
+              "
               :invalid="invalid"
               font="mono"
               autocomplete="off"

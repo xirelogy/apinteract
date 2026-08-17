@@ -188,6 +188,7 @@ describe("CollectionPropertiesDialog", () => {
     const targetPrefix = wrapper.get<HTMLInputElement>(
       'input[aria-label="Target prefix"]',
     );
+    expect(targetPrefix.attributes("placeholder")).toBe("Request path");
     targetPrefix.element.setSelectionRange(11, 11);
     await targetPrefix.trigger("focus");
     await targetPrefix.trigger("keyup");
@@ -238,6 +239,11 @@ describe("CollectionPropertiesDialog", () => {
     });
 
     expect(wrapper.find(".resource-dialog-context").exists()).toBe(false);
+    expect(
+      wrapper
+        .get('input[aria-label="Target prefix"]')
+        .attributes("placeholder"),
+    ).toBe("Request URL");
     await wrapper
       .get('input[aria-label="Collection name"]')
       .setValue("Renamed examples");

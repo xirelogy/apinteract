@@ -734,6 +734,12 @@ describe("RequestEditor", () => {
     const buttons = wrapper.findAll(".command-bar button");
     const save = buttons.find((button) => button.text().includes("Save"));
     const send = buttons.find((button) => button.text().includes("Send"));
+    expect(
+      wrapper.get('input[aria-label="Request name"]').attributes("placeholder"),
+    ).toBe("Request title");
+    expect(
+      wrapper.get('input[aria-label="Target URL"]').attributes("placeholder"),
+    ).toBe("Request URL");
     expect(wrapper.find(".draft-revision").exists()).toBe(false);
     expect(save?.attributes("aria-label")).toBe("Save");
     expect(send?.attributes("aria-label")).toBe("Send");
@@ -800,6 +806,11 @@ describe("RequestEditor", () => {
           .element as HTMLInputElement
       ).value,
     ).toBe("/42");
+    expect(
+      wrapper
+        .get('input[aria-label="Request path"]')
+        .attributes("placeholder"),
+    ).toBe("Request path");
     const targetMode = wrapper.get('.target-mode-picker [role="combobox"]');
     expect(targetMode.text()).not.toContain("Composed");
     expect(targetMode.find("svg").exists()).toBe(true);
@@ -822,6 +833,12 @@ describe("RequestEditor", () => {
     expect(wrapper.emitted("preview")).toEqual([
       [["service_host", "api_version"]],
     ]);
+    await wrapper.setProps({ inheritedTarget: "" });
+    expect(
+      wrapper
+        .get('input[aria-label="Request path"]')
+        .attributes("placeholder"),
+    ).toBe("Request URL");
     vi.useRealTimers();
   });
 

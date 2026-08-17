@@ -296,7 +296,7 @@ export const enUsMessages = {
     temporary: "Temporary",
     inheritedTarget: "Inherited target",
     requestPath: "Request path",
-    requestPathPlaceholder: "/resource/{id}",
+    requestPathPlaceholder: "Request path",
     targetMode: "Target mode",
     targetModes: {
       absolute: "Absolute",
@@ -304,7 +304,8 @@ export const enUsMessages = {
     },
     targetUnavailable: "Configure an absolute workspace or collection prefix",
     targetUrl: "Target URL",
-    targetUrlPlaceholder: "https://api.example.com/resource",
+    targetUrlPlaceholder: "Request URL",
+    titlePlaceholder: "Request title",
     variables: "Manage request variables",
     untitled: "Untitled request",
     unsavedChanges: "Unsaved changes",

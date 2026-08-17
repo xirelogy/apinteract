@@ -1030,6 +1030,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               v-model="name"
               class="request-name-input"
               :aria-label="t('request.name')"
+              :placeholder="t('request.titlePlaceholder')"
               :disabled="editorDisabled"
               @input="emitChange"
             />
@@ -1126,7 +1127,11 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               font="mono"
               :previews="variablePreviews"
               :aria-label="t('request.requestPath')"
-              :placeholder="t('request.requestPathPlaceholder')"
+              :placeholder="
+                inheritedTarget === ''
+                  ? t('request.targetUrlPlaceholder')
+                  : t('request.requestPathPlaceholder')
+              "
               inputmode="url"
               autocomplete="off"
               spellcheck="false"
