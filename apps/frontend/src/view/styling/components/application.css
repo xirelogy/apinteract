@@ -275,13 +275,15 @@
 .environment-include-row,
 .environment-include-picker {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns:
+    var(--row-reorder-handle-width) minmax(0, 1fr)
+    auto;
   align-items: center;
   gap: var(--space-1);
 }
 
-.environment-include-picker {
-  grid-template-columns: minmax(0, 1fr) auto;
+.environment-include-picker::before {
+  content: "";
 }
 
 .variable-field-heading,
@@ -289,7 +291,7 @@
   display: grid;
   grid-template-columns:
     minmax(8rem, 2fr) minmax(7rem, 0.9fr) minmax(10rem, 3fr)
-    calc(var(--control-height-compact) * 2 + var(--space-1));
+    var(--row-actions-width);
   align-items: center;
   gap: var(--space-1);
 }
@@ -314,8 +316,9 @@
 
 .inherited-variable-indicator {
   display: grid;
+  width: var(--control-height-compact);
   place-items: center;
-  justify-self: center;
+  justify-self: end;
   color: var(--text-secondary);
 }
 
@@ -405,7 +408,7 @@
   .variable-field-row {
     grid-template-columns:
       minmax(0, 1fr) minmax(4.5rem, 0.8fr) minmax(0, 1.25fr)
-      calc(var(--control-height-compact) * 2 + var(--space-1));
+      var(--row-actions-width);
   }
 }
 
@@ -1117,7 +1120,7 @@
   display: grid;
   grid-template-columns:
     var(--control-height-compact) minmax(8rem, 2fr) minmax(10rem, 3fr)
-    calc(var(--control-height-compact) * 2 + var(--space-1));
+    var(--row-actions-width);
   align-items: center;
   gap: var(--space-1);
 }
@@ -1137,15 +1140,22 @@
 }
 
 .row-actions {
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: var(--row-reorder-handle-width) var(
+      --control-height-compact
+    );
   align-items: center;
-  justify-content: flex-end;
   gap: var(--space-1);
 }
 
-.row-reorder-handle {
+.icon-button-control.row-reorder-handle {
+  width: var(--row-reorder-handle-width);
   cursor: grab;
   color: var(--text-secondary);
+}
+
+.row-actions > :not(.row-reorder-handle) {
+  grid-column: 2;
 }
 
 .row-reorder-handle:active {
@@ -1184,8 +1194,9 @@
 
 .inherited-header-indicator {
   display: grid;
+  width: var(--control-height-compact);
   place-items: center;
-  justify-self: center;
+  justify-self: end;
   color: var(--text-secondary);
 }
 
@@ -2132,7 +2143,7 @@
   .request-field-row {
     grid-template-columns:
       var(--control-height-compact) minmax(6rem, 1fr) minmax(7rem, 1.35fr)
-      calc(var(--control-height-compact) * 2 + var(--space-1));
+      var(--row-actions-width);
   }
 
   .response-heading-row {

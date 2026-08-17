@@ -36,6 +36,11 @@
   --control-height-compact: 1.875rem;
   --control-height-dense: 2.125rem;
   --control-height: 2.25rem;
+  --row-reorder-handle-width: calc(var(--control-height-compact) * 0.5);
+  --row-actions-width: calc(
+    var(--row-reorder-handle-width) + var(--space-1) +
+      var(--control-height-compact)
+  );
   --panel-header-height: 3rem;
   --request-tabs-height: 2.5rem;
   --header-height: 3.25rem;
