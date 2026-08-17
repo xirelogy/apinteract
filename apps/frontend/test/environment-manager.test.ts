@@ -82,6 +82,22 @@ describe("EnvironmentManager", () => {
       global: { plugins: [i18n] },
     });
 
+    const environmentSelector = wrapper.get(
+      'button[aria-label="Select environment"]',
+    );
+    const environmentIcon = environmentSelector.get(
+      ".environment-selector-icon",
+    );
+    const environmentName = environmentSelector.get(
+      ".environment-selector-name",
+    );
+    expect(environmentIcon.classes()).not.toContain(
+      "environment-selection-empty",
+    );
+    expect(environmentName.classes()).not.toContain(
+      "environment-selection-empty",
+    );
+
     await wrapper
       .get('button[aria-label="Manage environments"]')
       .trigger("click");
@@ -118,6 +134,9 @@ describe("EnvironmentManager", () => {
 
     await wrapper.get('button[aria-label="Close"]').trigger("click");
     await wrapper.setProps({ selectedEnvironmentId: null });
+    expect(environmentIcon.classes()).toContain("environment-selection-empty");
+    expect(environmentName.classes()).toContain("environment-selection-empty");
+    expect(environmentSelector.text()).toContain("No environment");
     await wrapper
       .get('button[aria-label="Manage environments"]')
       .trigger("click");

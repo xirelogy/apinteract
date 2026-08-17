@@ -102,6 +102,9 @@ describe("AppHeader", () => {
       'button[aria-label="Account menu for admin"]',
     );
     expect(wrapper.get(".header-actions").text()).toBe("admin");
+    expect(accountTrigger.find(".lucide-circle-user-round").exists()).toBe(
+      true,
+    );
 
     await accountTrigger.trigger("click");
     await flushPromises();
@@ -137,12 +140,21 @@ describe("AppHeader", () => {
       'button[aria-label="Display style"]',
     );
     expect(displayStyle.text()).toContain("System");
+    expect(displayStyle.find(".lucide-monitor").exists()).toBe(true);
+    await displayStyle.trigger("click");
+    await flushPromises();
+    const lightOption = optionsDialog
+      .findAll('[role="option"]')
+      .find((option) => option.text().includes("Light"));
+    await lightOption?.trigger("click");
+    expect(displayStyle.find(".lucide-sun").exists()).toBe(true);
     await displayStyle.trigger("click");
     await flushPromises();
     const darkOption = optionsDialog
       .findAll('[role="option"]')
       .find((option) => option.text().includes("Dark"));
     await darkOption?.trigger("click");
+    expect(displayStyle.find(".lucide-moon").exists()).toBe(true);
     await optionTabs[1]?.trigger("click");
     expect(optionTabs[1]?.attributes("aria-selected")).toBe("true");
     const appendingHeaders = optionsDialog.get("textarea");

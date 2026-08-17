@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { LogOut, Menu, Settings, X } from "@lucide/vue";
+import { CircleUserRound, LogOut, Menu, Settings, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import ActionMenu from "@/view/presentation/controls/ActionMenu.vue";
@@ -74,7 +74,8 @@ function selectAccountAction(action: string): void {
             @click="toggle"
             @keydown="keydown"
           >
-            {{ username }}
+            <CircleUserRound :size="17" aria-hidden="true" />
+            <span class="account-menu-username">{{ username }}</span>
           </button>
         </template>
         <template #item="{ item }">

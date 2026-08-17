@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { X } from "@lucide/vue";
+import { Monitor, Moon, Sun, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import {
@@ -130,7 +130,24 @@ function selectDisplayStyle(value: string): void {
                 :label="t('header.displayStyle.label')"
                 mobile-presentation="popover"
                 @update:model-value="selectDisplayStyle"
-              />
+              >
+                <template #selected="{ option }">
+                  <Monitor
+                    v-if="displayStyle === 'system'"
+                    :size="17"
+                    aria-hidden="true"
+                  />
+                  <Sun
+                    v-else-if="displayStyle === 'light'"
+                    :size="17"
+                    aria-hidden="true"
+                  />
+                  <Moon v-else :size="17" aria-hidden="true" />
+                  <span>
+                    {{ option?.label ?? t("header.displayStyle.system") }}
+                  </span>
+                </template>
+              </SelectMenu>
             </FormField>
           </TabsPanel>
           <TabsPanel value="defaults" class="account-options-section">

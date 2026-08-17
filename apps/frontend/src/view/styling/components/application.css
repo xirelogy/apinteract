@@ -151,19 +151,29 @@
 }
 
 .account-menu-trigger {
-  display: block;
+  display: flex;
   max-width: 18ch;
   min-height: var(--control-height-compact);
-  overflow: hidden;
+  align-items: center;
+  gap: var(--space-1);
   padding: 0 var(--space-2);
   color: var(--text-inverse-subtle);
   font-size: var(--font-size-sm);
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
+  cursor: pointer;
+}
+
+.account-menu-trigger > svg {
+  flex: 0 0 auto;
+}
+
+.account-menu-username {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
 }
 
 .account-menu-trigger:is(:hover, [aria-expanded="true"]) {
@@ -244,6 +254,10 @@
 
 .environment-toolbar .select-menu {
   width: min(18rem, 60vi);
+}
+
+.environment-selection-empty {
+  color: var(--text-secondary);
 }
 
 .resource-dialog.environment-dialog {

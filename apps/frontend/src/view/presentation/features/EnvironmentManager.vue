@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Trash2, X } from "@lucide/vue";
+import { Layers3, Trash2, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -318,7 +318,26 @@ function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
       density="compact"
       :disabled="busy || !canEdit"
       @update:model-value="emit('select', $event || null)"
-    />
+    >
+      <template #selected="{ option }">
+        <Layers3
+          class="environment-selector-icon"
+          :class="{
+            'environment-selection-empty': selectedEnvironmentId === null,
+          }"
+          :size="17"
+          aria-hidden="true"
+        />
+        <span
+          class="environment-selector-name"
+          :class="{
+            'environment-selection-empty': selectedEnvironmentId === null,
+          }"
+        >
+          {{ option?.label ?? t("environment.none") }}
+        </span>
+      </template>
+    </SelectMenu>
     <ActionMenu
       :label="t('environment.manage')"
       :items="environmentActions"
