@@ -7,6 +7,88 @@ import { useApplicationStore } from "../src/control/state/application-store";
 import type { BackendWebSocketClient } from "../src/control/transport/websocket-client";
 import { isRequestTabDirty } from "../src/model/domain/application";
 
+describe("ApplicationController workspaces", () => {
+  it("loads visible workspaces without selecting a default", async () => {
+    setActivePinia(createPinia());
+    const workspaces = [
+      {
+        workspaceId: "019facab-1eee-765f-bd9f-ac2449151cd1",
+        name: "First workspace",
+        role: "owner" as const,
+      },
+      {
+        workspaceId: "019facab-1eee-765f-bd9f-ac2449151cd2",
+        name: "Second workspace",
+        role: "viewer" as const,
+      },
+    ];
+    const command = vi.fn().mockResolvedValue({ workspaces });
+    const webSocket = {
+      command,
+      onEvent: vi.fn(),
+    } as unknown as BackendWebSocketClient;
+    const controller = new ApplicationController(
+      {} as SessionController,
+      webSocket,
+    );
+
+    await controller.initializeWorkspace();
+
+    const store = useApplicationStore();
+    expect(store.workspaces).toEqual(workspaces);
+    expect(store.selectedWorkspaceId).toBeNull();
+    expect(store.selectedWorkspace).toBeNull();
+    expect(command).toHaveBeenCalledOnce();
+    expect(command).toHaveBeenCalledWith("workspace.list", {});
+  });
+
+  it("clears workspace-derived state without a backend command", async () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151ce1";
+    const command = vi.fn();
+    const webSocket = {
+      command,
+      onEvent: vi.fn(),
+    } as unknown as BackendWebSocketClient;
+    const controller = new ApplicationController(
+      {} as SessionController,
+      webSocket,
+    );
+    const store = useApplicationStore();
+    store.$patch({
+      selectedWorkspaceId: workspaceId,
+      selectedWorkspace: {
+        workspaceId,
+        name: "Workspace",
+        role: "owner",
+        baseUrl: "https://example.test",
+        headers: [],
+        revision: 1,
+      },
+      environments: [
+        {
+          environmentId: "019facab-1eee-765f-bd9f-ac2449151ce2",
+          name: "Local",
+          revision: 1,
+        },
+      ],
+      selectedEnvironmentId: "019facab-1eee-765f-bd9f-ac2449151ce2",
+      selectedCollectionId: "019facab-1eee-765f-bd9f-ac2449151ce3",
+      expandedCollectionIds: ["019facab-1eee-765f-bd9f-ac2449151ce3"],
+    });
+
+    await controller.selectWorkspace(null);
+
+    expect(store.selectedWorkspaceId).toBeNull();
+    expect(store.selectedWorkspace).toBeNull();
+    expect(store.environments).toEqual([]);
+    expect(store.selectedEnvironmentId).toBeNull();
+    expect(store.selectedCollectionId).toBeNull();
+    expect(store.expandedCollectionIds).toEqual([]);
+    expect(command).not.toHaveBeenCalled();
+  });
+});
+
 describe("ApplicationController requests", () => {
   it("defaults root requests to absolute targets and collection requests to composed targets", () => {
     setActivePinia(createPinia());

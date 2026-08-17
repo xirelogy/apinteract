@@ -424,6 +424,13 @@ function updateActiveRequestVariables(
   }
 }
 
+/** Applies editor changes to the currently active request tab. */
+function updateActiveRequestDraft(draft: RequestDraftInput): void {
+  if (activeTab.value !== null) {
+    controller.updateRequestDraft(activeTab.value.tabId, draft);
+  }
+}
+
 /** Saves a tab or asks for a temporary request destination. */
 async function saveRequest(draft: RequestDraftInput): Promise<void> {
   const tab = activeTab.value;
@@ -717,61 +724,67 @@ function discardRequestTab(): void {
         :inert="navigatorOpen"
         :aria-hidden="navigatorOpen ? 'true' : undefined"
       >
-        <EnvironmentManager
-          v-if="selectedWorkspaceId"
-          ref="environmentManager"
-          :environments="environments"
-          :selected-environment-id="selectedEnvironmentId"
-          :environment="selectedEnvironment"
-          :can-edit="canEditWorkspace"
-          :busy="busy"
-          @select="controller.selectEnvironment($event)"
-          @load="controller.loadEnvironment($event)"
-          @create="createEnvironment"
-          @save="updateEnvironment"
-          @delete="deleteEnvironment"
-        />
-        <RequestTabs
-          :tabs="visibleRequestTabs"
-          :active-tab-id="activeRequestTabId"
-          @activate="controller.activateRequestTab($event)"
-          @close="requestTabClose"
-          @create="createTemporaryRequest()"
-        />
-        <RequestEditor
-          :request="activeTab?.request ?? null"
-          :draft="activeTab?.draft ?? null"
-          :execution="activeTab?.execution ?? null"
-          :tab-id="activeTab?.tabId ?? null"
-          :temporary="activeTab?.request === null"
-          :inherited-target="displayedInheritedTarget"
-          :inherited-headers="displayedInheritedHeaders"
-          :request-variable-profile="requestVariableProfile"
-          :request-variable-draft="activeTab?.variableDraft ?? null"
-          :variable-previews="variablePreviews"
-          :preview-context-key="variablePreviewContextKey"
-          :busy="(activeTab?.busy ?? false) || busy"
-          :can-edit="canEditWorkspace"
-          :revisions="activeTab?.revisions ?? []"
-          :viewing-revision="activeTab?.viewingRevision ?? null"
-          :upload-attachment="uploadActiveRequestAttachment"
-          @change="
-            activeTab && controller.updateRequestDraft(activeTab.tabId, $event)
-          "
-          @save="saveRequest"
-          @execute="executeRequest"
-          @preview="controller.previewVariables($event)"
-          @load-variables="editRequestVariables"
-          @change-variables="updateActiveRequestVariables"
-          @load-revisions="
-            activeTab && controller.loadRequestRevisions(activeTab.tabId)
-          "
-          @select-revision="selectActiveRevision"
-          @name-revision="nameActiveRevision"
-          @restore-revision="restoreActiveRevision"
-          @execute-revision="executeActiveRevision"
-          @download="downloadExecutionBody"
-        />
+        <div
+          v-if="selectedWorkspaceId === null"
+          class="empty-workbench workspace-empty-state"
+        >
+          <h1>{{ t("workspace.startTitle") }}</h1>
+          <p>{{ t("workspace.startDescription") }}</p>
+        </div>
+        <template v-else>
+          <EnvironmentManager
+            ref="environmentManager"
+            :environments="environments"
+            :selected-environment-id="selectedEnvironmentId"
+            :environment="selectedEnvironment"
+            :can-edit="canEditWorkspace"
+            :busy="busy"
+            @select="controller.selectEnvironment($event)"
+            @load="controller.loadEnvironment($event)"
+            @create="createEnvironment"
+            @save="updateEnvironment"
+            @delete="deleteEnvironment"
+          />
+          <RequestTabs
+            :tabs="visibleRequestTabs"
+            :active-tab-id="activeRequestTabId"
+            @activate="controller.activateRequestTab($event)"
+            @close="requestTabClose"
+            @create="createTemporaryRequest()"
+          />
+          <RequestEditor
+            :request="activeTab?.request ?? null"
+            :draft="activeTab?.draft ?? null"
+            :execution="activeTab?.execution ?? null"
+            :tab-id="activeTab?.tabId ?? null"
+            :temporary="activeTab?.request === null"
+            :inherited-target="displayedInheritedTarget"
+            :inherited-headers="displayedInheritedHeaders"
+            :request-variable-profile="requestVariableProfile"
+            :request-variable-draft="activeTab?.variableDraft ?? null"
+            :variable-previews="variablePreviews"
+            :preview-context-key="variablePreviewContextKey"
+            :busy="(activeTab?.busy ?? false) || busy"
+            :can-edit="canEditWorkspace"
+            :revisions="activeTab?.revisions ?? []"
+            :viewing-revision="activeTab?.viewingRevision ?? null"
+            :upload-attachment="uploadActiveRequestAttachment"
+            @change="updateActiveRequestDraft"
+            @save="saveRequest"
+            @execute="executeRequest"
+            @preview="controller.previewVariables($event)"
+            @load-variables="editRequestVariables"
+            @change-variables="updateActiveRequestVariables"
+            @load-revisions="
+              activeTab && controller.loadRequestRevisions(activeTab.tabId)
+            "
+            @select-revision="selectActiveRevision"
+            @name-revision="nameActiveRevision"
+            @restore-revision="restoreActiveRevision"
+            @execute-revision="executeActiveRevision"
+            @download="downloadExecutionBody"
+          />
+        </template>
       </div>
     </div>
 

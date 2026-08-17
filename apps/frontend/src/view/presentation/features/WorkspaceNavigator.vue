@@ -16,6 +16,7 @@ import {
 } from "./workspace-tree-reorder";
 
 type CreationKind = "workspace" | "collection";
+const NO_WORKSPACE_VALUE = "__no-workspace__";
 
 const props = defineProps<{
   workspaces: readonly WorkspaceSummary[];
@@ -33,7 +34,7 @@ const { t } = useI18n();
 
 const emit = defineEmits<{
   createWorkspace: [name: string];
-  selectWorkspace: [workspaceId: string];
+  selectWorkspace: [workspaceId: string | null];
   createCollection: [name: string, parentCollectionId: string | null];
   selectCollection: [collectionId: string];
   toggleCollection: [collectionId: string];
@@ -61,12 +62,30 @@ const navigator = ref<HTMLElement | null>(null);
 let returnFocus: HTMLElement | null = null;
 const creationKind = ref<CreationKind | null>(null);
 const creationParentCollectionId = ref<string | null>(null);
-const workspaceOptions = computed(() =>
-  props.workspaces.map((workspace) => ({
+const workspaceOptions = computed(() => [
+  {
+    value: NO_WORKSPACE_VALUE,
+    label: t("workspace.none"),
+    disabled: props.selectedWorkspaceId === null,
+  },
+  ...props.workspaces.map((workspace) => ({
     value: workspace.workspaceId,
     label: workspace.name,
   })),
-);
+]);
+
+/** Maps the menu's explicit empty option back to application selection state. */
+function selectWorkspace(value: string): void {
+  emit("selectWorkspace", value === NO_WORKSPACE_VALUE ? null : value);
+}
+
+/** Opens properties for the selected workspace when one is available. */
+function editSelectedWorkspaceProperties(): void {
+  if (props.selectedWorkspaceId !== null) {
+    emit("editWorkspaceProperties", props.selectedWorkspaceId);
+  }
+}
+
 const creationParentName = computed(() =>
   creationParentCollectionId.value === null
     ? null
@@ -477,13 +496,12 @@ function findLoadedParentCollectionId(nodeId: string): string | null {
           :label="t('workspace.label')"
           :placeholder="t('workspace.select')"
           :disabled="busy"
-          @update:model-value="emit('selectWorkspace', $event)"
+          @update:model-value="selectWorkspace"
         />
         <IconButton
-          v-if="selectedWorkspaceId"
           :label="t('workspace.properties')"
-          :disabled="busy"
-          @click="emit('editWorkspaceProperties', selectedWorkspaceId)"
+          :disabled="busy || selectedWorkspaceId === null"
+          @click="editSelectedWorkspaceProperties"
         >
           <Settings2 :size="17" aria-hidden="true" />
         </IconButton>

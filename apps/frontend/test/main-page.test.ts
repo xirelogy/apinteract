@@ -12,9 +12,42 @@ import type { ApplicationController } from "../src/control/application/applicati
 import { useApplicationStore } from "../src/control/state/application-store";
 import EnvironmentManager from "../src/view/presentation/features/EnvironmentManager.vue";
 import RequestEditor from "../src/view/presentation/features/RequestEditor.vue";
+import RequestTabs from "../src/view/presentation/features/RequestTabs.vue";
 import MainPage from "../src/view/presentation/pages/MainPage.vue";
 
 describe("MainPage", () => {
+  it("shows one workspace start state before a workspace is selected", () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const controller = {
+      initializeWorkspace: vi.fn().mockResolvedValue(undefined),
+      session: { logout: vi.fn() },
+    } as unknown as ApplicationController;
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/", component: { template: "<div />" } }],
+    });
+
+    const wrapper = shallowMount(MainPage, {
+      global: {
+        plugins: [pinia, i18n, router],
+        provide: { [applicationControllerKey as symbol]: controller },
+      },
+    });
+
+    expect(wrapper.get(".workspace-empty-state").text()).toContain(
+      "Start by creating or selecting a workspace",
+    );
+    expect(wrapper.findComponent(EnvironmentManager).exists()).toBe(false);
+    expect(wrapper.findComponent(RequestTabs).exists()).toBe(false);
+    expect(wrapper.findComponent(RequestEditor).exists()).toBe(false);
+  });
+
   it("passes request revisions to the request editor", () => {
     const pinia = createPinia();
     setActivePinia(pinia);

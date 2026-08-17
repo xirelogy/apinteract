@@ -638,6 +638,10 @@
   gap: var(--space-1);
 }
 
+.workspace-picker .select-menu-selected.is-placeholder {
+  color: var(--text-secondary);
+}
+
 .compact-icon-button {
   min-height: var(--control-height-compact);
   width: var(--control-height-compact);
@@ -911,6 +915,10 @@
 .empty-workbench h1 {
   color: var(--text-primary);
   font-size: var(--font-size-2xl);
+}
+
+.workspace-empty-state {
+  background: var(--surface-primary);
 }
 
 .request-editor {

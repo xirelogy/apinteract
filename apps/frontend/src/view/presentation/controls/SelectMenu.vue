@@ -373,7 +373,10 @@ function closeFromScroll(event: Event): void {
       @click="toggleMenu"
       @keydown="handleTriggerKeydown"
     >
-      <span class="select-menu-selected">
+      <span
+        class="select-menu-selected"
+        :class="{ 'is-placeholder': selectedOption === null }"
+      >
         <slot name="selected" :option="selectedOption">
           {{ selectedOption?.label ?? placeholder }}
         </slot>

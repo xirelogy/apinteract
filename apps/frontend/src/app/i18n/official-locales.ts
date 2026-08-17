@@ -71,6 +71,7 @@ const zhHansMessages = {
     navigation: "工作区导航",
     name: "工作区名称",
     noCollections: "尚无集合",
+    none: "无工作区",
     moreActions: "{name} 的更多操作",
     properties: "工作区属性",
     propertiesDescription: "重命名此工作区并管理所有请求继承的请求头和变量。",
@@ -83,6 +84,9 @@ const zhHansMessages = {
     headersDescription:
       "启用的请求头将应用于此工作区中的所有请求，除非被更近的作用域覆盖。",
     select: "选择工作区",
+    startDescription:
+      "请从导航栏选择现有工作区，或创建一个新工作区以开始使用。",
+    startTitle: "请先创建或选择工作区",
     tree: "工作区树",
     variables: "管理工作区变量",
   },
@@ -483,6 +487,7 @@ const zhHantMessages = {
     navigation: "工作區導覽",
     name: "工作區名稱",
     noCollections: "尚無集合",
+    none: "無工作區",
     moreActions: "{name} 的更多操作",
     properties: "工作區屬性",
     propertiesDescription: "重新命名此工作區並管理所有請求繼承的標頭和變數。",
@@ -495,6 +500,8 @@ const zhHantMessages = {
     headersDescription:
       "啟用的標頭會套用到此工作區中的所有請求，除非被較近的範圍覆寫。",
     select: "選擇工作區",
+    startDescription: "請從導覽列選擇現有工作區，或建立新的工作區以開始使用。",
+    startTitle: "請先建立或選擇工作區",
     tree: "工作區樹狀目錄",
     variables: "管理工作區變數",
   },

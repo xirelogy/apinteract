@@ -69,6 +69,7 @@ export const enUsMessages = {
     navigation: "Workspace navigation",
     name: "Workspace name",
     noCollections: "No collections yet",
+    none: "No workspace",
     moreActions: "More actions for {name}",
     properties: "Workspace properties",
     propertiesDescription:
@@ -82,6 +83,9 @@ export const enUsMessages = {
     headersDescription:
       "Enabled headers apply to every request in this workspace unless a nearer scope overrides them.",
     select: "Select a workspace",
+    startDescription:
+      "Choose an existing workspace from the navigator, or create a new one to begin.",
+    startTitle: "Start by creating or selecting a workspace",
     tree: "Workspace tree",
     variables: "Manage workspace variables",
   },

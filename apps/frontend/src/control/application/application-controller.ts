@@ -72,18 +72,13 @@ export class ApplicationController {
     });
   }
 
-  /** Loads visible workspaces and selects the first available workspace. */
+  /** Loads visible workspaces without choosing a default selection. */
   async initializeWorkspace(): Promise<void> {
     await this.#run(async () => {
       const result = await this.#webSocket.command<{
         workspaces: WorkspaceSummary[];
       }>("workspace.list", {});
-      const store = useApplicationStore();
-      store.workspaces = result.workspaces;
-      const first = result.workspaces[0];
-      if (first !== undefined) {
-        await this.#selectWorkspace(first.workspaceId);
-      }
+      useApplicationStore().workspaces = result.workspaces;
     });
   }
 
@@ -110,9 +105,34 @@ export class ApplicationController {
     });
   }
 
-  /** Selects a workspace and loads its root tree. */
-  async selectWorkspace(workspaceId: string): Promise<void> {
+  /** Selects a workspace and loads its root tree, or returns to no selection. */
+  async selectWorkspace(workspaceId: string | null): Promise<void> {
+    if (workspaceId === null) {
+      this.#clearWorkspaceSelection();
+      return;
+    }
     await this.#run(() => this.#selectWorkspace(workspaceId));
+  }
+
+  /** Clears workspace-derived state while preserving open request tabs. */
+  #clearWorkspaceSelection(): void {
+    const store = useApplicationStore();
+    store.selectedWorkspaceId = null;
+    store.selectedWorkspace = null;
+    store.rootNodes = [];
+    store.environments = [];
+    store.selectedEnvironmentId = null;
+    store.selectedEnvironment = null;
+    store.selectedVariableProfile = null;
+    store.variablePreviews = [];
+    this.#previewNames = [];
+    this.#previewContext = null;
+    this.#previewSequence += 1;
+    store.selectedCollectionId = null;
+    store.selectedCollection = null;
+    store.collectionChildren = {};
+    store.expandedCollectionIds = [];
+    store.error = null;
   }
 
   /** Loads a workspace root without nesting foreground busy state. */

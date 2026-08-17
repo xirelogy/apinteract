@@ -32,6 +32,7 @@ function requestNode(
 
 /** Mounts the navigator with the requested tree and interaction state. */
 function mountNavigator(options?: {
+  selectedWorkspaceId?: string | null;
   rootNodes?: readonly TreeNode[];
   collectionChildren?: Readonly<Record<string, readonly TreeNode[]>>;
   expandedCollectionIds?: readonly string[];
@@ -47,7 +48,10 @@ function mountNavigator(options?: {
     attachTo: document.body,
     props: {
       workspaces: [{ workspaceId, name: "Workspace", role: "owner" }],
-      selectedWorkspaceId: workspaceId,
+      selectedWorkspaceId:
+        options?.selectedWorkspaceId === undefined
+          ? workspaceId
+          : options.selectedWorkspaceId,
       rootNodes: options?.rootNodes ?? [
         requestNode(firstNodeId, "First", 0),
         requestNode(secondNodeId, "Second", 1),
@@ -67,6 +71,45 @@ function mountNavigator(options?: {
 
 afterEach(() => {
   document.body.replaceChildren();
+});
+
+describe("WorkspaceNavigator selection", () => {
+  it("mutes the placeholder and preserves a disabled properties control", () => {
+    const wrapper = mountNavigator({
+      selectedWorkspaceId: null,
+      rootNodes: [],
+    });
+
+    expect(wrapper.get(".select-menu-selected").classes()).toContain(
+      "is-placeholder",
+    );
+    expect(wrapper.get(".select-menu-selected").text()).toBe(
+      "Select a workspace",
+    );
+    expect(
+      wrapper
+        .get<HTMLButtonElement>('button[aria-label="Workspace properties"]')
+        .attributes("disabled"),
+    ).toBeDefined();
+    expect(wrapper.find(".navigator-grow").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("offers an explicit option to deselect the current workspace", async () => {
+    const wrapper = mountNavigator();
+
+    await wrapper.get(".select-menu-trigger").trigger("click");
+    await flushPromises();
+    const noWorkspaceOption = [
+      ...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ].find((option) => option.textContent?.includes("No workspace"));
+    expect(noWorkspaceOption).toBeDefined();
+    noWorkspaceOption?.click();
+    await flushPromises();
+
+    expect(wrapper.emitted("selectWorkspace")).toEqual([[null]]);
+    wrapper.unmount();
+  });
 });
 
 describe("WorkspaceNavigator tree reordering", () => {
