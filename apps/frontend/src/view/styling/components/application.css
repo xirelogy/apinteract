@@ -465,6 +465,10 @@
   background: var(--surface-primary);
 }
 
+.request-tab:hover {
+  background: var(--surface-primary);
+}
+
 .request-tab-main,
 .request-tab-close {
   min-width: 0;
@@ -520,10 +524,14 @@
   place-items: center;
 }
 
-.request-tab-close:hover,
-.request-tab-main:hover {
+.request-tab:hover .request-tab-main,
+.request-tab:hover .request-tab-close {
   color: var(--text-primary);
-  background: var(--surface-primary);
+}
+
+.request-tab .request-tab-close:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
 }
 
 .request-tab.is-active .request-tab-main {
