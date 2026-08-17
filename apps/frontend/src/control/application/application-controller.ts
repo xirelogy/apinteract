@@ -738,7 +738,7 @@ export class ApplicationController {
       tabId: uuidV7(),
       workspaceId,
       request: null,
-      draft: emptyDraft(),
+      draft: emptyDraft(parentCollectionId === null ? "absolute" : "composed"),
       baseline: null,
       variableProfile: null,
       variableDraft: [],
@@ -1420,12 +1420,14 @@ function activeRequestTab(store: {
   );
 }
 
-/** Creates the initial editable content for a temporary request. */
-function emptyDraft(): RequestDraftInput {
+/** Creates editable request content with a context-appropriate target mode. */
+function emptyDraft(
+  targetMode: RequestDraftInput["targetMode"],
+): RequestDraftInput {
   return {
     name: "",
     method: "GET",
-    targetMode: "composed",
+    targetMode,
     targetUrl: "",
     query: [],
     headers: [],

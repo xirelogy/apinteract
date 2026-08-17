@@ -8,6 +8,30 @@ import type { BackendWebSocketClient } from "../src/control/transport/websocket-
 import { isRequestTabDirty } from "../src/model/domain/application";
 
 describe("ApplicationController requests", () => {
+  it("defaults root requests to absolute targets and collection requests to composed targets", () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151cd1";
+    const collectionId = "019facab-1eee-765f-bd9f-ac2449151cd2";
+    const webSocket = {
+      command: vi.fn(),
+      onEvent: vi.fn(),
+    } as unknown as BackendWebSocketClient;
+    const controller = new ApplicationController(
+      {} as SessionController,
+      webSocket,
+    );
+    const store = useApplicationStore();
+    store.selectedWorkspaceId = workspaceId;
+
+    controller.createTemporaryRequest();
+    controller.createTemporaryRequest(collectionId);
+
+    expect(store.requestTabs.map((tab) => tab.draft.targetMode)).toEqual([
+      "absolute",
+      "composed",
+    ]);
+  });
+
   it("opens persisted form bodies without sharing fields or becoming dirty", async () => {
     setActivePinia(createPinia());
     const requestId = "019facab-1eee-765f-bd9f-ac2449151bf1";
