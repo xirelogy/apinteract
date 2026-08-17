@@ -33,7 +33,10 @@ import {
   ResourceNotFoundError,
   WorkspaceConflictError,
 } from "../workspaces/workspace-service.js";
-import { type EditableVariableScopeKind } from "../variables/variable-service.js";
+import {
+  type EditableVariableScopeKind,
+  type TemporaryRequestVariableProfile,
+} from "../variables/variable-service.js";
 import { VariableProfileConflictError } from "../variables/variable-profile-store.js";
 
 interface Command {
@@ -320,6 +323,15 @@ async function dispatch(
         requireString(command.payload.scopeId, "scopeId"),
         identity.sessionId,
       );
+    case "variable_profile.get_temporary":
+      return application.variables.getTemporary(
+        userId,
+        identity.sessionId,
+        requireString(command.payload.workspaceId, "workspaceId"),
+        optionalString(command.payload.parentCollectionId),
+        requireString(command.payload.scopeId, "scopeId"),
+        requireStringAllowEmpty(command.payload.scopeName, "scopeName"),
+      );
     case "variable_profile.update":
       return application.variables.update(
         userId,
@@ -337,6 +349,9 @@ async function dispatch(
         optionalString(command.payload.parentCollectionId),
         optionalString(command.payload.requestId),
         requireVariableNames(command.payload.names),
+        optionalTemporaryRequestVariableProfile(
+          command.payload.temporaryVariables,
+        ),
       );
     case "request.create":
       return application.requests.createRequest(
@@ -356,6 +371,12 @@ async function dispatch(
         ),
         requireTargetMode(command.payload.targetMode),
         optionalRequestBody(command.payload.requestBody),
+        {
+          variables:
+            command.payload.variables === undefined
+              ? []
+              : requireEnvironmentVariables(command.payload.variables),
+        },
       );
     case "request.get":
       return application.requests.get(
@@ -453,6 +474,9 @@ async function dispatch(
         optionalString(command.payload.parentCollectionId),
         requireExecutionInput(command.payload.request),
         (event) => publishExecutionEvent(event, publish),
+        optionalTemporaryRequestVariableProfile(
+          command.payload.temporaryVariables,
+        ),
       );
     default:
       throw new CommandError(
@@ -783,6 +807,28 @@ function requireEnvironmentVariables(
         );
     }
   });
+}
+
+/** Validates an optional in-memory request-variable layer for draft workflows. */
+function optionalTemporaryRequestVariableProfile(
+  value: unknown,
+): TemporaryRequestVariableProfile | null {
+  if (value === undefined) return null;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new CommandError(
+      "validation_failed",
+      "temporaryVariables must be an object.",
+    );
+  }
+  const profile = value as Record<string, unknown>;
+  return {
+    scopeId: requireString(profile.scopeId, "temporaryVariables.scopeId"),
+    scopeName: requireStringAllowEmpty(
+      profile.scopeName,
+      "temporaryVariables.scopeName",
+    ),
+    variables: requireEnvironmentVariables(profile.variables),
+  };
 }
 
 /** Accepts an optional ordered entity-ID list for additive command fields. */

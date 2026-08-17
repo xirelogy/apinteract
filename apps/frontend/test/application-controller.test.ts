@@ -225,4 +225,154 @@ describe("ApplicationController requests", () => {
       store.requestTabs[0] && isRequestTabDirty(store.requestTabs[0]),
     ).toBe(false);
   });
+
+  it("previews, executes, and saves temporary request variables", async () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151ce1";
+    const collectionId = "019facab-1eee-765f-bd9f-ac2449151ce2";
+    const requestId = "019facab-1eee-765f-bd9f-ac2449151ce3";
+    const variableId = "019facab-1eee-765f-bd9f-ac2449151ce4";
+    const command = vi.fn((type: string) => {
+      if (type === "variable_profile.get_temporary") {
+        return {
+          workspaceId,
+          scopeKind: "request",
+          scopeId: useApplicationStore().requestTabs[0]?.tabId,
+          scopeName: "Temporary request",
+          revision: 0,
+          variables: [],
+          inheritedVariables: [],
+        };
+      }
+      if (type === "variable.preview") return { previews: [] };
+      if (type === "execution.start_temporary") {
+        return {
+          executionId: "019facab-1eee-765f-bd9f-ac2449151ce5",
+          state: "created",
+          bodyComplete: false,
+          createdAt: "2026-08-17T00:00:00.000Z",
+          scriptLogs: [],
+          scriptTests: [],
+        };
+      }
+      if (type === "request.create") {
+        return {
+          requestId,
+          workspaceId,
+          parentCollectionId: collectionId,
+          name: "Draft request",
+          method: "GET",
+          targetMode: "absolute",
+          targetUrl: "https://example.test/<<source>>",
+          inheritedTarget: "",
+          queryMode: "structured",
+          query: [],
+          headers: [],
+          inheritedHeaders: [],
+          body: "",
+          preRequestScript: "",
+          postResponseScript: "",
+          draftRevision: 0,
+        };
+      }
+      if (type === "variable_profile.get") {
+        expect(useApplicationStore().requestTabs[0]?.request?.requestId).toBe(
+          requestId,
+        );
+        return {
+          workspaceId,
+          scopeKind: "request",
+          scopeId: requestId,
+          scopeName: "Draft request",
+          revision: 1,
+          variables: [
+            {
+              variableId,
+              name: "source",
+              kind: "value",
+              value: "temporary",
+            },
+          ],
+          inheritedVariables: [],
+        };
+      }
+      if (type === "tree.list") return { children: [] };
+      throw new Error(`Unexpected command ${type}`);
+    });
+    const webSocket = {
+      command,
+      onEvent: vi.fn(),
+    } as unknown as BackendWebSocketClient;
+    const controller = new ApplicationController(
+      {} as SessionController,
+      webSocket,
+    );
+    const store = useApplicationStore();
+    store.selectedWorkspaceId = workspaceId;
+    store.selectedWorkspace = {
+      workspaceId,
+      name: "Workspace",
+      role: "owner",
+      baseUrl: "",
+      headers: [],
+      revision: 0,
+    };
+
+    controller.createTemporaryRequest(collectionId);
+    const tab = store.requestTabs[0];
+    if (tab === undefined) throw new Error("Missing temporary request tab");
+    controller.updateRequestDraft(tab.tabId, {
+      ...tab.draft,
+      name: "Draft request",
+      targetMode: "absolute",
+      targetUrl: "https://example.test/<<source>>",
+    });
+    await controller.loadTemporaryVariableProfile(tab.tabId);
+    controller.updateRequestVariableDraft(tab.tabId, [
+      { name: "source", kind: "value", value: "temporary" },
+    ]);
+
+    await controller.previewVariables(["source"]);
+    expect(command).toHaveBeenLastCalledWith(
+      "variable.preview",
+      expect.objectContaining({
+        parentCollectionId: collectionId,
+        requestId: null,
+        temporaryVariables: {
+          scopeId: tab.tabId,
+          scopeName: "Draft request",
+          variables: [{ name: "source", kind: "value", value: "temporary" }],
+        },
+      }),
+    );
+
+    const currentDraft = store.requestTabs[0]!.draft;
+    await controller.executeRequest(tab.tabId, currentDraft);
+    expect(command).toHaveBeenCalledWith(
+      "execution.start_temporary",
+      expect.objectContaining({
+        temporaryVariables: {
+          scopeId: tab.tabId,
+          scopeName: "Draft request",
+          variables: [{ name: "source", kind: "value", value: "temporary" }],
+        },
+      }),
+    );
+
+    await controller.saveTemporaryRequest(
+      tab.tabId,
+      "Draft request",
+      collectionId,
+    );
+    expect(command).toHaveBeenCalledWith(
+      "request.create",
+      expect.objectContaining({
+        variables: [{ name: "source", kind: "value", value: "temporary" }],
+      }),
+    );
+    expect(store.requestTabs[0]?.variableProfile?.scopeId).toBe(requestId);
+    expect(
+      store.requestTabs[0] && isRequestTabDirty(store.requestTabs[0]),
+    ).toBe(false);
+  });
 });

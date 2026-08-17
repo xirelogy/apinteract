@@ -807,9 +807,7 @@ describe("RequestEditor", () => {
       ).value,
     ).toBe("/42");
     expect(
-      wrapper
-        .get('input[aria-label="Request path"]')
-        .attributes("placeholder"),
+      wrapper.get('input[aria-label="Request path"]').attributes("placeholder"),
     ).toBe("Request path");
     const targetMode = wrapper.get('.target-mode-picker [role="combobox"]');
     expect(targetMode.text()).not.toContain("Composed");
@@ -835,9 +833,7 @@ describe("RequestEditor", () => {
     ]);
     await wrapper.setProps({ inheritedTarget: "" });
     expect(
-      wrapper
-        .get('input[aria-label="Request path"]')
-        .attributes("placeholder"),
+      wrapper.get('input[aria-label="Request path"]').attributes("placeholder"),
     ).toBe("Request URL");
     vi.useRealTimers();
   });
@@ -1127,6 +1123,82 @@ describe("RequestEditor", () => {
       .find((button) => button.text().trim() === "Save")
       ?.trigger("click");
     expect(wrapper.emitted("save")).toHaveLength(1);
+  });
+
+  it("edits request variables before the request is saved", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151bf6";
+    const tabId = "019facab-1eee-765f-bd9f-ac2449151bf7";
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft: {
+          name: "",
+          method: "GET",
+          targetMode: "absolute",
+          targetUrl: "https://example.test/<<source>>",
+          query: [],
+          headers: [],
+          body: "",
+          preRequestScript: "",
+          postResponseScript: "",
+        },
+        execution: null,
+        tabId,
+        temporary: true,
+        inheritedHeaders: [],
+        requestVariableProfile: null,
+        requestVariableDraft: [],
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().includes("Variables"))
+      ?.trigger("click");
+    expect(wrapper.emitted("loadVariables")).toHaveLength(1);
+    await wrapper.setProps({
+      requestVariableProfile: {
+        workspaceId,
+        scopeKind: "request",
+        scopeId: tabId,
+        scopeName: "Temporary request",
+        revision: 0,
+        variables: [],
+        inheritedVariables: [
+          {
+            variable: {
+              variableId: "019facab-1eee-765f-bd9f-ac2449151bf8",
+              name: "workspace_value",
+              kind: "value",
+              value: "inherited",
+            },
+            source: {
+              scope: "workspace",
+              scopeId: workspaceId,
+              scopeName: "Workspace",
+              revision: 1,
+            },
+          },
+        ],
+      },
+    });
+    expect(
+      wrapper.get<HTMLInputElement>(
+        'input[aria-label="Inherited variable name 1"]',
+      ).element.value,
+    ).toBe("workspace_value");
+    await wrapper.get('input[aria-label="Variable name 1"]').setValue("source");
+    await wrapper.get('input[aria-label="Variable value 1"]').setValue("draft");
+    expect(wrapper.emitted("changeVariables")?.at(-1)).toEqual([
+      [{ name: "source", kind: "value", value: "draft" }],
+    ]);
   });
 
   it("edits both script phases from the request settings", async () => {

@@ -14,6 +14,7 @@ import type {
   RequestView,
   TreeNode,
   EditableVariableScopeKind,
+  TemporaryRequestVariableProfile,
   VariableProfileView,
   VariablePreviewResult,
   VariableWrite,
@@ -52,6 +53,7 @@ export class ApplicationController {
   #previewContext: {
     readonly parentCollectionId: string | null;
     readonly requestId: string | null;
+    readonly requestTabId: string | null;
   } | null = null;
   #previewSequence = 0;
 
@@ -278,6 +280,7 @@ export class ApplicationController {
         context === undefined
           ? (active?.request?.requestId ?? null)
           : (context.requestId ?? null),
+      requestTabId: context === undefined ? (active?.tabId ?? null) : null,
     };
     await this.#refreshVariablePreviews();
   }
@@ -294,6 +297,12 @@ export class ApplicationController {
       return;
     }
     try {
+      const previewTab =
+        context?.requestTabId === null || context?.requestTabId === undefined
+          ? null
+          : (store.requestTabs.find(
+              (tab) => tab.tabId === context.requestTabId,
+            ) ?? null);
       const result = await this.#webSocket.command<VariablePreviewResult>(
         "variable.preview",
         {
@@ -301,6 +310,9 @@ export class ApplicationController {
           parentCollectionId: context?.parentCollectionId ?? null,
           requestId: context?.requestId ?? null,
           names,
+          ...(previewTab?.request === null
+            ? { temporaryVariables: temporaryVariableProfile(previewTab) }
+            : {}),
         },
       );
       if (sequence === this.#previewSequence) {
@@ -341,6 +353,33 @@ export class ApplicationController {
         );
       }
       return profile;
+    });
+  }
+
+  /** Loads inherited variables beneath one unsaved request's local draft. */
+  async loadTemporaryVariableProfile(tabId: string): Promise<void> {
+    const tab = requireTab(tabId);
+    if (tab.request !== null) return;
+    await this.#runTab(tabId, async () => {
+      const profile = await this.#webSocket.command<VariableProfileView>(
+        "variable_profile.get_temporary",
+        {
+          workspaceId: tab.workspaceId,
+          parentCollectionId: tab.pendingParentCollectionId,
+          scopeId: tab.tabId,
+          scopeName: temporaryVariableScopeName(tab),
+        },
+      );
+      this.#updateTab(tabId, (current) =>
+        current.request === null
+          ? {
+              ...current,
+              variableProfile: profile,
+              variableDraft: current.variableDraft ?? [],
+              variableBaseline: current.variableBaseline ?? [],
+            }
+          : current,
+      );
     });
   }
 
@@ -702,8 +741,8 @@ export class ApplicationController {
       draft: emptyDraft(),
       baseline: null,
       variableProfile: null,
-      variableDraft: null,
-      variableBaseline: null,
+      variableDraft: [],
+      variableBaseline: [],
       pendingParentCollectionId: parentCollectionId,
       inheritedTarget:
         parentCollectionId === null
@@ -858,6 +897,9 @@ export class ApplicationController {
       ...tab,
       variableDraft: cloneVariableWrites(variables),
     }));
+    if (this.#previewContext?.requestTabId === tabId) {
+      void this.#refreshVariablePreviews();
+    }
   }
 
   /** Persists edits for one already saved request tab. */
@@ -938,9 +980,11 @@ export class ApplicationController {
           parentCollectionId,
           name,
           ...executableDraft(tab.draft),
+          variables: tab.variableDraft ?? [],
         },
       );
       const savedDraft = requestToDraft(request);
+      const pendingVariables = cloneVariableWrites(tab.variableDraft ?? []);
       this.#updateTab(tabId, (current) => ({
         ...current,
         request,
@@ -951,8 +995,23 @@ export class ApplicationController {
         inheritedHeaders: request.inheritedHeaders.map((field) => ({
           ...field,
         })),
+        variableProfile: null,
+        variableDraft: cloneVariableWrites(pendingVariables),
+        variableBaseline: cloneVariableWrites(pendingVariables),
         revisions: [],
         viewingRevision: null,
+      }));
+      const variableProfile =
+        await this.#webSocket.command<VariableProfileView>(
+          "variable_profile.get",
+          { scopeKind: "request", scopeId: request.requestId },
+        );
+      const savedVariables = variableViewsToWrites(variableProfile.variables);
+      this.#updateTab(tabId, (current) => ({
+        ...current,
+        variableProfile,
+        variableDraft: cloneVariableWrites(savedVariables),
+        variableBaseline: cloneVariableWrites(savedVariables),
       }));
       await this.#reloadCollection(tab.workspaceId, parentCollectionId);
     });
@@ -975,6 +1034,7 @@ export class ApplicationController {
                 workspaceId: tab.workspaceId,
                 parentCollectionId: tab.pendingParentCollectionId,
                 request: executableDraft(tab.draft),
+                temporaryVariables: temporaryVariableProfile(tab),
               },
             )
           : await this.#webSocket.command<ExecutionView>("execution.start", {
@@ -1454,6 +1514,22 @@ function cloneVariableWrites(
   variables: readonly VariableWrite[],
 ): VariableWrite[] {
   return variables.map((variable) => ({ ...variable }));
+}
+
+/** Returns the display name used for one unsaved request-variable source. */
+function temporaryVariableScopeName(tab: RequestTab): string {
+  return tab.draft.name.trim() || "Temporary request";
+}
+
+/** Projects one tab's local variables onto the temporary backend contract. */
+function temporaryVariableProfile(
+  tab: RequestTab,
+): TemporaryRequestVariableProfile {
+  return {
+    scopeId: tab.tabId,
+    scopeName: temporaryVariableScopeName(tab),
+    variables: cloneVariableWrites(tab.variableDraft ?? []),
+  };
 }
 
 /** Joins an inherited target and local path across a single slash boundary. */

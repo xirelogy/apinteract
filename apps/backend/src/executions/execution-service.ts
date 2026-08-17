@@ -27,6 +27,7 @@ import {
 } from "../scripting/script-types.js";
 import type { WorkspaceService } from "../workspaces/workspace-service.js";
 import { ResourceNotFoundError } from "../workspaces/workspace-service.js";
+import type { TemporaryRequestVariableProfile } from "../variables/variable-service.js";
 import { DEFAULT_BACKEND_USER_AGENT } from "../version.js";
 import {
   executionRequestFromScript,
@@ -191,6 +192,7 @@ export class ExecutionService {
     parentCollectionId: EntityId | null,
     request: RequestExecutionInput,
     publish: (event: ExecutionEvent) => void,
+    temporaryVariables: TemporaryRequestVariableProfile | null = null,
   ): Promise<ExecutionView> {
     return this.#beginStart(async () => {
       const prepared = await this.#requests.prepareTemporaryExecution(
@@ -199,6 +201,7 @@ export class ExecutionService {
         workspaceId,
         parentCollectionId,
         request,
+        temporaryVariables,
       );
       return this.#startPrepared(prepared, userId, publish);
     });

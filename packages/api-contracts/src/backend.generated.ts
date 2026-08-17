@@ -242,6 +242,7 @@ export interface components {
       | components["schemas"]["EnvironmentSelectCommand"]
       | components["schemas"]["EnvironmentPreviewVariablesCommand"]
       | components["schemas"]["VariableProfileGetCommand"]
+      | components["schemas"]["VariableProfileGetTemporaryCommand"]
       | components["schemas"]["VariableProfileUpdateCommand"]
       | components["schemas"]["VariablePreviewCommand"]
       | components["schemas"]["RequestCreateCommand"]
@@ -600,6 +601,23 @@ export interface components {
        */
       type: "VariableProfileGetCommand";
     };
+    /** @description Loads inherited variables for an unsaved request without creating persistent state. */
+    VariableProfileGetTemporaryCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "variable_profile.get_temporary";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+        parentCollectionId: components["schemas"]["CollectionId"] | null;
+        scopeId: components["schemas"]["UuidV7"];
+        scopeName: string;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "VariableProfileGetTemporaryCommand";
+    };
     VariableProfileUpdateCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
       type?: "variable_profile.update";
@@ -623,6 +641,7 @@ export interface components {
         workspaceId: components["schemas"]["WorkspaceId"];
         parentCollectionId: components["schemas"]["CollectionId"] | null;
         requestId: components["schemas"]["RequestId"] | null;
+        temporaryVariables?: components["schemas"]["TemporaryRequestVariableProfile"];
         names: components["schemas"]["VariableName"][];
       };
     } & {
@@ -650,6 +669,7 @@ export interface components {
         requestBody?: components["schemas"]["RequestBodyDefinition"];
         preRequestScript?: string;
         postResponseScript?: string;
+        variables?: components["schemas"]["VariableWrite"][];
       };
     } & {
       /**
@@ -819,6 +839,7 @@ export interface components {
         workspaceId: components["schemas"]["WorkspaceId"];
         parentCollectionId: components["schemas"]["CollectionId"] | null;
         request: components["schemas"]["RequestExecutionInput"];
+        temporaryVariables?: components["schemas"]["TemporaryRequestVariableProfile"];
       };
     } & {
       /**
@@ -929,6 +950,12 @@ export interface components {
       source: components["schemas"]["VariablePreviewSource"];
     };
     VariableWrite: components["schemas"]["EnvironmentVariableWrite"];
+    /** @description An unsaved request's highest-precedence variable layer. */
+    TemporaryRequestVariableProfile: {
+      scopeId: components["schemas"]["UuidV7"];
+      scopeName: string;
+      variables: components["schemas"]["VariableWrite"][];
+    };
     /** @description Optional request-variable mutation committed atomically with request draft updates. */
     RequestVariableProfileUpdate: {
       expectedRevision: number;

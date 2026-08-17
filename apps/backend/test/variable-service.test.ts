@@ -256,6 +256,58 @@ describe("persisted variable scopes", () => {
         ],
       });
 
+      const temporaryScopeId = createEntityId();
+      const temporaryProfile = await variables.getTemporary(
+        userId,
+        sessionId,
+        workspace.workspaceId,
+        leaf.nodeId,
+        temporaryScopeId,
+        "Unsaved request",
+      );
+      expect(
+        temporaryProfile.inheritedVariables.map((item) => item.variable.name),
+      ).toContain("collection_only");
+      await expect(
+        variables.previewVariables(
+          userId,
+          sessionId,
+          workspace.workspaceId,
+          leaf.nodeId,
+          null,
+          ["base_url", "temporary_alias"],
+          {
+            scopeId: temporaryScopeId,
+            scopeName: "Unsaved request",
+            variables: [
+              {
+                name: "base_url",
+                kind: "value",
+                value: "https://temporary.test",
+              },
+              {
+                name: "temporary_alias",
+                kind: "alias",
+                target: "collection_only",
+              },
+            ],
+          },
+        ),
+      ).resolves.toMatchObject({
+        previews: [
+          {
+            name: "base_url",
+            value: "https://temporary.test",
+            source: { scope: "request", scopeName: "Unsaved request" },
+          },
+          {
+            name: "temporary_alias",
+            value: "leaf",
+            source: { scope: "request", scopeName: "Unsaved request" },
+          },
+        ],
+      });
+
       expect(workspaceProfile.variables).toEqual(
         expect.arrayContaining([
           expect.objectContaining({

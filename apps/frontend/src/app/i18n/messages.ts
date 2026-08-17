@@ -197,7 +197,6 @@ export const enUsMessages = {
     inheritedOverridden: "Inherited from {scope}: {name}; overridden here",
     inheritedTarget: "Inherited alias target {index}",
     inheritedValue: "Inherited variable value {index}",
-    requestUnavailable: "Save this request before adding request variables.",
     loading: "Loading request variables…",
     title: "Variables for {name}",
     typeLocked:

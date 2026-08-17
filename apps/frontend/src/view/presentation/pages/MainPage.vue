@@ -404,12 +404,15 @@ async function editWorkspaceProperties(workspaceId: string): Promise<void> {
   workspacePropertiesOpen.value = true;
 }
 
-/** Opens persisted variables for the active saved request. */
+/** Opens inherited and local variables for the active request draft. */
 async function editRequestVariables(): Promise<void> {
-  const requestId = activeTab.value?.request?.requestId;
-  if (requestId !== undefined) {
-    await controller.loadVariableProfile("request", requestId);
+  const tab = activeTab.value;
+  if (tab === null) return;
+  if (tab.request === null) {
+    await controller.loadTemporaryVariableProfile(tab.tabId);
+    return;
   }
+  await controller.loadVariableProfile("request", tab.request.requestId);
 }
 
 /** Keeps request-variable edits in the active tab until the request is saved. */

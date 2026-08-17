@@ -1634,6 +1634,10 @@ describe("RequestService draft updates", () => {
         "",
         "",
         "composed",
+        undefined,
+        {
+          variables: [{ name: "identifier", kind: "value", value: "84" }],
+        },
       );
       const variableExecution = await requests.prepareExecution(
         userId,
@@ -1641,7 +1645,36 @@ describe("RequestService draft updates", () => {
         variableRequest.requestId,
       );
       expect(variableExecution.request.targetUrl).toBe(
-        "https://variables.example.test/root/v3/users/42",
+        "https://variables.example.test/root/v3/users/84",
+      );
+      await expect(
+        variables.get(userId, "request", variableRequest.requestId),
+      ).resolves.toMatchObject({
+        revision: 1,
+        variables: [{ name: "identifier", kind: "value", value: "84" }],
+      });
+
+      const temporaryExecution = await requests.prepareTemporaryExecution(
+        userId,
+        createEntityId(),
+        workspace.workspaceId,
+        variableLeaf.nodeId,
+        {
+          method: "GET",
+          targetMode: "composed",
+          targetUrl: "/<<identifier>>",
+          query: [],
+          headers: [],
+          body: "",
+        },
+        {
+          scopeId: createEntityId(),
+          scopeName: "Unsaved request",
+          variables: [{ name: "identifier", kind: "value", value: "126" }],
+        },
+      );
+      expect(temporaryExecution.request.targetUrl).toBe(
+        "https://variables.example.test/root/v3/users/126",
       );
     } finally {
       await database.close();

@@ -17,6 +17,8 @@ export type EditableVariableScopeKind =
   components["schemas"]["EditableVariableScopeKind"];
 export type VariableProfileView = components["schemas"]["VariableProfileView"];
 export type VariableWrite = components["schemas"]["VariableWrite"];
+export type TemporaryRequestVariableProfile =
+  components["schemas"]["TemporaryRequestVariableProfile"];
 export type VariablePreview = components["schemas"]["VariablePreview"];
 export type VariablePreviewResult =
   components["schemas"]["VariablePreviewResult"];

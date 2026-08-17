@@ -343,14 +343,12 @@ watch(
   [
     activeTab,
     () => props.request?.requestId,
+    () => props.tabId,
     () => props.requestVariableProfile?.scopeId,
   ],
-  ([tab, requestId, profileScopeId]) => {
-    if (
-      tab === "variables" &&
-      requestId !== undefined &&
-      profileScopeId !== requestId
-    ) {
+  ([tab, requestId, tabId, profileScopeId]) => {
+    const expectedProfileScopeId = requestId ?? tabId;
+    if (tab === "variables" && profileScopeId !== expectedProfileScopeId) {
       emit("loadVariables");
     } else if (tab === "versions" && requestId !== undefined) {
       emit("loadRevisions");
@@ -1730,11 +1728,8 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
             value="variables"
             class="request-variables-editor"
           >
-            <p v-if="temporary" class="resource-dialog-context">
-              {{ t("variables.requestUnavailable") }}
-            </p>
             <p
-              v-else-if="requestVariableProfile === null"
+              v-if="requestVariableProfile === null"
               class="resource-dialog-context"
               role="status"
             >

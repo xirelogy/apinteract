@@ -3,7 +3,12 @@ import type { Kysely, Transaction } from "kysely";
 import type { AuditService } from "../audit/audit-service.js";
 import type { EnvironmentService } from "../environments/environment-service.js";
 import { VariableResolver } from "../environments/variable-resolver.js";
-import { bytesToId, idToBytes, type EntityId } from "../foundation/id.js";
+import {
+  bytesToId,
+  createEntityId,
+  idToBytes,
+  type EntityId,
+} from "../foundation/id.js";
 import type { DatabaseSchema } from "../persistence/schema.js";
 import type { WorkspaceService } from "../workspaces/workspace-service.js";
 import { ResourceNotFoundError } from "../workspaces/workspace-service.js";
@@ -73,6 +78,13 @@ export interface EffectiveVariableProfile {
   readonly evidence: readonly VariableProfileEvidence[];
 }
 
+/** Identifies an in-memory request profile layered above persisted scopes. */
+export interface TemporaryRequestVariableProfile {
+  readonly scopeId: EntityId;
+  readonly scopeName: string;
+  readonly variables: readonly VariableWrite[];
+}
+
 interface ScopeIdentity {
   readonly workspaceId: EntityId;
   readonly scopeKind: EditableVariableScopeKind;
@@ -139,6 +151,38 @@ export class VariableService {
       identity.workspaceId,
     );
     return this.#view(this.#database, identity, sessionId);
+  }
+
+  /** Builds the inherited profile shown by an unsaved request editor. */
+  async getTemporary(
+    userId: EntityId,
+    sessionId: EntityId,
+    workspaceId: EntityId,
+    parentCollectionId: EntityId | null,
+    scopeId: EntityId,
+    scopeName: string,
+  ): Promise<VariableProfileView> {
+    await this.#workspaces.requireCanRead(this.#database, userId, workspaceId);
+    const identity: ScopeIdentity = {
+      workspaceId,
+      scopeKind: "request",
+      scopeId,
+      scopeName,
+      parentCollectionId,
+    };
+    return {
+      workspaceId,
+      scopeKind: "request",
+      scopeId,
+      scopeName,
+      revision: 0,
+      variables: [],
+      inheritedVariables: await this.#inheritedVariables(
+        this.#database,
+        sessionId,
+        identity,
+      ),
+    };
   }
 
   /** Replaces one authorized ordered profile under optimistic concurrency. */
@@ -269,15 +313,25 @@ export class VariableService {
     parentCollectionId: EntityId | null,
     requestId: EntityId | null,
     names: readonly string[],
+    temporaryRequest: TemporaryRequestVariableProfile | null = null,
   ): Promise<VariablePreviewResult> {
     await this.#workspaces.requireCanRead(this.#database, userId, workspaceId);
-    const profile = await this.effectiveProfile(
-      this.#database,
-      sessionId,
-      workspaceId,
-      parentCollectionId,
-      requestId,
-    );
+    const profile =
+      temporaryRequest === null
+        ? await this.effectiveProfile(
+            this.#database,
+            sessionId,
+            workspaceId,
+            parentCollectionId,
+            requestId,
+          )
+        : await this.effectiveTemporaryProfile(
+            this.#database,
+            sessionId,
+            workspaceId,
+            parentCollectionId,
+            temporaryRequest,
+          );
     const variables = new Map(
       profile.variables.map((variable) => [variable.name, variable] as const),
     );
@@ -455,6 +509,44 @@ export class VariableService {
       variables: [...variables.values()],
       sources,
       evidence,
+    };
+  }
+
+  /** Layers unsaved request variables above every persisted inherited scope. */
+  async effectiveTemporaryProfile(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    sessionId: EntityId,
+    workspaceId: EntityId,
+    parentCollectionId: EntityId | null,
+    temporaryRequest: TemporaryRequestVariableProfile,
+  ): Promise<EffectiveVariableProfile> {
+    const inherited = await this.effectiveProfile(
+      database,
+      sessionId,
+      workspaceId,
+      parentCollectionId,
+      null,
+    );
+    const variables = new Map(
+      inherited.variables.map((variable) => [variable.name, variable] as const),
+    );
+    const sources = new Map(inherited.sources);
+    const source: VariablePreviewSource = {
+      scope: "request",
+      scopeId: temporaryRequest.scopeId,
+      scopeName: temporaryRequest.scopeName,
+      revision: 0,
+    };
+    for (const variable of resolveTemporaryVariableWrites(
+      temporaryRequest.variables,
+    )) {
+      variables.set(variable.name, variable);
+      sources.set(variable.name, source);
+    }
+    return {
+      variables: [...variables.values()],
+      sources,
+      evidence: inherited.evidence,
     };
   }
 
@@ -721,4 +813,46 @@ function variableEvidence(
     scopeId: source.scopeId,
     revision: source.revision,
   };
+}
+
+/** Validates and materializes one request-local draft without persisting secrets. */
+function resolveTemporaryVariableWrites(
+  writes: readonly VariableWrite[],
+): readonly ResolvedVariable[] {
+  const usedIds = new Set<EntityId>();
+  const usedNames = new Set<string>();
+  return writes.map((write) => {
+    validateVariableName(write.name);
+    if (usedNames.has(write.name)) {
+      throw new Error(`Variable name ${write.name} is duplicated`);
+    }
+    usedNames.add(write.name);
+    const variableId = write.variableId ?? createEntityId();
+    if (usedIds.has(variableId)) {
+      throw new Error("A variable identifier was submitted more than once");
+    }
+    usedIds.add(variableId);
+    if (write.kind === "alias") {
+      validateVariableName(write.target);
+    }
+    if (
+      write.kind === "secret" &&
+      (write.value === undefined || write.clearValue === true)
+    ) {
+      throw new Error("A temporary secret requires a value");
+    }
+    return {
+      variableId,
+      name: write.name,
+      kind: write.kind,
+      value:
+        write.kind === "value"
+          ? write.value
+          : write.kind === "secret"
+            ? (write.value ?? null)
+            : null,
+      aliasTarget: write.kind === "alias" ? write.target : null,
+      secretVersion: write.kind === "secret" ? 1 : null,
+    };
+  });
 }

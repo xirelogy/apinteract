@@ -693,6 +693,9 @@
             "$ref": "#/components/schemas/VariableProfileGetCommand"
           },
           {
+            "$ref": "#/components/schemas/VariableProfileGetTemporaryCommand"
+          },
+          {
             "$ref": "#/components/schemas/VariableProfileUpdateCommand"
           },
           {
@@ -1490,6 +1493,39 @@
           }
         ]
       },
+      "VariableProfileGetTemporaryCommand": {
+        "description": "Loads inherited variables for an unsaved request without creating persistent state.",
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "variable_profile.get_temporary" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "workspaceId",
+                  "parentCollectionId",
+                  "scopeId",
+                  "scopeName"
+                ],
+                "properties": {
+                  "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+                  "parentCollectionId": {
+                    "oneOf": [
+                      { "$ref": "#/components/schemas/CollectionId" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "scopeId": { "$ref": "#/components/schemas/UuidV7" },
+                  "scopeName": { "type": "string", "maxLength": 200 }
+                }
+              }
+            }
+          }
+        ]
+      },
       "VariableProfileUpdateCommand": {
         "allOf": [
           { "$ref": "#/components/schemas/CommandEnvelope" },
@@ -1553,6 +1589,9 @@
                       { "$ref": "#/components/schemas/RequestId" },
                       { "type": "null" }
                     ]
+                  },
+                  "temporaryVariables": {
+                    "$ref": "#/components/schemas/TemporaryRequestVariableProfile"
                   },
                   "names": {
                     "type": "array",
@@ -1648,6 +1687,10 @@
                   "postResponseScript": {
                     "type": "string",
                     "maxLength": 65536
+                  },
+                  "variables": {
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/VariableWrite" }
                   }
                 }
               }
@@ -1993,6 +2036,9 @@
                   },
                   "request": {
                     "$ref": "#/components/schemas/RequestExecutionInput"
+                  },
+                  "temporaryVariables": {
+                    "$ref": "#/components/schemas/TemporaryRequestVariableProfile"
                   }
                 }
               }
@@ -2315,6 +2361,20 @@
       },
       "VariableWrite": {
         "$ref": "#/components/schemas/EnvironmentVariableWrite"
+      },
+      "TemporaryRequestVariableProfile": {
+        "type": "object",
+        "description": "An unsaved request's highest-precedence variable layer.",
+        "additionalProperties": false,
+        "required": ["scopeId", "scopeName", "variables"],
+        "properties": {
+          "scopeId": { "$ref": "#/components/schemas/UuidV7" },
+          "scopeName": { "type": "string", "maxLength": 200 },
+          "variables": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/VariableWrite" }
+          }
+        }
       },
       "RequestVariableProfileUpdate": {
         "type": "object",

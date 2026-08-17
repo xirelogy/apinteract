@@ -15,7 +15,10 @@ import {
 } from "../foundation/id.js";
 import type { DatabaseSchema } from "../persistence/schema.js";
 import type { ScriptRequest } from "../scripting/script-types.js";
-import type { VariableService } from "../variables/variable-service.js";
+import type {
+  TemporaryRequestVariableProfile,
+  VariableService,
+} from "../variables/variable-service.js";
 import type {
   VariablePreviewSource,
   VariableProfileEvidence,
@@ -169,6 +172,11 @@ export interface RequestExecutionInput {
 export interface RequestVariableProfileUpdate {
   readonly expectedRevision: number;
   readonly variables: readonly VariableWrite[];
+}
+
+/** Carries additive request-creation data without extending positional inputs. */
+export interface RequestCreationOptions {
+  readonly variables?: readonly VariableWrite[];
 }
 
 export interface ExecutionRequestSnapshot extends RequestExecutionInput {
@@ -868,6 +876,7 @@ export class RequestService {
     postResponseScript = "",
     targetMode: "absolute" | "composed" = "absolute",
     requestBody?: RequestBodyDefinition,
+    options: RequestCreationOptions = {},
   ): Promise<RequestView> {
     const content = normalizeExecutionInput({
       method,
@@ -929,6 +938,16 @@ export class RequestService {
           updated_at: now,
         })
         .execute();
+      if ((options.variables?.length ?? 0) > 0) {
+        await this.#variables.updateInTransaction(
+          transaction,
+          userId,
+          "request",
+          requestId,
+          0,
+          options.variables ?? [],
+        );
+      }
       await this.#audit.record(transaction, {
         type: "request.created",
         actorUserId: userId,
@@ -1719,6 +1738,7 @@ export class RequestService {
     workspaceId: EntityId,
     parentCollectionId: EntityId | null,
     input: RequestExecutionInput,
+    temporaryVariables: TemporaryRequestVariableProfile | null = null,
   ): Promise<PreparedExecution> {
     const localRequest = {
       workspaceId,
@@ -1740,13 +1760,22 @@ export class RequestService {
         localRequest.targetMode,
         localRequest.targetUrl,
       );
-      const variableProfile = await this.#variables.effectiveProfile(
-        transaction,
-        sessionId,
-        workspaceId,
-        parentCollectionId,
-        null,
-      );
+      const variableProfile =
+        temporaryVariables === null
+          ? await this.#variables.effectiveProfile(
+              transaction,
+              sessionId,
+              workspaceId,
+              parentCollectionId,
+              null,
+            )
+          : await this.#variables.effectiveTemporaryProfile(
+              transaction,
+              sessionId,
+              workspaceId,
+              parentCollectionId,
+              temporaryVariables,
+            );
       const executionRequest: ExecutionRequestSnapshot = {
         ...localRequest,
         headers: withRequestBodyContentType(
