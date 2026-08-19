@@ -17,6 +17,56 @@ Object.defineProperty(Range.prototype, "getClientRects", {
 });
 
 describe("RequestEditor", () => {
+  it("marks body and script tabs that contain editable content", () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft: {
+          name: "Content indicators",
+          method: "POST",
+          targetMode: "absolute",
+          targetUrl: "https://example.test",
+          query: [],
+          headers: [],
+          requestBody: {
+            kind: "text",
+            contentType: "text/plain",
+            text: "payload",
+          },
+          body: "payload",
+          preRequestScript: "api.variables.set('token', 'value');",
+          postResponseScript: "api.test('ok', () => true);",
+        },
+        execution: null,
+        tabId: "content-tab",
+        temporary: true,
+        inheritedHeaders: [],
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    for (const tab of ["body", "preRequest", "postResponse"]) {
+      expect(
+        wrapper
+          .get(`[id$="-trigger-${tab}"]`)
+          .find(".tab-content-indicator")
+          .exists(),
+      ).toBe(true);
+    }
+    expect(
+      wrapper
+        .get('[id$="-trigger-query"]')
+        .find(".tab-content-indicator")
+        .exists(),
+    ).toBe(false);
+  });
+
   it("shows warnings for stale drafts and omitted secret values", () => {
     const i18n = createI18n({
       legacy: false,

@@ -271,6 +271,7 @@ export const enUsMessages = {
     closeNamed: "Close {name}",
     copySuffix: " copy",
     current: "Current request: {name}",
+    hasContent: "Has content",
     deleteAction: "Delete request",
     deleteHistoryRetained: "Past execution records are retained.",
     deleteMessage:

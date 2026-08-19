@@ -294,6 +294,13 @@ const headerCount = computed(
     props.inheritedHeaders.length +
     (generatedContentType.value === null ? 0 : 1),
 );
+const bodyHasContent = computed(() => {
+  const body = currentRequestBody();
+  if (body.kind === "none") return false;
+  if (body.kind === "text") return body.text.length > 0;
+  if (body.kind === "file") return true;
+  return body.fields.length > 0;
+});
 const generatedContentType = computed(() => {
   if (bodyKind.value === "none") return null;
   const override = bodyContentType.value.trim();
@@ -924,6 +931,14 @@ function requestTabLabel(tab: (typeof requestTabs)[number]): string {
     : t("environment.variables");
 }
 
+/** Reports whether a request tab owns a meaningful body or script draft. */
+function requestTabHasContent(tab: (typeof requestTabs)[number]): boolean {
+  if (tab === "body") return bodyHasContent.value;
+  if (tab === "preRequest") return preRequestScript.value.trim() !== "";
+  if (tab === "postResponse") return postResponseScript.value.trim() !== "";
+  return false;
+}
+
 /** Persists a trimmed version name or removes the current one when blank. */
 function saveVersionName(): void {
   const revisionId = props.viewingRevision?.revisionId;
@@ -1206,6 +1221,15 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 class="tab-count"
               >
                 {{ requestVariableCount }}
+              </span>
+              <span
+                v-if="requestTabHasContent(tab)"
+                class="tab-content-indicator"
+                :title="t('request.hasContent')"
+              >
+                <span class="visually-hidden">{{
+                  t("request.hasContent")
+                }}</span>
               </span>
             </TabsTrigger>
           </TabsList>
