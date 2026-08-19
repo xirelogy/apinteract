@@ -5,8 +5,11 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
+import type { EnvironmentEditorTab } from "../src/model/domain/application";
 import EnvironmentManager from "../src/view/presentation/features/EnvironmentManager.vue";
 
+const workspaceId = "019fa8be-a510-76b9-b73b-69f4c7af7876";
+const environmentId = "019fa8be-a510-76b9-b73b-69f4c7af7875";
 let showModalDescriptor: PropertyDescriptor | undefined;
 let closeDescriptor: PropertyDescriptor | undefined;
 
@@ -58,51 +61,79 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+/** Creates the localization plugin used by presentation tests. */
+function i18n() {
+  return createI18n({
+    legacy: false,
+    locale: "en-US",
+    messages: { "en-US": enUsMessages },
+  });
+}
+
+/** Creates one saved environment editor tab. */
+function savedTab(): EnvironmentEditorTab {
+  const environment = {
+    environmentId,
+    workspaceId,
+    name: "Development",
+    revision: 2,
+    includedEnvironments: [],
+    variables: [
+      {
+        variableId: "019fa8be-a510-76b9-b73b-69f4c7af7877",
+        name: "token",
+        kind: "secret" as const,
+        hasValue: true,
+        secretVersion: 4,
+      },
+    ],
+    inheritedVariables: [],
+  };
+  const draft = {
+    name: environment.name,
+    variables: [
+      {
+        variableId: "019fa8be-a510-76b9-b73b-69f4c7af7877",
+        name: "token",
+        kind: "secret" as const,
+      },
+    ],
+    includedEnvironmentIds: [],
+  };
+  return {
+    kind: "environment",
+    tabId: "019fa8be-a510-76b9-b73b-69f4c7af7878",
+    workspaceId,
+    environment,
+    draft,
+    baseline: draft,
+    busy: false,
+  };
+}
+
 describe("EnvironmentManager", () => {
-  it("orders creation and inactive edits in the environment action menu", async () => {
-    const i18n = createI18n({
-      legacy: false,
-      locale: "en-US",
-      messages: { "en-US": enUsMessages },
-    });
-    const developmentId = "019fa8be-a510-76b9-b73b-69f4c7af7875";
-    const stagingId = "019fa8be-a510-76b9-b73b-69f4c7af7876";
+  it("opens environment editors from the non-blocking toolbar", async () => {
+    const stagingId = "019fa8be-a510-76b9-b73b-69f4c7af7879";
     const wrapper = mount(EnvironmentManager, {
       attachTo: document.body,
       props: {
         environments: [
-          { environmentId: developmentId, name: "Development", revision: 1 },
+          { environmentId, name: "Development", revision: 2 },
           { environmentId: stagingId, name: "Staging", revision: 1 },
         ],
-        selectedEnvironmentId: developmentId,
-        environment: null,
+        selectedEnvironmentId: environmentId,
+        editorTab: null,
         canEdit: true,
         busy: false,
       },
-      global: { plugins: [i18n] },
+      global: { plugins: [i18n()] },
     });
-
-    const environmentSelector = wrapper.get(
-      'button[aria-label="Select environment"]',
-    );
-    const environmentIcon = environmentSelector.get(
-      ".environment-selector-icon",
-    );
-    const environmentName = environmentSelector.get(
-      ".environment-selector-name",
-    );
-    expect(environmentIcon.classes()).not.toContain(
-      "environment-selection-empty",
-    );
-    expect(environmentName.classes()).not.toContain(
-      "environment-selection-empty",
-    );
 
     await wrapper
       .get('button[aria-label="Manage environments"]')
       .trigger("click");
     await flushPromises();
-    let menuItems = [
+    const menuItems = [
       ...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
     ];
     expect(menuItems.map((item) => item.textContent)).toEqual([
@@ -110,301 +141,91 @@ describe("EnvironmentManager", () => {
       "Create new environment",
       "Edit Staging",
     ]);
-
     menuItems[1]?.click();
     await flushPromises();
-    expect(wrapper.get("dialog").attributes()).toHaveProperty("open");
-    expect(wrapper.get("h2").text()).toBe("Create environment");
-    expect(wrapper.emitted("load")).toBeUndefined();
-
-    await wrapper.get('button[aria-label="Close"]').trigger("click");
-    expect(wrapper.get("dialog").attributes()).not.toHaveProperty("open");
-
-    await wrapper
-      .get('button[aria-label="Manage environments"]')
-      .trigger("click");
-    await flushPromises();
-    menuItems = [
-      ...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
-    ];
-    menuItems[2]?.click();
-    await flushPromises();
-    expect(wrapper.emitted("load")).toEqual([[stagingId]]);
-    expect(wrapper.emitted("select")).toBeUndefined();
-
-    await wrapper.get('button[aria-label="Close"]').trigger("click");
-    await wrapper.setProps({ selectedEnvironmentId: null });
-    expect(environmentIcon.classes()).toContain("environment-selection-empty");
-    expect(environmentName.classes()).toContain("environment-selection-empty");
-    expect(environmentSelector.text()).toContain("No environment");
-    await wrapper
-      .get('button[aria-label="Manage environments"]')
-      .trigger("click");
-    await flushPromises();
-    menuItems = [
-      ...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
-    ];
-    expect(menuItems.map((item) => item.textContent)).toEqual([
-      "Create new environment",
-      "Edit Development",
-      "Edit Staging",
-    ]);
+    expect(wrapper.emitted("openEditor")).toEqual([[null]]);
+    expect(wrapper.find(".environment-dialog").exists()).toBe(false);
     wrapper.unmount();
   });
 
-  it("keeps the editor open until persistence and refresh are confirmed", async () => {
-    const i18n = createI18n({
-      legacy: false,
-      locale: "en-US",
-      messages: { "en-US": enUsMessages },
-    });
-    const wrapper = mount(EnvironmentManager, {
-      attachTo: document.body,
-      props: {
-        environments: [],
-        selectedEnvironmentId: null,
-        environment: null,
-        canEdit: true,
-        busy: false,
-      },
-      global: { plugins: [i18n] },
-    });
-
-    await wrapper
-      .get('button[aria-label="Manage environments"]')
-      .trigger("click");
-    await flushPromises();
-    document.body
-      .querySelector<HTMLButtonElement>('[role="menuitem"]')
-      ?.click();
-    await flushPromises();
-    await wrapper.get("form").trigger("submit");
-    expect(wrapper.emitted("create")).toEqual([["", [], []]]);
-    expect(wrapper.get("dialog").attributes()).toHaveProperty("open");
-
-    await wrapper.setProps({ busy: true });
-    const cancelButton = wrapper
-      .findAll("button")
-      .find((button) => button.text() === "Cancel");
-    expect(cancelButton?.attributes()).toHaveProperty("disabled");
-
-    wrapper.vm.finishMutation();
-    await wrapper.vm.$nextTick();
-    expect(wrapper.get("dialog").attributes()).not.toHaveProperty("open");
-    wrapper.unmount();
-  });
-
-  it("creates an ordered composition and supports keyboard reordering", async () => {
-    const i18n = createI18n({
-      legacy: false,
-      locale: "en-US",
-      messages: { "en-US": enUsMessages },
-    });
-    const firstId = "019fa8be-a510-76b9-b73b-69f4c7af7875";
-    const secondId = "019fa8be-a510-76b9-b73b-69f4c7af7876";
-    const wrapper = mount(EnvironmentManager, {
-      attachTo: document.body,
-      props: {
-        environments: [
-          { environmentId: firstId, name: "First", revision: 1 },
-          { environmentId: secondId, name: "Second", revision: 1 },
-        ],
-        selectedEnvironmentId: null,
-        environment: null,
-        canEdit: true,
-        busy: false,
-      },
-      global: { plugins: [i18n] },
-    });
-
-    await wrapper
-      .get('button[aria-label="Manage environments"]')
-      .trigger("click");
-    await flushPromises();
-    document.body
-      .querySelector<HTMLButtonElement>('[role="menuitem"]')
-      ?.click();
-    await flushPromises();
-
-    for (const name of ["First", "Second"]) {
-      await wrapper
-        .get('button[aria-label="Environment to include"]')
-        .trigger("click");
-      await flushPromises();
-      const option = wrapper
-        .findAll('[role="option"]')
-        .find((candidate) => candidate.text().includes(name));
-      await option?.trigger("click");
-      await wrapper
-        .findAll("button")
-        .find((button) => button.text() === "Include")
-        ?.trigger("click");
-    }
-
-    await wrapper
-      .get('button[aria-label^="Reorder included environment 1"]')
-      .trigger("keydown", { altKey: true, key: "ArrowDown" });
-    await wrapper.get("form").trigger("submit");
-    expect(wrapper.emitted("create")).toEqual([["", [], [secondId, firstId]]]);
-    wrapper.unmount();
-  });
-
-  it("moves deletion into the editor menu and confirms it in a styled dialog", async () => {
-    const i18n = createI18n({
-      legacy: false,
-      locale: "en-US",
-      messages: { "en-US": enUsMessages },
-    });
-    const environmentId = "019fa8be-a510-76b9-b73b-69f4c7af7875";
+  it("edits an environment in a workbench panel and keeps it open after save", async () => {
+    const tab = savedTab();
     const wrapper = mount(EnvironmentManager, {
       attachTo: document.body,
       props: {
         environments: [{ environmentId, name: "Development", revision: 2 }],
         selectedEnvironmentId: environmentId,
-        environment: {
-          environmentId,
-          workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
-          name: "Development",
-          revision: 2,
-          includedEnvironments: [],
-          variables: [],
-          inheritedVariables: [],
-        },
+        editorTab: tab,
+        showToolbar: false,
         canEdit: true,
         busy: false,
       },
-      global: { plugins: [i18n] },
+      global: { plugins: [i18n()] },
     });
 
-    await wrapper
-      .get('button[aria-label="Manage environments"]')
-      .trigger("click");
-    await flushPromises();
-    document.body
-      .querySelector<HTMLButtonElement>('[role="menuitem"]')
-      ?.click();
-    await flushPromises();
-
-    const editor = wrapper.get(".environment-dialog");
-    expect(editor.attributes()).toHaveProperty("open");
-    expect(
-      editor.findAll("footer button").map((button) => button.text()),
-    ).toEqual(["Cancel", "Save"]);
-
-    await wrapper
-      .get('button[aria-label="More actions for Development"]')
-      .trigger("click");
-    await flushPromises();
-    const deleteMenuItem = editor.get('[role="menuitem"]');
-    expect(deleteMenuItem.text()).toBe("Delete environment");
-    expect(deleteMenuItem.attributes("data-variant")).toBe("danger");
-    await deleteMenuItem.trigger("click");
-    await flushPromises();
-
-    const confirmation = wrapper.get(".environment-delete-dialog");
-    expect(confirmation.attributes()).toHaveProperty("open");
-    expect(confirmation.get("h2").text()).toBe("Delete environment?");
-    expect(confirmation.text()).toContain(
-      "“Development” and all of its variables will be permanently deleted.",
+    expect(wrapper.get(".environment-dialog").element.tagName).toBe("SECTION");
+    const title = wrapper.get<HTMLInputElement>("#environment-dialog-title");
+    expect(title.element.value).toBe("Development");
+    expect(title.classes()).toContain("request-name-input");
+    expect(wrapper.find(".resource-editor-title .lucide-layers").exists()).toBe(
+      true,
     );
-    expect(wrapper.emitted("delete")).toBeUndefined();
-
-    await confirmation.get(".danger-button").trigger("click");
-    expect(wrapper.emitted("delete")).toEqual([[environmentId, 2]]);
-    expect(confirmation.attributes()).toHaveProperty("open");
-
-    await wrapper.setProps({ busy: true });
-    expect(confirmation.get(".danger-button").attributes()).toHaveProperty(
-      "disabled",
-    );
-    wrapper.vm.finishMutation();
-    await wrapper.vm.$nextTick();
-    expect(editor.attributes()).not.toHaveProperty("open");
-    expect(wrapper.find(".environment-delete-dialog").exists()).toBe(false);
+    const saveButton = wrapper.get('button[aria-label="Save"]');
+    expect(saveButton.attributes("form")).toBe("environment-editor-form");
+    expect(saveButton.classes()).toContain("primary-button");
+    await wrapper.get("input[required]").setValue("Local development");
+    await saveButton.trigger("click");
+    expect(wrapper.emitted("saveEditor")).toEqual([[tab.tabId]]);
+    expect(wrapper.find(".environment-dialog").exists()).toBe(true);
+    const change = wrapper.emitted("change")?.at(-1);
+    expect(change?.[0]).toBe(tab.tabId);
+    expect(change?.[1]).toMatchObject({ name: "Local development" });
     wrapper.unmount();
   });
 
-  it("preserves a stored secret without rendering or resubmitting plaintext", async () => {
-    const i18n = createI18n({
-      legacy: false,
-      locale: "en-US",
-      messages: { "en-US": enUsMessages },
-    });
-    const environmentId = "019fa8be-a510-76b9-b73b-69f4c7af7875";
+  it("preserves stored secrets without rendering or resubmitting plaintext", () => {
+    const tab = savedTab();
     const wrapper = mount(EnvironmentManager, {
-      attachTo: document.body,
       props: {
         environments: [{ environmentId, name: "Development", revision: 2 }],
         selectedEnvironmentId: environmentId,
-        environment: null,
+        editorTab: tab,
+        showToolbar: false,
         canEdit: true,
         busy: false,
       },
-      global: { plugins: [i18n] },
-    });
-
-    await wrapper
-      .get('button[aria-label="Manage environments"]')
-      .trigger("click");
-    await flushPromises();
-    document.body
-      .querySelector<HTMLButtonElement>('[role="menuitem"]')
-      ?.click();
-    await flushPromises();
-    expect(wrapper.emitted("load")).toEqual([[environmentId]]);
-    await wrapper.setProps({
-      environment: {
-        environmentId,
-        workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
-        name: "Development",
-        revision: 2,
-        includedEnvironments: [],
-        variables: [
-          {
-            variableId: "019fa8be-a510-76b9-b73b-69f4c7af7877",
-            name: "token",
-            kind: "secret",
-            hasValue: true,
-            secretVersion: 4,
-          },
-        ],
-        inheritedVariables: [],
-      },
+      global: { plugins: [i18n()] },
     });
 
     const secretInput = wrapper.get('input[aria-label="Secret value 1"]');
     expect((secretInput.element as HTMLInputElement).value).toBe("");
-    expect(
-      wrapper
-        .get('button[aria-label="Variable kind 1"]')
-        .attributes("disabled"),
-    ).toBeDefined();
-    expect(wrapper.get(".variable-type-cell[title]").attributes("title")).toBe(
-      "Variable type cannot be changed after saving to prevent secret disclosure.",
-    );
-    expect(wrapper.get(".variable-field-heading").text()).toContain(
-      "NameTypeValue / Target",
-    );
-    expect(
-      wrapper
-        .get('input[aria-label="Variable name 2"]')
-        .attributes("placeholder"),
-    ).toBe("Add variable");
     expect(wrapper.text()).not.toContain("top-secret-token");
-    await wrapper.get('button[type="submit"]').trigger("submit");
-    expect(wrapper.emitted("save")?.[0]).toEqual([
-      environmentId,
-      2,
-      "Development",
-      [
-        {
-          variableId: "019fa8be-a510-76b9-b73b-69f4c7af7877",
-          name: "token",
-          kind: "secret",
-        },
-      ],
-      [],
-    ]);
+    wrapper.unmount();
+  });
+
+  it("keeps destructive environment confirmation modal", async () => {
+    const tab = savedTab();
+    const wrapper = mount(EnvironmentManager, {
+      attachTo: document.body,
+      props: {
+        environments: [{ environmentId, name: "Development", revision: 2 }],
+        selectedEnvironmentId: environmentId,
+        editorTab: tab,
+        showToolbar: false,
+        canEdit: true,
+        busy: false,
+      },
+      global: { plugins: [i18n()] },
+    });
+
+    const deleteButton = wrapper.get('button[aria-label="Delete"]');
+    expect(deleteButton.classes()).toContain("danger-outline-button");
+    await deleteButton.trigger("click");
+    await flushPromises();
+    const confirmation = wrapper.get(".environment-delete-dialog");
+    expect(confirmation.attributes()).toHaveProperty("open");
+    await confirmation.get(".danger-button").trigger("click");
+    expect(wrapper.emitted("delete")).toEqual([[environmentId, 2]]);
     wrapper.unmount();
   });
 });

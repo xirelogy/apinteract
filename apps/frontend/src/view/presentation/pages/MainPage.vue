@@ -7,7 +7,6 @@ import { useRouter } from "vue-router";
 import { useApplicationController } from "@/app/dependencies";
 import { useApplicationStore } from "@/control/state/application-store";
 import type {
-  EnvironmentVariableWrite,
   ExecutionView,
   RequestAttachment,
   RequestField,
@@ -15,9 +14,14 @@ import type {
   VariableWrite,
 } from "@/model/contracts/backend";
 import {
+  isResourceEditorTabDirty,
   isRequestTabDirty,
+  workbenchTabId,
+  workbenchTabWorkspaceId,
+  type ResourceEditorTab,
   type RequestDraftInput,
   type RequestTab,
+  type WorkbenchTab,
 } from "@/model/domain/application";
 import AppHeader from "@/view/presentation/layout/AppHeader.vue";
 import DiscardChangesDialog from "@/view/presentation/features/DiscardChangesDialog.vue";
@@ -39,8 +43,7 @@ const { t } = useI18n();
 const navigatorOpen = ref(false);
 const saveDialogTab = ref<RequestTab | null>(null);
 const discardDialogTab = ref<RequestTab | null>(null);
-const collectionPropertiesOpen = ref(false);
-const workspacePropertiesOpen = ref(false);
+const discardResourceTab = ref<ResourceEditorTab | null>(null);
 const importDialogOpen = ref(false);
 const requestDuplicateTarget = ref<{
   readonly requestId: string;
@@ -55,18 +58,12 @@ const navigatorWidth = ref(
   Math.min(304, Math.max(256, window.innerWidth * 0.2)),
 );
 const navigatorResizePointerId = ref<number | null>(null);
-const environmentManager = ref<InstanceType<typeof EnvironmentManager> | null>(
-  null,
-);
 const {
   session,
   workspaces,
   selectedWorkspaceId,
-  selectedWorkspace,
   environments,
   selectedEnvironmentId,
-  selectedEnvironment,
-  selectedVariableProfile,
   variablePreviews,
   rootNodes,
   selectedCollectionId,
@@ -75,13 +72,47 @@ const {
   expandedCollectionIds,
   requestTabs,
   activeRequestTabId,
+  resourceTabs,
+  workbenchTabOrder,
+  activeWorkbenchTabId,
   busy,
   error,
 } = storeToRefs(store);
 const activeTab = computed(
   () =>
-    requestTabs.value.find((tab) => tab.tabId === activeRequestTabId.value) ??
-    null,
+    requestTabs.value.find(
+      (tab) =>
+        tab.tabId === activeRequestTabId.value &&
+        (activeWorkbenchTabId.value === null ||
+          tab.tabId === activeWorkbenchTabId.value),
+    ) ?? null,
+);
+const workbenchTabs = computed<WorkbenchTab[]>(() => {
+  const byId = new Map<string, WorkbenchTab>([
+    ...requestTabs.value.map((requestTab): [string, WorkbenchTab] => [
+      requestTab.tabId,
+      { kind: "request", requestTab },
+    ]),
+    ...resourceTabs.value.map((resourceTab): [string, WorkbenchTab] => [
+      resourceTab.tabId,
+      resourceTab,
+    ]),
+  ]);
+  const ordered = workbenchTabOrder.value.flatMap((tabId) => {
+    const tab = byId.get(tabId);
+    return tab === undefined ? [] : [tab];
+  });
+  const orderedIds = new Set(ordered.map(workbenchTabId));
+  return [
+    ...ordered,
+    ...[...byId.values()].filter((tab) => !orderedIds.has(workbenchTabId(tab))),
+  ];
+});
+const activeResourceTab = computed(
+  () =>
+    resourceTabs.value.find(
+      (tab) => tab.tabId === activeWorkbenchTabId.value,
+    ) ?? null,
 );
 const displayedExecution = computed<ExecutionView | null>(() => {
   const tab = activeTab.value;
@@ -134,31 +165,11 @@ const displayingCapturedResponse = computed(() => {
     tab.viewingRevision === null
   );
 });
-const visibleRequestTabs = computed(() =>
-  requestTabs.value.filter(
-    (tab) => tab.workspaceId === selectedWorkspaceId.value,
+const visibleWorkbenchTabs = computed(() =>
+  workbenchTabs.value.filter(
+    (tab) => workbenchTabWorkspaceId(tab) === selectedWorkspaceId.value,
   ),
 );
-const collectionProperties = computed(() => {
-  const collection = selectedCollection.value;
-  const variableProfile = selectedVariableProfile.value;
-  return collectionPropertiesOpen.value &&
-    collection !== null &&
-    variableProfile?.scopeKind === "collection" &&
-    variableProfile.scopeId === collection.collectionId
-    ? { collection, variableProfile }
-    : null;
-});
-const workspaceProperties = computed(() => {
-  const workspace = selectedWorkspace.value;
-  const variableProfile = selectedVariableProfile.value;
-  return workspacePropertiesOpen.value &&
-    workspace !== null &&
-    variableProfile?.scopeKind === "workspace" &&
-    variableProfile.scopeId === workspace.workspaceId
-    ? { workspace, variableProfile }
-    : null;
-});
 const requestVariableProfile = computed(() => {
   return activeTab.value?.variableProfile ?? null;
 });
@@ -178,11 +189,7 @@ const variablePreviewContextKey = computed(() =>
   [
     selectedWorkspaceId.value ?? "",
     selectedEnvironmentId.value ?? "",
-    collectionPropertiesOpen.value
-      ? (selectedCollectionId.value ?? "collection-properties")
-      : workspacePropertiesOpen.value
-        ? (selectedWorkspaceId.value ?? "workspace-properties")
-        : "request-editor",
+    activeResourceTab.value?.kind ?? "request-editor",
     activeTab.value?.request?.requestId ?? "",
     activeTab.value?.request?.parentCollectionId ??
       activeTab.value?.pendingParentCollectionId ??
@@ -447,16 +454,12 @@ function setRequestDeleteDialogOpen(open: boolean): void {
 
 /** Loads a collection and its redacted variables before opening properties. */
 async function editCollectionProperties(collectionId: string): Promise<void> {
-  await controller.selectCollection(collectionId);
-  await controller.loadVariableProfile("collection", collectionId);
-  collectionPropertiesOpen.value = true;
+  await controller.openCollectionPropertiesTab(collectionId);
 }
 
 /** Loads workspace headers and variables before opening unified properties. */
 async function editWorkspaceProperties(workspaceId: string): Promise<void> {
-  await controller.loadWorkspace(workspaceId);
-  await controller.loadVariableProfile("workspace", workspaceId);
-  workspacePropertiesOpen.value = true;
+  await controller.openWorkspacePropertiesTab(workspaceId);
 }
 
 /** Opens inherited and local variables for the active request draft. */
@@ -552,60 +555,68 @@ async function downloadExecutionBody(executionId: string): Promise<void> {
 
 /** Saves every editable property for the selected collection. */
 async function saveCollectionProperties(
+  tabId: string,
   name: string,
   pathPrefix: string,
   headers: readonly RequestField[],
   variables: readonly VariableWrite[],
 ): Promise<void> {
-  const collection = selectedCollection.value;
-  const profile = selectedVariableProfile.value;
-  if (
-    collection === null ||
-    profile === null ||
-    profile.scopeKind !== "collection" ||
-    profile.scopeId !== collection.collectionId
-  ) {
-    return;
-  }
-  await controller.updateCollectionProperties(
-    collection.collectionId,
-    collection.revision,
+  controller.updateCollectionPropertiesDraft(tabId, {
     name,
     pathPrefix,
     headers,
-    profile.revision,
     variables,
-  );
-  collectionPropertiesOpen.value = false;
+  });
+  await controller.saveCollectionPropertiesTab(tabId);
 }
 
 /** Saves every editable property for the selected workspace. */
 async function saveWorkspaceProperties(
+  tabId: string,
   name: string,
   baseUrl: string,
   headers: readonly RequestField[],
   variables: readonly VariableWrite[],
 ): Promise<void> {
-  const workspace = selectedWorkspace.value;
-  const profile = selectedVariableProfile.value;
-  if (
-    workspace === null ||
-    profile === null ||
-    profile.scopeKind !== "workspace" ||
-    profile.scopeId !== workspace.workspaceId
-  ) {
-    return;
-  }
-  await controller.updateWorkspaceProperties(
-    workspace.workspaceId,
-    workspace.revision,
+  controller.updateWorkspacePropertiesDraft(tabId, {
     name,
     baseUrl,
     headers,
-    profile.revision,
     variables,
-  );
-  workspacePropertiesOpen.value = false;
+  });
+  await controller.saveWorkspacePropertiesTab(tabId);
+}
+
+/** Saves the active workspace editor without relying on template narrowing. */
+function saveActiveWorkspaceProperties(
+  name: string,
+  baseUrl: string,
+  headers: readonly RequestField[],
+  variables: readonly VariableWrite[],
+): void {
+  const tab = activeResourceTab.value;
+  if (tab?.kind === "workspace") {
+    void saveWorkspaceProperties(tab.tabId, name, baseUrl, headers, variables);
+  }
+}
+
+/** Saves the active collection editor without relying on template narrowing. */
+function saveActiveCollectionProperties(
+  name: string,
+  pathPrefix: string,
+  headers: readonly RequestField[],
+  variables: readonly VariableWrite[],
+): void {
+  const tab = activeResourceTab.value;
+  if (tab?.kind === "collection") {
+    void saveCollectionProperties(
+      tab.tabId,
+      name,
+      pathPrefix,
+      headers,
+      variables,
+    );
+  }
 }
 
 /** Deletes the selected collection and closes its properties after refresh. */
@@ -614,7 +625,6 @@ async function deleteCollection(
   revision: number,
 ): Promise<void> {
   await controller.deleteCollection(collectionId, revision);
-  collectionPropertiesOpen.value = false;
 }
 
 /** Deletes the selected owner-managed workspace and closes its properties. */
@@ -623,35 +633,6 @@ async function deleteWorkspace(
   revision: number,
 ): Promise<void> {
   await controller.deleteWorkspace(workspaceId, revision);
-  workspacePropertiesOpen.value = false;
-}
-
-/** Creates an environment and closes its editor after summaries refresh. */
-async function createEnvironment(
-  name: string,
-  variables: readonly EnvironmentVariableWrite[],
-  includedEnvironmentIds: readonly string[],
-): Promise<void> {
-  await controller.createEnvironment(name, variables, includedEnvironmentIds);
-  environmentManager.value?.finishMutation();
-}
-
-/** Updates an environment and closes its editor after summaries refresh. */
-async function updateEnvironment(
-  environmentId: string,
-  revision: number,
-  name: string,
-  variables: readonly EnvironmentVariableWrite[],
-  includedEnvironmentIds: readonly string[],
-): Promise<void> {
-  await controller.updateEnvironment(
-    environmentId,
-    revision,
-    name,
-    variables,
-    includedEnvironmentIds,
-  );
-  environmentManager.value?.finishMutation();
 }
 
 /** Deletes an environment and closes its editor after summaries refresh. */
@@ -660,7 +641,16 @@ async function deleteEnvironment(
   revision: number,
 ): Promise<void> {
   await controller.deleteEnvironment(environmentId, revision);
-  environmentManager.value?.finishMutation();
+}
+
+/** Opens a saved or new environment as a first-class workbench tab. */
+function openEnvironmentEditor(environmentId: string | null): void {
+  void controller.openEnvironmentTab(environmentId);
+}
+
+/** Saves draft changes owned by one environment workbench tab. */
+function saveEnvironmentEditor(tabId: string): void {
+  void controller.saveEnvironmentTab(tabId);
 }
 
 /** Closes a clean tab or opens discard confirmation for unsaved content. */
@@ -676,6 +666,23 @@ function requestTabClose(tabId: string): void {
   }
 }
 
+/** Closes any clean workbench tab or confirms discarding its local draft. */
+function workbenchTabClose(tabId: string): void {
+  const workbenchTab = workbenchTabs.value.find(
+    (tab) => workbenchTabId(tab) === tabId,
+  );
+  if (workbenchTab === undefined) return;
+  if (workbenchTab.kind === "request") {
+    requestTabClose(tabId);
+    return;
+  }
+  if (isResourceEditorTabDirty(workbenchTab)) {
+    discardResourceTab.value = workbenchTab;
+  } else {
+    controller.closeResourceTab(tabId);
+  }
+}
+
 /** Discards and closes the tab selected by the confirmation dialog. */
 function discardRequestTab(): void {
   const tab = discardDialogTab.value;
@@ -683,6 +690,14 @@ function discardRequestTab(): void {
     controller.closeRequestTab(tab.tabId);
   }
   discardDialogTab.value = null;
+}
+
+/** Discards and closes the resource editor selected for confirmation. */
+function discardActiveResourceTab(): void {
+  if (discardResourceTab.value !== null) {
+    controller.closeResourceTab(discardResourceTab.value.tabId);
+  }
+  discardResourceTab.value = null;
 }
 </script>
 
@@ -789,26 +804,89 @@ function discardRequestTab(): void {
         </div>
         <template v-else>
           <EnvironmentManager
-            ref="environmentManager"
             :environments="environments"
             :selected-environment-id="selectedEnvironmentId"
-            :environment="selectedEnvironment"
+            :editor-tab="null"
             :can-edit="canEditWorkspace"
             :busy="busy"
             @select="controller.selectEnvironment($event)"
-            @load="controller.loadEnvironment($event)"
-            @create="createEnvironment"
-            @save="updateEnvironment"
-            @delete="deleteEnvironment"
+            @open-editor="openEnvironmentEditor"
           />
           <RequestTabs
-            :tabs="visibleRequestTabs"
-            :active-tab-id="activeRequestTabId"
-            @activate="controller.activateRequestTab($event)"
-            @close="requestTabClose"
+            :tabs="visibleWorkbenchTabs"
+            :active-tab-id="activeWorkbenchTabId"
+            @activate="controller.activateWorkbenchTab($event)"
+            @close="workbenchTabClose"
             @create="createTemporaryRequest()"
           />
+          <WorkspacePropertiesDialog
+            v-if="activeResourceTab?.kind === 'workspace'"
+            :key="`${activeResourceTab.tabId}:${activeResourceTab.workspace.revision}:${activeResourceTab.variableProfile.revision}`"
+            :workspace="activeResourceTab.workspace"
+            :draft="activeResourceTab.draft"
+            :variable-profile="activeResourceTab.variableProfile"
+            :variable-previews="variablePreviews"
+            :can-edit="canEditWorkspace"
+            :can-delete="canDeleteWorkspace"
+            :busy="busy"
+            :recovery-warning="activeResourceTab.omittedSecretValues ?? false"
+            @change="
+              controller.updateWorkspacePropertiesDraft(
+                activeResourceTab.tabId,
+                $event,
+              )
+            "
+            @preview="
+              controller.previewVariables($event, {
+                parentCollectionId: null,
+                requestId: null,
+              })
+            "
+            @save="saveActiveWorkspaceProperties"
+            @delete="deleteWorkspace"
+          />
+          <CollectionPropertiesDialog
+            v-else-if="activeResourceTab?.kind === 'collection'"
+            :key="`${activeResourceTab.tabId}:${activeResourceTab.collection.revision}:${activeResourceTab.variableProfile.revision}`"
+            :collection="activeResourceTab.collection"
+            :draft="activeResourceTab.draft"
+            :variable-profile="activeResourceTab.variableProfile"
+            :variable-previews="variablePreviews"
+            :can-edit="canEditWorkspace"
+            :busy="busy"
+            :recovery-warning="activeResourceTab.omittedSecretValues ?? false"
+            @change="
+              controller.updateCollectionPropertiesDraft(
+                activeResourceTab.tabId,
+                $event,
+              )
+            "
+            @preview="
+              controller.previewVariables($event, {
+                parentCollectionId: activeResourceTab.collection.collectionId,
+                requestId: null,
+              })
+            "
+            @save="saveActiveCollectionProperties"
+            @delete="deleteCollection"
+          />
+          <EnvironmentManager
+            v-else-if="activeResourceTab?.kind === 'environment'"
+            :key="`${activeResourceTab.tabId}:${activeResourceTab.environment?.revision ?? 'new'}`"
+            :environments="environments"
+            :selected-environment-id="selectedEnvironmentId"
+            :editor-tab="activeResourceTab"
+            :show-toolbar="false"
+            :can-edit="canEditWorkspace"
+            :busy="busy"
+            @change="
+              (tabId, draft) => controller.updateEnvironmentDraft(tabId, draft)
+            "
+            @save-editor="saveEnvironmentEditor"
+            @delete="deleteEnvironment"
+          />
           <RequestEditor
+            v-else
             :request="activeTab?.request ?? null"
             :draft="activeTab?.draft ?? null"
             :execution="displayedExecution"
@@ -884,6 +962,18 @@ function discardRequestTab(): void {
       @close="discardDialogTab = null"
       @discard="discardRequestTab"
     />
+    <DiscardChangesDialog
+      v-if="discardResourceTab"
+      :request-name="
+        discardResourceTab.kind === 'workspace'
+          ? discardResourceTab.draft.name
+          : discardResourceTab.kind === 'collection'
+            ? discardResourceTab.draft.name
+            : discardResourceTab.draft.name || t('environment.create')
+      "
+      @close="discardResourceTab = null"
+      @discard="discardActiveResourceTab"
+    />
     <RequestDuplicateDialog
       v-if="requestDuplicateTarget"
       :request-name="requestDuplicateTarget.name"
@@ -910,41 +1000,6 @@ function discardRequestTab(): void {
       :busy="busy"
       @update:open="setRequestDeleteDialogOpen"
       @confirm="confirmRequestDeletion"
-    />
-    <CollectionPropertiesDialog
-      v-if="collectionProperties"
-      :collection="collectionProperties.collection"
-      :variable-profile="collectionProperties.variableProfile"
-      :variable-previews="variablePreviews"
-      :can-edit="canEditWorkspace"
-      :busy="busy"
-      @preview="
-        controller.previewVariables($event, {
-          parentCollectionId: collectionProperties.collection.collectionId,
-          requestId: null,
-        })
-      "
-      @close="collectionPropertiesOpen = false"
-      @save="saveCollectionProperties"
-      @delete="deleteCollection"
-    />
-    <WorkspacePropertiesDialog
-      v-if="workspaceProperties"
-      :workspace="workspaceProperties.workspace"
-      :variable-profile="workspaceProperties.variableProfile"
-      :variable-previews="variablePreviews"
-      :can-edit="canEditWorkspace"
-      :can-delete="canDeleteWorkspace"
-      :busy="busy"
-      @preview="
-        controller.previewVariables($event, {
-          parentCollectionId: null,
-          requestId: null,
-        })
-      "
-      @close="workspacePropertiesOpen = false"
-      @save="saveWorkspaceProperties"
-      @delete="deleteWorkspace"
     />
   </div>
 </template>

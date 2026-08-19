@@ -156,6 +156,16 @@ describe("CollectionPropertiesDialog", () => {
       global: { plugins: [i18n] },
     });
 
+    const title = wrapper.get<HTMLInputElement>("#collection-properties-title");
+    expect(title.element.value).toBe("Examples");
+    expect(title.classes()).toContain("request-name-input");
+    expect(wrapper.find(".resource-editor-title .lucide-folder").exists()).toBe(
+      true,
+    );
+    const saveButton = wrapper.get('button[aria-label="Save"]');
+    expect(saveButton.attributes("form")).toBe("collection-properties-form");
+    expect(saveButton.classes()).toContain("primary-button");
+
     await vi.advanceTimersByTimeAsync(150);
     expect(wrapper.emitted("preview")).toEqual([
       [["parent_host", "host", "token"]],
@@ -302,7 +312,7 @@ describe("CollectionPropertiesDialog", () => {
     await wrapper
       .get('input[aria-label="Variable value 1"]')
       .setValue("https://collection.test");
-    await wrapper.get('button[type="submit"]').trigger("submit");
+    await wrapper.get('button[aria-label="Save"]').trigger("click");
 
     expect(wrapper.emitted("save")).toEqual([
       [
@@ -328,7 +338,7 @@ describe("CollectionPropertiesDialog", () => {
     wrapper.unmount();
   });
 
-  it("confirms collection deletion from the header action menu", async () => {
+  it("confirms collection deletion from the outlined header button", async () => {
     const i18n = createI18n({
       legacy: false,
       locale: "en-US",
@@ -367,14 +377,9 @@ describe("CollectionPropertiesDialog", () => {
       global: { plugins: [i18n] },
     });
 
-    await wrapper
-      .get('button[aria-label="More actions for Examples"]')
-      .trigger("click");
-    await flushPromises();
-    const deleteMenuItem = wrapper.get('[role="menuitem"]');
-    expect(deleteMenuItem.text()).toBe("Delete collection");
-    expect(deleteMenuItem.attributes("data-variant")).toBe("danger");
-    await deleteMenuItem.trigger("click");
+    const deleteButton = wrapper.get('button[aria-label="Delete"]');
+    expect(deleteButton.classes()).toContain("danger-outline-button");
+    await deleteButton.trigger("click");
     await flushPromises();
 
     const confirmation = wrapper.get(".collection-delete-dialog");
@@ -443,6 +448,16 @@ describe("WorkspacePropertiesDialog", () => {
       },
       global: { plugins: [i18n] },
     });
+
+    const title = wrapper.get<HTMLInputElement>("#workspace-properties-title");
+    expect(title.element.value).toBe("Platform");
+    expect(title.classes()).toContain("request-name-input");
+    expect(
+      wrapper.find(".resource-editor-title .lucide-panels-top-left").exists(),
+    ).toBe(true);
+    const saveButton = wrapper.get('button[aria-label="Save"]');
+    expect(saveButton.attributes("form")).toBe("workspace-properties-form");
+    expect(saveButton.classes()).toContain("primary-button");
 
     await vi.advanceTimersByTimeAsync(150);
     expect(wrapper.emitted("preview")).toEqual([[["host"]]]);
@@ -520,7 +535,7 @@ describe("WorkspacePropertiesDialog", () => {
     await wrapper
       .get('input[aria-label="Variable value 1"]')
       .setValue("platform");
-    await wrapper.get('button[type="submit"]').trigger("submit");
+    await wrapper.get('button[aria-label="Save"]').trigger("click");
 
     expect(wrapper.emitted("save")).toEqual([
       [
@@ -575,11 +590,9 @@ describe("WorkspacePropertiesDialog", () => {
       global: { plugins: [i18n] },
     });
 
-    await wrapper
-      .get('button[aria-label="More actions for Platform"]')
-      .trigger("click");
-    await flushPromises();
-    await wrapper.get('[role="menuitem"]').trigger("click");
+    const deleteButton = wrapper.get('button[aria-label="Delete"]');
+    expect(deleteButton.classes()).toContain("danger-outline-button");
+    await deleteButton.trigger("click");
     await flushPromises();
     const confirmation = wrapper.get(".workspace-delete-dialog");
     expect(confirmation.attributes()).toHaveProperty("open");
@@ -590,9 +603,7 @@ describe("WorkspacePropertiesDialog", () => {
     expect(wrapper.emitted("delete")).toEqual([[workspaceId, 4]]);
 
     await wrapper.setProps({ canDelete: false });
-    expect(
-      wrapper.find('button[aria-label="More actions for Platform"]').exists(),
-    ).toBe(false);
+    expect(wrapper.find('button[aria-label="Delete"]').exists()).toBe(false);
     wrapper.unmount();
   });
 });

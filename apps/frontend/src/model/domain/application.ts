@@ -2,6 +2,8 @@ import type {
   CollectionView,
   CapturedExchangeView,
   CurrentSession,
+  EnvironmentVariableWrite,
+  EnvironmentView,
   ExecutionView,
   HttpMethod,
   RequestField,
@@ -14,6 +16,7 @@ import type {
   TreeNode,
   VariableProfileView,
   VariableWrite,
+  WorkspaceView,
   WorkspaceSummary,
 } from "../contracts/backend";
 
@@ -68,6 +71,90 @@ export interface RequestTab {
   readonly busy: boolean;
 }
 
+export interface WorkspacePropertiesDraft {
+  readonly name: string;
+  readonly baseUrl: string;
+  readonly headers: readonly RequestField[];
+  readonly variables: readonly VariableWrite[];
+}
+
+export interface CollectionPropertiesDraft {
+  readonly name: string;
+  readonly pathPrefix: string;
+  readonly headers: readonly RequestField[];
+  readonly variables: readonly VariableWrite[];
+}
+
+export interface EnvironmentDraft {
+  readonly name: string;
+  readonly variables: readonly EnvironmentVariableWrite[];
+  readonly includedEnvironmentIds: readonly string[];
+}
+
+interface ResourceEditorTabBase {
+  readonly tabId: string;
+  readonly workspaceId: string;
+  readonly busy: boolean;
+  readonly omittedSecretValues?: boolean;
+}
+
+export interface WorkspacePropertiesTab extends ResourceEditorTabBase {
+  readonly kind: "workspace";
+  readonly workspace: WorkspaceView;
+  readonly variableProfile: VariableProfileView;
+  readonly draft: WorkspacePropertiesDraft;
+  readonly baseline: WorkspacePropertiesDraft;
+}
+
+export interface CollectionPropertiesTab extends ResourceEditorTabBase {
+  readonly kind: "collection";
+  readonly collection: CollectionView;
+  readonly variableProfile: VariableProfileView;
+  readonly draft: CollectionPropertiesDraft;
+  readonly baseline: CollectionPropertiesDraft;
+}
+
+export interface EnvironmentEditorTab extends ResourceEditorTabBase {
+  readonly kind: "environment";
+  readonly environment: EnvironmentView | null;
+  readonly draft: EnvironmentDraft;
+  readonly baseline: EnvironmentDraft | null;
+}
+
+export type ResourceEditorTab =
+  | WorkspacePropertiesTab
+  | CollectionPropertiesTab
+  | EnvironmentEditorTab;
+
+export type WorkbenchTab =
+  | { readonly kind: "request"; readonly requestTab: RequestTab }
+  | ResourceEditorTab;
+
+/** Reports whether a resource editor differs from its last persisted baseline. */
+export function isResourceEditorTabDirty(tab: ResourceEditorTab): boolean {
+  return (
+    tab.baseline === null ||
+    JSON.stringify(tab.draft) !== JSON.stringify(tab.baseline)
+  );
+}
+
+/** Returns the stable identity of any workbench tab variant. */
+export function workbenchTabId(tab: WorkbenchTab): string {
+  return tab.kind === "request" ? tab.requestTab.tabId : tab.tabId;
+}
+
+/** Returns the workspace owning any workbench tab variant. */
+export function workbenchTabWorkspaceId(tab: WorkbenchTab): string {
+  return tab.kind === "request" ? tab.requestTab.workspaceId : tab.workspaceId;
+}
+
+/** Reports whether any workbench tab contains unsaved editable content. */
+export function isWorkbenchTabDirty(tab: WorkbenchTab): boolean {
+  return tab.kind === "request"
+    ? isRequestTabDirty(tab.requestTab)
+    : isResourceEditorTabDirty(tab);
+}
+
 /** Reports whether a tab contains content not represented by its saved baseline. */
 export function isRequestTabDirty(tab: RequestTab): boolean {
   return (
@@ -89,6 +176,9 @@ export interface ApplicationSnapshot {
   readonly expandedCollectionIds: readonly string[];
   readonly requestTabs: readonly RequestTab[];
   readonly activeRequestTabId: string | null;
+  readonly resourceTabs: readonly ResourceEditorTab[];
+  readonly workbenchTabOrder: readonly string[];
+  readonly activeWorkbenchTabId: string | null;
   readonly busy: boolean;
   readonly error: ApplicationError | null;
 }

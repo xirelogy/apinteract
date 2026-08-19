@@ -14,6 +14,7 @@ import type {
 import type {
   ApplicationError,
   ConnectionState,
+  ResourceEditorTab,
   RequestTab,
 } from "@/model/domain/application";
 
@@ -36,6 +37,9 @@ export const useApplicationStore = defineStore("application", {
     expandedCollectionIds: [] as string[],
     requestTabs: [] as RequestTab[],
     activeRequestTabId: null as string | null,
+    resourceTabs: [] as ResourceEditorTab[],
+    workbenchTabOrder: [] as string[],
+    activeWorkbenchTabId: null as string | null,
     busy: false,
     error: null as ApplicationError | null,
   }),

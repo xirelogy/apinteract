@@ -23,6 +23,9 @@ describe("BrowserRequestSessionStorage", () => {
     const snapshot = {
       selectedWorkspaceId: "019facab-1eee-765f-bd9f-ac2449151da2",
       activeRequestTabId: "019facab-1eee-765f-bd9f-ac2449151da3",
+      activeWorkbenchTabId: "019facab-1eee-765f-bd9f-ac2449151da3",
+      workbenchTabOrder: ["019facab-1eee-765f-bd9f-ac2449151da3"],
+      resourceTabs: [],
       tabs: [
         {
           tabId: "019facab-1eee-765f-bd9f-ac2449151da3",
@@ -57,6 +60,9 @@ describe("BrowserRequestSessionStorage", () => {
     await expect(storage.load(userId)).resolves.toEqual({
       selectedWorkspaceId: snapshot.selectedWorkspaceId,
       activeRequestTabId: snapshot.activeRequestTabId,
+      activeWorkbenchTabId: snapshot.activeWorkbenchTabId,
+      workbenchTabOrder: snapshot.workbenchTabOrder,
+      resourceTabs: [],
       tabs: [
         {
           tabId: snapshot.tabs[0]?.tabId,
@@ -88,6 +94,9 @@ describe("BrowserRequestSessionStorage", () => {
     const snapshot = {
       selectedWorkspaceId: workspaceId,
       activeRequestTabId: tabId,
+      activeWorkbenchTabId: tabId,
+      workbenchTabOrder: [tabId],
+      resourceTabs: [],
       tabs: [
         {
           tabId,
@@ -143,6 +152,9 @@ describe("BrowserRequestSessionStorage", () => {
       new BrowserRequestSessionStorage().save(userId, {
         selectedWorkspaceId: workspaceId,
         activeRequestTabId: null,
+        activeWorkbenchTabId: null,
+        workbenchTabOrder: [],
+        resourceTabs: [],
         tabs: [],
       }),
     ).rejects.toThrow("IndexedDB cleanup failed");

@@ -5,7 +5,7 @@
  */
 withDefaults(
   defineProps<{
-    variant?: "primary" | "secondary" | "danger" | "ghost";
+    variant?: "primary" | "secondary" | "danger" | "danger-outline" | "ghost";
     size?: "compact" | "default";
     type?: "button" | "submit" | "reset";
     disabled?: boolean;

@@ -69,6 +69,16 @@
   background: color-mix(in srgb, var(--danger) 82%, white);
 }
 
+.danger-outline-button {
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  background: transparent;
+}
+
+.danger-outline-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
 .primary-button {
   color: var(--text-inverse);
   border: 1px solid var(--accent-primary);

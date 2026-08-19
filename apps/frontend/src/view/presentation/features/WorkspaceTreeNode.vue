@@ -211,7 +211,7 @@ function handleTreeItemKeydown(event: KeyboardEvent): void {
         :disabled="busy"
         aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
         :title="t('workspace.reorderHint')"
-        @click="emit('selectCollection', node.nodeId)"
+        @click="emit('editCollectionProperties', node.nodeId)"
         @keydown="handleTreeItemKeydown"
         @dragstart="
           treeReorder.startDrag($event, node.nodeId, parentNodeId, node.kind)

@@ -74,7 +74,7 @@ export const enUsMessages = {
     properties: "Workspace properties",
     propertiesDescription:
       "Rename this workspace and manage headers and variables inherited by every request.",
-    propertiesTitle: "Workspace properties",
+    propertiesTitle: "Workspace",
     reorderHint:
       "Drag to move. From the keyboard, use Alt with an arrow key to reorder, indent, or outdent.",
     reorderRequested: "Moved {name} to position {position}.",
@@ -118,7 +118,7 @@ export const enUsMessages = {
     properties: "Collection properties",
     propertiesDescription:
       "Rename this collection and manage inherited headers and variables.",
-    propertiesTitle: "Collection properties",
+    propertiesTitle: "Collection",
   },
   environment: {
     addVariable: "Add variable",
@@ -245,6 +245,12 @@ export const enUsMessages = {
       request: "Request",
       workspace: "Workspace",
     },
+  },
+  workbench: {
+    close: "Close tab",
+    closeNamed: "Close {name}",
+    noOpenTabs: "No open tabs",
+    openTabs: "Open tabs",
   },
   request: {
     addHeader: "Add header",

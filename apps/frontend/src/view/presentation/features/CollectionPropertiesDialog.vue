@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Asterisk, Lock, Trash2, X } from "@lucide/vue";
+import { Asterisk, Folder, Lock, Save, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import { defaultHeaderMergeMode } from "@/app/preferences/header-preferences";
@@ -11,6 +11,7 @@ import type {
   VariablePreview,
   VariableWrite,
 } from "@/model/contracts/backend";
+import type { CollectionPropertiesDraft } from "@/model/domain/application";
 import {
   createBlankHeaderField,
   editableRequestFields,
@@ -19,9 +20,6 @@ import {
   meaningfulRequestFields,
 } from "@/model/domain/request-fields";
 import { collectTemplateVariableNames } from "@/model/domain/template-variables";
-import ActionMenu, {
-  type ActionMenuItem,
-} from "@/view/presentation/controls/ActionMenu.vue";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import FormField from "@/view/presentation/controls/FormField.vue";
@@ -30,7 +28,6 @@ import IconButton from "@/view/presentation/controls/IconButton.vue";
 import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue";
 import TemplateTextControl from "@/view/presentation/controls/TemplateTextControl.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
-import DialogControl from "@/view/presentation/controls/dialog/DialogControl.vue";
 import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
 import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
 import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
@@ -45,13 +42,16 @@ interface VariableFieldsEditorApi {
 
 const props = defineProps<{
   collection: CollectionView;
+  draft?: CollectionPropertiesDraft;
   variableProfile: VariableProfileView;
   variablePreviews: readonly VariablePreview[];
   canEdit: boolean;
   busy: boolean;
+  recoveryWarning?: boolean;
 }>();
 const emit = defineEmits<{
   close: [];
+  change: [draft: CollectionPropertiesDraft];
   delete: [collectionId: string, revision: number];
   preview: [names: readonly string[]];
   save: [
@@ -62,19 +62,19 @@ const emit = defineEmits<{
   ];
 }>();
 const { t } = useI18n();
-const open = ref(true);
 const activeSection = ref<"headers" | "variables">("headers");
-const name = ref(props.collection.name);
-const pathPrefix = ref(props.collection.pathPrefix);
+const name = ref(props.draft?.name ?? props.collection.name);
+const pathPrefix = ref(props.draft?.pathPrefix ?? props.collection.pathPrefix);
 const deleteConfirmationOpen = ref(false);
 const headers = ref<RequestField[]>(
   editableRequestFields(
-    props.collection.headers,
+    props.draft?.headers ?? props.collection.headers,
     props.canEdit,
     createBlankHeaderField,
   ),
 );
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
+const variables = ref<readonly VariableWrite[]>(props.draft?.variables ?? []);
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
 const displayedInheritedTarget = computed(() => {
   if (props.collection.inheritedTarget === "" || pathPrefix.value === "") {
@@ -108,15 +108,8 @@ const canSave = computed(
       (header) => !header.enabled || header.name.trim() !== "",
     ),
 );
-const collectionActions = computed<readonly ActionMenuItem[]>(() => [
-  {
-    value: "delete",
-    label: t("collection.deleteAction"),
-    variant: "danger",
-  },
-]);
-
 watch(previewSignature, scheduleVariablePreview, { immediate: true });
+watch([name, pathPrefix, headers], publishDraft, { deep: true });
 
 onBeforeUnmount(() => {
   if (previewTimer !== undefined) clearTimeout(previewTimer);
@@ -177,20 +170,25 @@ const headerReorder = useRowReorder({
   isDisabled: () => props.busy || !props.canEdit,
 });
 
-/** Requests closure through the shared controlled dialog lifecycle. */
-function close(): void {
-  deleteConfirmationOpen.value = false;
-  open.value = false;
+/** Publishes tab-owned editable state for dirty tracking and local recovery. */
+function publishDraft(): void {
+  emit("change", {
+    name: name.value,
+    pathPrefix: pathPrefix.value,
+    headers: meaningfulRequestFields(headers.value),
+    variables: variables.value,
+  });
+}
+
+/** Publishes variable edits with the rest of the collection draft. */
+function updateVariables(nextVariables: readonly VariableWrite[]): void {
+  variables.value = nextVariables;
+  publishDraft();
 }
 
 /** Opens styled confirmation before requesting collection deletion. */
 function requestCollectionDeletion(): void {
   if (props.canEdit) deleteConfirmationOpen.value = true;
-}
-
-/** Routes one infrequent collection action from the header overflow menu. */
-function selectCollectionAction(action: string): void {
-  if (action === "delete") requestCollectionDeletion();
 }
 
 /** Emits the immutable collection deletion target after confirmation. */
@@ -214,59 +212,71 @@ function save(): void {
 </script>
 
 <template>
-  <DialogControl
-    v-model:open="open"
-    class="resource-dialog environment-dialog collection-properties-dialog"
+  <section
+    id="request-workbench"
+    class="resource-editor-panel collection-properties-dialog"
     aria-labelledby="collection-properties-title"
-    :busy="busy"
-    @close="emit('close')"
   >
     <div class="resource-dialog-surface">
-      <header class="resource-dialog-header">
-        <h2 id="collection-properties-title">
-          {{ t("collection.propertiesTitle") }}
-        </h2>
-        <div class="resource-dialog-header-actions">
-          <ActionMenu
-            v-if="canEdit"
-            :label="t('collection.moreActions', { name: collection.name })"
-            :items="collectionActions"
-            :disabled="busy"
-            @select="selectCollectionAction"
-          >
-            <template #item="{ item }">
-              <Trash2
-                class="action-menu-item-icon"
-                :size="16"
-                aria-hidden="true"
-              />
-              <span>{{ item.label }}</span>
-            </template>
-          </ActionMenu>
-          <IconButton
-            :label="t('common.actions.close')"
-            :disabled="busy"
-            @click="close"
-          >
-            <X :size="18" aria-hidden="true" />
-          </IconButton>
-        </div>
-      </header>
-      <form class="resource-dialog-form" @submit.prevent="save">
-        <FormField
-          v-slot="{ controlId, describedBy, invalid }"
-          :label="t('collection.name')"
-        >
+      <header class="resource-dialog-header resource-editor-header">
+        <div class="resource-editor-title">
+          <Folder
+            class="resource-editor-kind-icon"
+            :size="19"
+            aria-hidden="true"
+          />
           <TextInput
-            :id="controlId"
+            id="collection-properties-title"
             v-model="name"
-            :aria-describedby="describedBy"
+            class="request-name-input"
             :aria-label="t('collection.name')"
-            :invalid="invalid"
+            :placeholder="t('collection.propertiesTitle')"
             autocomplete="off"
             :disabled="busy || !canEdit"
           />
-        </FormField>
+        </div>
+        <div class="command-bar resource-editor-actions">
+          <ButtonControl
+            v-if="canEdit"
+            type="submit"
+            form="collection-properties-form"
+            variant="primary"
+            :aria-label="t('common.actions.save')"
+            :title="t('common.actions.save')"
+            :disabled="busy || !canSave"
+          >
+            <template #leading>
+              <Save :size="16" aria-hidden="true" />
+            </template>
+            {{ t("common.actions.save") }}
+          </ButtonControl>
+          <ButtonControl
+            v-if="canEdit"
+            variant="danger-outline"
+            :aria-label="t('common.actions.delete')"
+            :title="t('common.actions.delete')"
+            :disabled="busy"
+            @click="requestCollectionDeletion"
+          >
+            <template #leading>
+              <Trash2 :size="16" aria-hidden="true" />
+            </template>
+            {{ t("common.actions.delete") }}
+          </ButtonControl>
+        </div>
+      </header>
+      <p
+        v-if="recoveryWarning"
+        class="resource-editor-recovery-warning"
+        role="status"
+      >
+        {{ t("request.recovery.secrets-omitted") }}
+      </p>
+      <form
+        id="collection-properties-form"
+        class="resource-dialog-form"
+        @submit.prevent="save"
+      >
         <FormField
           v-slot="{ controlId, describedBy, invalid }"
           :label="t('collection.pathPrefix')"
@@ -475,35 +485,17 @@ function save(): void {
             <VariableFieldsEditor
               ref="variableEditor"
               :profile-variables="variableProfile.variables"
+              :draft-variables="draft?.variables"
               :inherited-variables="variableProfile.inheritedVariables"
               :can-edit="canEdit"
               :busy="busy"
+              @change="updateVariables"
             />
           </TabsPanel>
         </TabsRoot>
-        <footer class="resource-dialog-actions">
-          <ButtonControl
-            type="button"
-            variant="secondary"
-            :disabled="busy"
-            @click="close"
-          >
-            {{
-              canEdit ? t("common.actions.cancel") : t("common.actions.close")
-            }}
-          </ButtonControl>
-          <ButtonControl
-            v-if="canEdit"
-            variant="primary"
-            type="submit"
-            :disabled="busy || !canSave"
-          >
-            {{ t("common.actions.save") }}
-          </ButtonControl>
-        </footer>
       </form>
     </div>
-  </DialogControl>
+  </section>
 
   <ResourceDeleteDialog
     class="collection-delete-dialog"

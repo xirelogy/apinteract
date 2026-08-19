@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Layers3, Trash2, X } from "@lucide/vue";
+import { Layers3, Save, Trash2, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
   EnvironmentSummary,
   EnvironmentVariableWrite,
-  EnvironmentView,
 } from "@/model/contracts/backend";
+import type {
+  EnvironmentDraft,
+  EnvironmentEditorTab,
+} from "@/model/domain/application";
 import ActionMenu, {
   type ActionMenuItem,
 } from "@/view/presentation/controls/ActionMenu.vue";
@@ -17,7 +20,6 @@ import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue"
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
 import { useRowReorder } from "@/view/presentation/controls/row-reorder";
-import DialogControl from "@/view/presentation/controls/dialog/DialogControl.vue";
 import ResourceDeleteDialog from "./ResourceDeleteDialog.vue";
 import VariableFieldsEditor from "./VariableFieldsEditor.vue";
 
@@ -25,32 +27,25 @@ interface VariableFieldsEditorApi {
   writes(): EnvironmentVariableWrite[];
 }
 
-const props = defineProps<{
-  environments: readonly EnvironmentSummary[];
-  selectedEnvironmentId: string | null;
-  environment: EnvironmentView | null;
-  canEdit: boolean;
-  busy: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    environments: readonly EnvironmentSummary[];
+    selectedEnvironmentId: string | null;
+    editorTab?: EnvironmentEditorTab | null;
+    showToolbar?: boolean;
+    canEdit: boolean;
+    busy: boolean;
+  }>(),
+  { editorTab: null, showToolbar: true },
+);
 const emit = defineEmits<{
   select: [environmentId: string | null];
-  load: [environmentId: string];
-  create: [
-    name: string,
-    variables: readonly EnvironmentVariableWrite[],
-    includedEnvironmentIds: readonly string[],
-  ];
-  save: [
-    environmentId: string,
-    revision: number,
-    name: string,
-    variables: readonly EnvironmentVariableWrite[],
-    includedEnvironmentIds: readonly string[],
-  ];
+  openEditor: [environmentId: string | null];
+  change: [tabId: string, draft: EnvironmentDraft];
+  saveEditor: [tabId: string];
   delete: [environmentId: string, revision: number];
 }>();
 const { t } = useI18n();
-const open = ref(false);
 const name = ref("");
 const editingId = ref<string | null>(null);
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
@@ -63,17 +58,7 @@ const deletionTarget = ref<{
   readonly revision: number;
   readonly name: string;
 } | null>(null);
-const editorReady = computed(
-  () =>
-    editingId.value === null ||
-    props.environment?.environmentId === editingId.value,
-);
-const editorEnvironmentName = computed(
-  () =>
-    props.environments.find(
-      (environment) => environment.environmentId === editingId.value,
-    )?.name ?? name.value,
-);
+const editorReady = computed(() => props.editorTab !== null);
 const options = computed(() => [
   { value: "", label: t("environment.none") },
   ...props.environments.map((environment) => ({
@@ -120,53 +105,28 @@ const environmentActions = computed<readonly ActionMenuItem[]>(() => {
       })),
   ];
 });
-const editorActions = computed<readonly ActionMenuItem[]>(() => [
-  {
-    value: "delete",
-    label: t("environment.deleteAction"),
-    variant: "danger",
-    disabled: !editorReady.value,
-  },
-]);
 watch(
-  () => props.environment,
-  (environment) => {
-    if (
-      environment === null ||
-      (editingId.value !== null &&
-        environment.environmentId !== editingId.value)
-    ) {
-      return;
-    }
-    editingId.value = environment.environmentId;
-    name.value = environment.name;
-    includedEnvironmentIds.value = environment.includedEnvironments.map(
-      (included) => included.environmentId,
-    );
+  () => props.editorTab?.tabId ?? null,
+  () => {
+    const tab = props.editorTab;
+    if (tab === null) return;
+    editingId.value = tab.environment?.environmentId ?? null;
+    name.value = tab.draft.name;
+    includedEnvironmentIds.value = [...tab.draft.includedEnvironmentIds];
     includeCandidateId.value = "";
+    variableEditorKey.value += 1;
   },
+  { immediate: true },
 );
 
 /** Opens the manager with a clean create form. */
 function createEnvironment(): void {
-  editingId.value = null;
-  name.value = "";
-  includedEnvironmentIds.value = [];
-  includeCandidateId.value = "";
-  variableEditorKey.value += 1;
-  open.value = true;
+  emit("openEditor", null);
 }
 
 /** Opens and requests one redacted environment profile. */
 function editEnvironment(environmentId: string): void {
-  editingId.value = environmentId;
-  name.value =
-    props.environment?.environmentId === environmentId
-      ? props.environment.name
-      : "";
-  variableEditorKey.value += 1;
-  open.value = true;
-  emit("load", environmentId);
+  emit("openEditor", environmentId);
 }
 
 /** Returns valid replacements for one included-environment row. */
@@ -192,6 +152,7 @@ function addIncludedEnvironment(): void {
   }
   includedEnvironmentIds.value.push(candidate);
   includeCandidateId.value = "";
+  publishDraft();
 }
 
 /** Replaces one include while retaining uniqueness and order. */
@@ -207,12 +168,14 @@ function replaceIncludedEnvironment(
     )
   ) {
     includedEnvironmentIds.value[index] = environmentId;
+    publishDraft();
   }
 }
 
 /** Removes one environment from the composition list. */
 function removeIncludedEnvironment(index: number): void {
   includedEnvironmentIds.value.splice(index, 1);
+  publishDraft();
 }
 
 /** Moves one environment within the low-to-high precedence list. */
@@ -220,6 +183,7 @@ function moveIncludedEnvironment(fromIndex: number, toIndex: number): void {
   const [environmentId] = includedEnvironmentIds.value.splice(fromIndex, 1);
   if (environmentId !== undefined) {
     includedEnvironmentIds.value.splice(toIndex, 0, environmentId);
+    publishDraft();
   }
 }
 
@@ -238,43 +202,29 @@ function selectEnvironmentAction(action: string): void {
   }
 }
 
-/** Requests closure through the shared controlled-dialog lifecycle. */
-function close(): void {
-  deleteConfirmationOpen.value = false;
-  deletionTarget.value = null;
-  open.value = false;
+/** Publishes the current environment draft to its owning workbench tab. */
+function publishDraft(variables?: readonly EnvironmentVariableWrite[]): void {
+  const tab = props.editorTab;
+  if (tab === null) return;
+  emit("change", tab.tabId, {
+    name: name.value,
+    variables:
+      variables ?? variableEditor.value?.writes() ?? tab.draft.variables,
+    includedEnvironmentIds: includedEnvironmentIds.value,
+  });
 }
 
-/** Emits create or optimistic update from the current complete profile. */
+/** Publishes and requests persistence for the current environment tab. */
 function save(): void {
-  const writes = variableEditor.value?.writes() ?? [];
-  const environment = props.environment;
-  if (editingId.value === null) {
-    emit("create", name.value, writes, includedEnvironmentIds.value);
-  } else if (environment?.environmentId === editingId.value) {
-    emit(
-      "save",
-      environment.environmentId,
-      environment.revision,
-      name.value,
-      writes,
-      includedEnvironmentIds.value,
-    );
-  }
+  const tab = props.editorTab;
+  if (tab === null) return;
+  publishDraft();
+  emit("saveEditor", tab.tabId);
 }
-
-/** Closes the editor only after its owning controller confirms persistence. */
-function finishMutation(): void {
-  deleteConfirmationOpen.value = false;
-  deletionTarget.value = null;
-  open.value = false;
-}
-
-defineExpose({ finishMutation });
 
 /** Opens styled confirmation for the currently loaded saved environment. */
 function requestEnvironmentDeletion(): void {
-  const environment = props.environment;
+  const environment = props.editorTab?.environment ?? null;
   if (
     environment !== null &&
     editingId.value === environment.environmentId &&
@@ -287,11 +237,6 @@ function requestEnvironmentDeletion(): void {
     };
     deleteConfirmationOpen.value = true;
   }
-}
-
-/** Routes one infrequent editor action from the header overflow menu. */
-function selectEditorAction(action: string): void {
-  if (action === "delete") requestEnvironmentDeletion();
 }
 
 /** Emits deletion while retaining both modal surfaces until persistence succeeds. */
@@ -310,7 +255,11 @@ function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
 </script>
 
 <template>
-  <section class="environment-toolbar" :aria-label="t('environment.label')">
+  <section
+    v-if="showToolbar"
+    class="environment-toolbar"
+    :aria-label="t('environment.label')"
+  >
     <SelectMenu
       :model-value="selectedEnvironmentId ?? ''"
       :options="options"
@@ -346,57 +295,74 @@ function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
     />
   </section>
 
-  <DialogControl
-    v-model:open="open"
-    class="resource-dialog environment-dialog"
+  <section
+    v-if="editorTab"
+    id="request-workbench"
+    class="resource-editor-panel environment-dialog"
     aria-labelledby="environment-dialog-title"
-    :busy="busy"
   >
     <div class="resource-dialog-surface">
-      <header class="resource-dialog-header">
-        <h2 id="environment-dialog-title">
-          {{ editingId ? t("environment.edit") : t("environment.create") }}
-        </h2>
-        <div class="resource-dialog-header-actions">
-          <ActionMenu
-            v-if="editingId && canEdit"
-            :label="
-              t('environment.moreActions', {
-                name: editorEnvironmentName,
-              })
-            "
-            :items="editorActions"
-            :disabled="busy"
-            @select="selectEditorAction"
-          >
-            <template #item="{ item }">
-              <Trash2
-                class="action-menu-item-icon"
-                :size="16"
-                aria-hidden="true"
-              />
-              <span>{{ item.label }}</span>
-            </template>
-          </ActionMenu>
-          <IconButton
-            :label="t('common.actions.close')"
-            :disabled="busy"
-            @click="close"
-          >
-            <X :size="18" aria-hidden="true" />
-          </IconButton>
-        </div>
-      </header>
-      <form class="resource-dialog-form" @submit.prevent="save">
-        <label class="field-label">
-          {{ t("common.fields.name") }}
+      <header class="resource-dialog-header resource-editor-header">
+        <div class="resource-editor-title">
+          <Layers3
+            class="resource-editor-kind-icon"
+            :size="19"
+            aria-hidden="true"
+          />
           <TextInput
+            id="environment-dialog-title"
             v-model="name"
+            class="request-name-input"
+            :aria-label="t('common.fields.name')"
+            :placeholder="t('environment.label')"
             :disabled="busy || !canEdit"
             required
             autocomplete="off"
+            @input="publishDraft()"
           />
-        </label>
+        </div>
+        <div class="command-bar resource-editor-actions">
+          <ButtonControl
+            v-if="canEdit"
+            type="submit"
+            form="environment-editor-form"
+            variant="primary"
+            :aria-label="t('common.actions.save')"
+            :title="t('common.actions.save')"
+            :busy="busy"
+          >
+            <template #leading>
+              <Save :size="16" aria-hidden="true" />
+            </template>
+            {{ t("common.actions.save") }}
+          </ButtonControl>
+          <ButtonControl
+            v-if="editingId && canEdit"
+            variant="danger-outline"
+            :aria-label="t('common.actions.delete')"
+            :title="t('common.actions.delete')"
+            :disabled="busy"
+            @click="requestEnvironmentDeletion"
+          >
+            <template #leading>
+              <Trash2 :size="16" aria-hidden="true" />
+            </template>
+            {{ t("common.actions.delete") }}
+          </ButtonControl>
+        </div>
+      </header>
+      <p
+        v-if="editorTab.omittedSecretValues"
+        class="resource-editor-recovery-warning"
+        role="status"
+      >
+        {{ t("request.recovery.secrets-omitted") }}
+      </p>
+      <form
+        id="environment-editor-form"
+        class="resource-dialog-form"
+        @submit.prevent="save"
+      >
         <section
           class="environment-includes"
           aria-labelledby="environment-includes-title"
@@ -484,35 +450,21 @@ function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
           :key="variableEditorKey"
           ref="variableEditor"
           :profile-variables="
-            editingId === null ? [] : (environment?.variables ?? [])
+            editingId === null ? [] : (editorTab.environment?.variables ?? [])
           "
+          :draft-variables="editorTab.draft.variables"
           :inherited-variables="
-            editingId === null ? [] : (environment?.inheritedVariables ?? [])
+            editingId === null
+              ? []
+              : (editorTab.environment?.inheritedVariables ?? [])
           "
           :can-edit="canEdit"
           :busy="busy"
+          @change="publishDraft"
         />
-        <footer class="resource-dialog-actions">
-          <ButtonControl
-            type="button"
-            variant="secondary"
-            :disabled="busy"
-            @click="close"
-          >
-            {{ t("common.actions.cancel") }}
-          </ButtonControl>
-          <ButtonControl
-            v-if="canEdit"
-            type="submit"
-            variant="primary"
-            :busy="busy"
-          >
-            {{ t("common.actions.save") }}
-          </ButtonControl>
-        </footer>
       </form>
     </div>
-  </DialogControl>
+  </section>
 
   <ResourceDeleteDialog
     v-if="deletionTarget"

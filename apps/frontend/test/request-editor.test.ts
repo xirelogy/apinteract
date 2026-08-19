@@ -54,6 +54,12 @@ describe("RequestEditor", () => {
     expect(wrapper.text()).toContain(
       "Unsaved secret values were not stored locally",
     );
+    expect(wrapper.get<HTMLInputElement>("#request-name").element.value).toBe(
+      "Recovered request",
+    );
+    expect(wrapper.find(".resource-editor-title .lucide-send").exists()).toBe(
+      true,
+    );
   });
 
   it("switches the whole editor to a read-only immutable version", async () => {

@@ -15,6 +15,7 @@ import {
   Play,
   Route,
   Save,
+  Send,
   Trash2,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
@@ -1035,24 +1036,31 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
     <template v-else>
       <section class="request-editor" aria-labelledby="request-name">
         <div class="request-title-row">
-          <div class="request-title">
-            <TextInput
-              id="request-name"
-              v-model="name"
-              class="request-name-input"
-              :aria-label="t('request.name')"
-              :placeholder="t('request.titlePlaceholder')"
-              :disabled="editorDisabled"
-              @input="emitChange"
+          <div class="resource-editor-title">
+            <Send
+              class="resource-editor-kind-icon"
+              :size="19"
+              aria-hidden="true"
             />
-            <p
-              v-for="warning in recoveryWarnings"
-              :key="warning"
-              class="request-recovery-warning"
-              role="status"
-            >
-              {{ t(`request.recovery.${warning}`) }}
-            </p>
+            <div class="request-title">
+              <TextInput
+                id="request-name"
+                v-model="name"
+                class="request-name-input"
+                :aria-label="t('request.name')"
+                :placeholder="t('request.titlePlaceholder')"
+                :disabled="editorDisabled"
+                @input="emitChange"
+              />
+              <p
+                v-for="warning in recoveryWarnings"
+                :key="warning"
+                class="request-recovery-warning"
+                role="status"
+              >
+                {{ t(`request.recovery.${warning}`) }}
+              </p>
+            </div>
           </div>
           <div class="command-bar">
             <ButtonControl

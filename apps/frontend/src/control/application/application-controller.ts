@@ -4,9 +4,11 @@ import {
   BrowserRequestSessionStorage,
   redactSecretVariableWrites,
   type LocalRequestSessionSnapshot,
+  type LocalResourceTabSnapshot,
   type LocalRequestTabSnapshot,
   type RequestSessionStorage,
   type RestoredRequestTabEntry,
+  type RestoredResourceTabEntry,
 } from "@/control/persistence/request-session-storage";
 import type {
   CollectionView,
@@ -42,11 +44,19 @@ import type { SessionController } from "@/control/session/session-controller";
 import type { BackendWebSocketClient } from "@/control/transport/websocket-client";
 import {
   isRequestTabDirty,
+  isResourceEditorTabDirty,
+  type CollectionPropertiesDraft,
+  type CollectionPropertiesTab,
+  type EnvironmentDraft,
+  type EnvironmentEditorTab,
+  type ResourceEditorTab,
   type RequestRecoveryWarning,
   type ApplicationError,
   type ApplicationErrorCode,
   type RequestDraftInput,
   type RequestTab,
+  type WorkspacePropertiesDraft,
+  type WorkspacePropertiesTab,
 } from "@/model/domain/application";
 
 class WorkflowError extends Error {
@@ -178,6 +188,24 @@ export class ApplicationController {
     );
     const store = useApplicationStore();
     store.requestTabs = tabs.filter((tab): tab is RequestTab => tab !== null);
+    const resourceTabs = await Promise.all(
+      restored.resourceTabs.map((entry) =>
+        this.#restoreLocalResourceTab(entry, workspaceIds),
+      ),
+    );
+    store.resourceTabs = resourceTabs.filter(
+      (tab): tab is ResourceEditorTab => tab !== null,
+    );
+    const restoredIds = new Set([
+      ...store.requestTabs.map((tab) => tab.tabId),
+      ...store.resourceTabs.map((tab) => tab.tabId),
+    ]);
+    store.workbenchTabOrder = [
+      ...restored.workbenchTabOrder.filter((tabId) => restoredIds.has(tabId)),
+      ...[...restoredIds].filter(
+        (tabId) => !restored.workbenchTabOrder.includes(tabId),
+      ),
+    ];
     store.activeRequestTabId = store.requestTabs.some(
       (tab) => tab.tabId === restored.activeRequestTabId,
     )
@@ -185,11 +213,150 @@ export class ApplicationController {
       : (store.requestTabs.find(
           (tab) => tab.workspaceId === selectedWorkspaceId,
         )?.tabId ?? null);
+    const visibleRestoredIds = new Set(
+      [...store.requestTabs, ...store.resourceTabs]
+        .filter((tab) => tab.workspaceId === selectedWorkspaceId)
+        .map((tab) => tab.tabId),
+    );
+    store.activeWorkbenchTabId =
+      restored.activeWorkbenchTabId !== null &&
+      visibleRestoredIds.has(restored.activeWorkbenchTabId)
+        ? restored.activeWorkbenchTabId
+        : (store.workbenchTabOrder.find((tabId) =>
+            visibleRestoredIds.has(tabId),
+          ) ?? null);
+    store.activeRequestTabId = store.requestTabs.some(
+      (tab) => tab.tabId === store.activeWorkbenchTabId,
+    )
+      ? store.activeWorkbenchTabId
+      : null;
     if (selectedWorkspaceId !== null) {
       await this.#refreshOpenRequestContexts(selectedWorkspaceId).catch(
         () => undefined,
       );
     }
+  }
+
+  /** Rebuilds one resource editor from current server data and a safe local draft. */
+  async #restoreLocalResourceTab(
+    entry: RestoredResourceTabEntry,
+    workspaceIds: ReadonlySet<string>,
+  ): Promise<ResourceEditorTab | null> {
+    if (!workspaceIds.has(entry.workspaceId)) return null;
+    const snapshot = entry.snapshot;
+    try {
+      if (entry.kind === "workspace" && entry.resourceId !== null) {
+        const [workspace, profile] = await Promise.all([
+          this.#webSocket.command<WorkspaceView>("workspace.get", {
+            workspaceId: entry.resourceId,
+          }),
+          this.#webSocket.command<VariableProfileView>("variable_profile.get", {
+            scopeKind: "workspace",
+            scopeId: entry.resourceId,
+          }),
+        ]);
+        const currentDraft = workspacePropertiesDraft(workspace, profile);
+        const recovered =
+          snapshot?.kind === "workspace" && snapshot.dirty ? snapshot : null;
+        const draft =
+          recovered === null
+            ? currentDraft
+            : cloneWorkspacePropertiesDraft(recovered.draft);
+        return {
+          kind: "workspace",
+          tabId: entry.tabId,
+          workspaceId: entry.workspaceId,
+          workspace:
+            recovered === null
+              ? workspace
+              : { ...workspace, revision: recovered.baseRevision },
+          variableProfile:
+            recovered === null
+              ? profile
+              : { ...profile, revision: recovered.baseVariableRevision },
+          draft,
+          baseline: cloneWorkspacePropertiesDraft(currentDraft),
+          omittedSecretValues: recovered?.omittedSecretValues ?? false,
+          busy: false,
+        };
+      }
+      if (entry.kind === "collection" && entry.resourceId !== null) {
+        const [collection, profile] = await Promise.all([
+          this.#webSocket.command<CollectionView>("collection.get", {
+            collectionId: entry.resourceId,
+          }),
+          this.#webSocket.command<VariableProfileView>("variable_profile.get", {
+            scopeKind: "collection",
+            scopeId: entry.resourceId,
+          }),
+        ]);
+        const currentDraft = collectionPropertiesDraft(collection, profile);
+        const recovered =
+          snapshot?.kind === "collection" && snapshot.dirty ? snapshot : null;
+        const draft =
+          recovered === null
+            ? currentDraft
+            : cloneCollectionPropertiesDraft(recovered.draft);
+        return {
+          kind: "collection",
+          tabId: entry.tabId,
+          workspaceId: entry.workspaceId,
+          collection:
+            recovered === null
+              ? collection
+              : { ...collection, revision: recovered.baseRevision },
+          variableProfile:
+            recovered === null
+              ? profile
+              : { ...profile, revision: recovered.baseVariableRevision },
+          draft,
+          baseline: cloneCollectionPropertiesDraft(currentDraft),
+          omittedSecretValues: recovered?.omittedSecretValues ?? false,
+          busy: false,
+        };
+      }
+      if (entry.kind === "environment") {
+        if (entry.resourceId === null) {
+          if (snapshot?.kind !== "environment") return null;
+          return {
+            kind: "environment",
+            tabId: entry.tabId,
+            workspaceId: entry.workspaceId,
+            environment: null,
+            draft: cloneEnvironmentDraft(snapshot.draft),
+            baseline: null,
+            omittedSecretValues: snapshot.omittedSecretValues,
+            busy: false,
+          };
+        }
+        const environment = await this.#webSocket.command<EnvironmentView>(
+          "environment.get",
+          { environmentId: entry.resourceId },
+        );
+        const currentDraft = environmentDraft(environment);
+        const recovered =
+          snapshot?.kind === "environment" && snapshot.dirty ? snapshot : null;
+        return {
+          kind: "environment",
+          tabId: entry.tabId,
+          workspaceId: entry.workspaceId,
+          environment:
+            recovered === null
+              ? environment
+              : { ...environment, revision: recovered.baseRevision ?? 0 },
+          draft:
+            recovered === null
+              ? currentDraft
+              : cloneEnvironmentDraft(recovered.draft),
+          baseline: cloneEnvironmentDraft(currentDraft),
+          omittedSecretValues: recovered?.omittedSecretValues ?? false,
+          busy: false,
+        };
+      }
+    } catch {
+      return null;
+    }
+    return null;
   }
 
   /** Rebuilds one local tab without trusting derived or transient browser state. */
@@ -431,12 +598,23 @@ export class ApplicationController {
     store.selectedCollection = null;
     store.collectionChildren = {};
     store.expandedCollectionIds = [];
-    const active = activeRequestTab(store);
-    if (active !== null && active.workspaceId !== workspaceId) {
-      store.activeRequestTabId =
-        store.requestTabs.find((tab) => tab.workspaceId === workspaceId)
-          ?.tabId ?? null;
-    }
+    const visibleIds = new Set([
+      ...store.requestTabs
+        .filter((tab) => tab.workspaceId === workspaceId)
+        .map((tab) => tab.tabId),
+      ...store.resourceTabs
+        .filter((tab) => tab.workspaceId === workspaceId)
+        .map((tab) => tab.tabId),
+    ]);
+    const nextActiveId = store.workbenchTabOrder.find((tabId) =>
+      visibleIds.has(tabId),
+    );
+    store.activeWorkbenchTabId = nextActiveId ?? null;
+    store.activeRequestTabId =
+      nextActiveId !== undefined &&
+      store.requestTabs.some((tab) => tab.tabId === nextActiveId)
+        ? nextActiveId
+        : null;
     if (store.requestTabs.some((tab) => tab.workspaceId === workspaceId)) {
       await this.#refreshOpenRequestContexts(workspaceId).catch(
         () => undefined,
@@ -456,6 +634,81 @@ export class ApplicationController {
     });
   }
 
+  /** Opens workspace properties once and activates the existing editor on repeat. */
+  async openWorkspacePropertiesTab(workspaceId: string): Promise<void> {
+    const store = useApplicationStore();
+    const existing = store.resourceTabs.find(
+      (tab) =>
+        tab.kind === "workspace" && tab.workspace.workspaceId === workspaceId,
+    );
+    if (existing !== undefined) {
+      this.activateWorkbenchTab(existing.tabId);
+      return;
+    }
+    await this.#run(async () => {
+      const [workspace, variableProfile] = await Promise.all([
+        this.#webSocket.command<WorkspaceView>("workspace.get", {
+          workspaceId,
+        }),
+        this.#webSocket.command<VariableProfileView>("variable_profile.get", {
+          scopeKind: "workspace",
+          scopeId: workspaceId,
+        }),
+      ]);
+      const draft = workspacePropertiesDraft(workspace, variableProfile);
+      const tab: WorkspacePropertiesTab = {
+        kind: "workspace",
+        tabId: uuidV7(),
+        workspaceId,
+        workspace,
+        variableProfile,
+        draft,
+        baseline: cloneWorkspacePropertiesDraft(draft),
+        busy: false,
+      };
+      this.#appendResourceTab(tab);
+    });
+  }
+
+  /** Replaces the editable draft owned by one workspace-properties tab. */
+  updateWorkspacePropertiesDraft(
+    tabId: string,
+    draft: WorkspacePropertiesDraft,
+  ): void {
+    this.#updateResourceTab(tabId, (tab) =>
+      tab.kind === "workspace"
+        ? { ...tab, draft: cloneWorkspacePropertiesDraft(draft) }
+        : tab,
+    );
+  }
+
+  /** Saves a workspace editor and advances its optimistic baselines in place. */
+  async saveWorkspacePropertiesTab(tabId: string): Promise<void> {
+    const tab = requireResourceTab(tabId, "workspace");
+    const result = await this.updateWorkspaceProperties(
+      tab.workspace.workspaceId,
+      tab.workspace.revision,
+      tab.draft.name,
+      tab.draft.baseUrl,
+      tab.draft.headers,
+      tab.variableProfile.revision,
+      tab.draft.variables,
+    );
+    const draft = workspacePropertiesDraft(result.workspace, result.profile);
+    this.#updateResourceTab(tabId, (current) =>
+      current.kind === "workspace"
+        ? {
+            ...current,
+            workspace: result.workspace,
+            variableProfile: result.profile,
+            draft,
+            baseline: cloneWorkspacePropertiesDraft(draft),
+            omittedSecretValues: false,
+          }
+        : current,
+    );
+  }
+
   /** Saves workspace properties and variables as one coordinated UI action. */
   async updateWorkspaceProperties(
     workspaceId: string,
@@ -465,8 +718,8 @@ export class ApplicationController {
     headers: readonly RequestField[],
     expectedVariableRevision: number,
     variables: readonly VariableWrite[],
-  ): Promise<void> {
-    await this.#run(async () => {
+  ): Promise<{ workspace: WorkspaceView; profile: VariableProfileView }> {
+    return this.#run(async () => {
       const workspace = await this.#webSocket.command<WorkspaceView>(
         "workspace.update",
         { workspaceId, expectedRevision, name, baseUrl, headers },
@@ -494,6 +747,7 @@ export class ApplicationController {
       store.selectedVariableProfile = profile;
       await this.#refreshOpenRequestContexts(workspaceId);
       await this.#refreshVariablePreviews();
+      return { workspace, profile };
     });
   }
 
@@ -515,7 +769,18 @@ export class ApplicationController {
       store.requestTabs = store.requestTabs.filter(
         (tab) => tab.workspaceId !== workspaceId,
       );
+      store.resourceTabs = store.resourceTabs.filter(
+        (tab) => tab.workspaceId !== workspaceId,
+      );
+      const retainedIds = new Set([
+        ...store.requestTabs.map((tab) => tab.tabId),
+        ...store.resourceTabs.map((tab) => tab.tabId),
+      ]);
+      store.workbenchTabOrder = store.workbenchTabOrder.filter((tabId) =>
+        retainedIds.has(tabId),
+      );
       store.activeRequestTabId = null;
+      store.activeWorkbenchTabId = null;
       store.selectedWorkspaceId = null;
       store.selectedWorkspace = null;
       store.environments = [];
@@ -694,6 +959,93 @@ export class ApplicationController {
     });
   }
 
+  /** Opens a saved environment once, or creates an independent unsaved editor. */
+  async openEnvironmentTab(environmentId: string | null): Promise<void> {
+    const store = useApplicationStore();
+    if (environmentId !== null) {
+      const existing = store.resourceTabs.find(
+        (tab) =>
+          tab.kind === "environment" &&
+          tab.environment?.environmentId === environmentId,
+      );
+      if (existing !== undefined) {
+        this.activateWorkbenchTab(existing.tabId);
+        return;
+      }
+    }
+    const workspaceId = requireSelection(store.selectedWorkspaceId);
+    if (environmentId === null) {
+      const tab: EnvironmentEditorTab = {
+        kind: "environment",
+        tabId: uuidV7(),
+        workspaceId,
+        environment: null,
+        draft: { name: "", variables: [], includedEnvironmentIds: [] },
+        baseline: null,
+        busy: false,
+      };
+      this.#appendResourceTab(tab);
+      return;
+    }
+    await this.#run(async () => {
+      const environment = await this.#webSocket.command<EnvironmentView>(
+        "environment.get",
+        { environmentId },
+      );
+      const draft = environmentDraft(environment);
+      const tab: EnvironmentEditorTab = {
+        kind: "environment",
+        tabId: uuidV7(),
+        workspaceId: environment.workspaceId,
+        environment,
+        draft,
+        baseline: cloneEnvironmentDraft(draft),
+        busy: false,
+      };
+      this.#appendResourceTab(tab);
+    });
+  }
+
+  /** Replaces the editable draft owned by one environment tab. */
+  updateEnvironmentDraft(tabId: string, draft: EnvironmentDraft): void {
+    this.#updateResourceTab(tabId, (tab) =>
+      tab.kind === "environment"
+        ? { ...tab, draft: cloneEnvironmentDraft(draft) }
+        : tab,
+    );
+  }
+
+  /** Creates or updates an environment and advances the tab baseline in place. */
+  async saveEnvironmentTab(tabId: string): Promise<void> {
+    const tab = requireResourceTab(tabId, "environment");
+    const environment =
+      tab.environment === null
+        ? await this.createEnvironment(
+            tab.draft.name,
+            tab.draft.variables,
+            tab.draft.includedEnvironmentIds,
+          )
+        : await this.updateEnvironment(
+            tab.environment.environmentId,
+            tab.environment.revision,
+            tab.draft.name,
+            tab.draft.variables,
+            tab.draft.includedEnvironmentIds,
+          );
+    const draft = environmentDraft(environment);
+    this.#updateResourceTab(tabId, (current) =>
+      current.kind === "environment"
+        ? {
+            ...current,
+            environment,
+            draft,
+            baseline: cloneEnvironmentDraft(draft),
+            omittedSecretValues: false,
+          }
+        : current,
+    );
+  }
+
   /** Loads one redacted environment profile for management. */
   async loadEnvironment(environmentId: string): Promise<EnvironmentView> {
     return this.#run(async () => {
@@ -766,6 +1118,27 @@ export class ApplicationController {
         environmentId,
         expectedRevision,
       });
+      const removedTabIds = new Set(
+        store.resourceTabs
+          .filter(
+            (tab) =>
+              tab.kind === "environment" &&
+              tab.environment?.environmentId === environmentId,
+          )
+          .map((tab) => tab.tabId),
+      );
+      store.resourceTabs = store.resourceTabs.filter(
+        (tab) => !removedTabIds.has(tab.tabId),
+      );
+      store.workbenchTabOrder = store.workbenchTabOrder.filter(
+        (tabId) => !removedTabIds.has(tabId),
+      );
+      if (
+        store.activeWorkbenchTabId !== null &&
+        removedTabIds.has(store.activeWorkbenchTabId)
+      ) {
+        this.#activateNearestWorkbenchTab();
+      }
       store.selectedEnvironment = null;
       await this.#reloadEnvironments(workspaceId);
       await this.#refreshVariablePreviews();
@@ -875,9 +1248,92 @@ export class ApplicationController {
     store.selectedCollectionId = collectionId;
     store.selectedCollection = collection;
     store.activeRequestTabId = null;
+    store.activeWorkbenchTabId = null;
     store.expandedCollectionIds = includeOnce(
       store.expandedCollectionIds,
       collectionId,
+    );
+  }
+
+  /** Opens collection properties once and activates the existing editor on repeat. */
+  async openCollectionPropertiesTab(collectionId: string): Promise<void> {
+    const store = useApplicationStore();
+    const existing = store.resourceTabs.find(
+      (tab) =>
+        tab.kind === "collection" &&
+        tab.collection.collectionId === collectionId,
+    );
+    if (existing !== undefined) {
+      this.activateWorkbenchTab(existing.tabId);
+      return;
+    }
+    await this.#run(async () => {
+      const [collection, variableProfile] = await Promise.all([
+        this.#webSocket.command<CollectionView>("collection.get", {
+          collectionId,
+        }),
+        this.#webSocket.command<VariableProfileView>("variable_profile.get", {
+          scopeKind: "collection",
+          scopeId: collectionId,
+        }),
+      ]);
+      const draft = collectionPropertiesDraft(collection, variableProfile);
+      const tab: CollectionPropertiesTab = {
+        kind: "collection",
+        tabId: uuidV7(),
+        workspaceId: collection.workspaceId,
+        collection,
+        variableProfile,
+        draft,
+        baseline: cloneCollectionPropertiesDraft(draft),
+        busy: false,
+      };
+      store.selectedCollectionId = collectionId;
+      store.selectedCollection = collection;
+      store.expandedCollectionIds = includeOnce(
+        store.expandedCollectionIds,
+        collectionId,
+      );
+      this.#appendResourceTab(tab);
+    });
+  }
+
+  /** Replaces the editable draft owned by one collection-properties tab. */
+  updateCollectionPropertiesDraft(
+    tabId: string,
+    draft: CollectionPropertiesDraft,
+  ): void {
+    this.#updateResourceTab(tabId, (tab) =>
+      tab.kind === "collection"
+        ? { ...tab, draft: cloneCollectionPropertiesDraft(draft) }
+        : tab,
+    );
+  }
+
+  /** Saves a collection editor and advances its optimistic baselines in place. */
+  async saveCollectionPropertiesTab(tabId: string): Promise<void> {
+    const tab = requireResourceTab(tabId, "collection");
+    const result = await this.updateCollectionProperties(
+      tab.collection.collectionId,
+      tab.collection.revision,
+      tab.draft.name,
+      tab.draft.pathPrefix,
+      tab.draft.headers,
+      tab.variableProfile.revision,
+      tab.draft.variables,
+    );
+    const draft = collectionPropertiesDraft(result.collection, result.profile);
+    this.#updateResourceTab(tabId, (current) =>
+      current.kind === "collection"
+        ? {
+            ...current,
+            collection: result.collection,
+            variableProfile: result.profile,
+            draft,
+            baseline: cloneCollectionPropertiesDraft(draft),
+            omittedSecretValues: false,
+          }
+        : current,
     );
   }
 
@@ -890,8 +1346,8 @@ export class ApplicationController {
     headers: readonly RequestField[],
     expectedVariableRevision: number,
     variables: readonly VariableWrite[],
-  ): Promise<void> {
-    await this.#run(async () => {
+  ): Promise<{ collection: CollectionView; profile: VariableProfileView }> {
+    return this.#run(async () => {
       const collection = await this.#webSocket.command<CollectionView>(
         "collection.update",
         { collectionId, expectedRevision, name, pathPrefix, headers },
@@ -916,6 +1372,7 @@ export class ApplicationController {
       store.selectedVariableProfile = profile;
       await this.#refreshOpenRequestContexts(collection.workspaceId);
       await this.#refreshVariablePreviews();
+      return { collection, profile };
     });
   }
 
@@ -926,7 +1383,15 @@ export class ApplicationController {
   ): Promise<void> {
     const store = useApplicationStore();
     const workspaceId = requireSelection(store.selectedWorkspaceId);
-    const collection = store.selectedCollection;
+    const collectionTab = store.resourceTabs.find(
+      (tab) =>
+        tab.kind === "collection" &&
+        tab.collection.collectionId === collectionId,
+    );
+    const collection =
+      collectionTab?.kind === "collection"
+        ? collectionTab.collection
+        : store.selectedCollection;
     const parentCollectionId =
       collection?.collectionId === collectionId
         ? collection.parentCollectionId
@@ -952,10 +1417,28 @@ export class ApplicationController {
               deleted.collectionIds.has(tab.pendingParentCollectionId)))
         );
       });
+      store.resourceTabs = store.resourceTabs.filter(
+        (tab) =>
+          tab.kind !== "collection" ||
+          !deleted.collectionIds.has(tab.collection.collectionId),
+      );
+      const retainedIds = new Set([
+        ...store.requestTabs.map((tab) => tab.tabId),
+        ...store.resourceTabs.map((tab) => tab.tabId),
+      ]);
+      store.workbenchTabOrder = store.workbenchTabOrder.filter((tabId) =>
+        retainedIds.has(tabId),
+      );
       if (
         !store.requestTabs.some((tab) => tab.tabId === store.activeRequestTabId)
       ) {
         store.activeRequestTabId = null;
+      }
+      if (
+        store.activeWorkbenchTabId !== null &&
+        !retainedIds.has(store.activeWorkbenchTabId)
+      ) {
+        this.#activateNearestWorkbenchTab();
       }
       store.selectedCollectionId = null;
       store.selectedCollection = null;
@@ -1066,6 +1549,8 @@ export class ApplicationController {
     };
     store.requestTabs.push(tab);
     store.activeRequestTabId = tab.tabId;
+    store.workbenchTabOrder.push(tab.tabId);
+    store.activeWorkbenchTabId = tab.tabId;
     store.selectedCollectionId = null;
     store.selectedCollection = null;
   }
@@ -1187,6 +1672,7 @@ export class ApplicationController {
       }
       if (firstOpenedTabId !== null) {
         store.activeRequestTabId = firstOpenedTabId;
+        store.activeWorkbenchTabId = firstOpenedTabId;
       }
       return result;
     });
@@ -1197,8 +1683,22 @@ export class ApplicationController {
     const store = useApplicationStore();
     if (store.requestTabs.some((tab) => tab.tabId === tabId)) {
       store.activeRequestTabId = tabId;
+      store.activeWorkbenchTabId = tabId;
       store.selectedCollectionId = null;
       store.selectedCollection = null;
+    }
+  }
+
+  /** Activates any open workbench tab while retaining request-only selection state. */
+  activateWorkbenchTab(tabId: string): void {
+    const store = useApplicationStore();
+    if (store.requestTabs.some((tab) => tab.tabId === tabId)) {
+      this.activateRequestTab(tabId);
+      return;
+    }
+    if (store.resourceTabs.some((tab) => tab.tabId === tabId)) {
+      store.activeWorkbenchTabId = tabId;
+      store.activeRequestTabId = null;
     }
   }
 
@@ -1210,11 +1710,30 @@ export class ApplicationController {
       return;
     }
     store.requestTabs.splice(index, 1);
+    store.workbenchTabOrder = store.workbenchTabOrder.filter(
+      (candidate) => candidate !== tabId,
+    );
     if (store.activeRequestTabId === tabId) {
-      store.activeRequestTabId =
-        store.requestTabs[index]?.tabId ??
-        store.requestTabs[index - 1]?.tabId ??
-        null;
+      store.activeRequestTabId = null;
+    }
+    if (store.activeWorkbenchTabId === tabId) {
+      this.#activateNearestWorkbenchTab();
+    }
+    this.#flushLocalSessionPersistence();
+  }
+
+  /** Closes one resource editor and activates its nearest remaining neighbor. */
+  closeResourceTab(tabId: string): void {
+    const store = useApplicationStore();
+    if (!store.resourceTabs.some((tab) => tab.tabId === tabId)) return;
+    store.resourceTabs = store.resourceTabs.filter(
+      (tab) => tab.tabId !== tabId,
+    );
+    store.workbenchTabOrder = store.workbenchTabOrder.filter(
+      (candidate) => candidate !== tabId,
+    );
+    if (store.activeWorkbenchTabId === tabId) {
+      this.#activateNearestWorkbenchTab();
     }
     this.#flushLocalSessionPersistence();
   }
@@ -1280,11 +1799,20 @@ export class ApplicationController {
       store.requestTabs = store.requestTabs.filter(
         (tab) => tab.request?.requestId !== request.requestId,
       );
+      const retainedRequestIds = new Set(
+        store.requestTabs.map((tab) => tab.tabId),
+      );
+      store.workbenchTabOrder = store.workbenchTabOrder.filter(
+        (tabId) =>
+          retainedRequestIds.has(tabId) ||
+          store.resourceTabs.some((tab) => tab.tabId === tabId),
+      );
       if (activeRequestId === request.requestId) {
         store.activeRequestTabId =
           store.requestTabs[activeIndex]?.tabId ??
           store.requestTabs[activeIndex - 1]?.tabId ??
           null;
+        store.activeWorkbenchTabId = store.activeRequestTabId;
       }
       if (
         store.selectedVariableProfile?.scopeKind === "request" &&
@@ -1683,9 +2211,53 @@ export class ApplicationController {
     };
     store.requestTabs.push(tab);
     store.activeRequestTabId = tab.tabId;
+    store.workbenchTabOrder.push(tab.tabId);
+    store.activeWorkbenchTabId = tab.tabId;
     store.selectedCollectionId = null;
     store.selectedCollection = null;
     return tab.tabId;
+  }
+
+  /** Adds one resource editor to the ordered workbench and activates it. */
+  #appendResourceTab(tab: ResourceEditorTab): void {
+    const store = useApplicationStore();
+    store.resourceTabs.push(tab);
+    store.workbenchTabOrder.push(tab.tabId);
+    store.activeWorkbenchTabId = tab.tabId;
+    store.activeRequestTabId = null;
+  }
+
+  /** Replaces one resource tab without permitting stale callbacks to recreate it. */
+  #updateResourceTab(
+    tabId: string,
+    project: (tab: ResourceEditorTab) => ResourceEditorTab,
+  ): void {
+    const store = useApplicationStore();
+    const index = store.resourceTabs.findIndex((tab) => tab.tabId === tabId);
+    const tab = store.resourceTabs[index];
+    if (tab !== undefined) store.resourceTabs[index] = project(tab);
+  }
+
+  /** Activates the last remaining tab visible in the selected workspace. */
+  #activateNearestWorkbenchTab(): void {
+    const store = useApplicationStore();
+    const workspaceId = store.selectedWorkspaceId;
+    const requestIds = new Set(
+      store.requestTabs
+        .filter((tab) => tab.workspaceId === workspaceId)
+        .map((tab) => tab.tabId),
+    );
+    const resourceIds = new Set(
+      store.resourceTabs
+        .filter((tab) => tab.workspaceId === workspaceId)
+        .map((tab) => tab.tabId),
+    );
+    const nextId = [...store.workbenchTabOrder]
+      .reverse()
+      .find((tabId) => requestIds.has(tabId) || resourceIds.has(tabId));
+    store.activeWorkbenchTabId = nextId ?? null;
+    store.activeRequestTabId =
+      nextId !== undefined && requestIds.has(nextId) ? nextId : null;
   }
 
   /** Refreshes inherited request metadata without replacing editable drafts. */
@@ -1954,6 +2526,8 @@ function localRequestSessionSnapshot(
   return {
     selectedWorkspaceId: store.selectedWorkspaceId,
     activeRequestTabId: store.activeRequestTabId,
+    activeWorkbenchTabId: store.activeWorkbenchTabId,
+    workbenchTabOrder: [...store.workbenchTabOrder],
     tabs: store.requestTabs.map((tab): LocalRequestTabSnapshot => {
       const safeVariables = redactSecretVariableWrites(tab.variableDraft);
       const warnings = new Set<RequestRecoveryWarning>(
@@ -1983,6 +2557,58 @@ function localRequestSessionSnapshot(
         recoveryWarnings: [...warnings],
       };
     }),
+    resourceTabs: store.resourceTabs.map(localResourceTabSnapshot),
+  };
+}
+
+/** Projects one resource editor into a secret-safe browser payload. */
+function localResourceTabSnapshot(
+  tab: ResourceEditorTab,
+): LocalResourceTabSnapshot {
+  const safeVariables = redactSecretVariableWrites(tab.draft.variables);
+  const common = {
+    kind: tab.kind,
+    tabId: tab.tabId,
+    workspaceId: tab.workspaceId,
+    omittedSecretValues: safeVariables.omittedSecretValues,
+    dirty: isResourceEditorTabDirty(tab),
+  } as const;
+  if (tab.kind === "workspace") {
+    return {
+      ...common,
+      kind: "workspace",
+      resourceId: tab.workspace.workspaceId,
+      baseRevision: tab.workspace.revision,
+      baseVariableRevision: tab.variableProfile.revision,
+      draft: {
+        ...cloneWorkspacePropertiesDraft(tab.draft),
+        variables: safeVariables.variables ?? [],
+      },
+    };
+  }
+  if (tab.kind === "collection") {
+    return {
+      ...common,
+      kind: "collection",
+      resourceId: tab.collection.collectionId,
+      baseRevision: tab.collection.revision,
+      baseVariableRevision: tab.variableProfile.revision,
+      draft: {
+        ...cloneCollectionPropertiesDraft(tab.draft),
+        variables: safeVariables.variables ?? [],
+      },
+    };
+  }
+  return {
+    ...common,
+    kind: "environment",
+    resourceId: tab.environment?.environmentId ?? null,
+    baseRevision: tab.environment?.revision ?? null,
+    baseVariableRevision: null,
+    draft: {
+      ...cloneEnvironmentDraft(tab.draft),
+      variables: safeVariables.variables ?? [],
+    },
   };
 }
 
@@ -2012,6 +2638,18 @@ function requireTab(tabId: string): RequestTab {
     throw new WorkflowError("requestTabClosed");
   }
   return tab;
+}
+
+/** Returns one resource editor of the requested kind or raises a stale-tab error. */
+function requireResourceTab<Kind extends ResourceEditorTab["kind"]>(
+  tabId: string,
+  kind: Kind,
+): Extract<ResourceEditorTab, { readonly kind: Kind }> {
+  const tab = useApplicationStore().resourceTabs.find(
+    (candidate) => candidate.tabId === tabId && candidate.kind === kind,
+  );
+  if (tab === undefined) throw new WorkflowError("requestTabClosed");
+  return tab as Extract<ResourceEditorTab, { readonly kind: Kind }>;
 }
 
 /** Returns the currently active request tab. */
@@ -2121,6 +2759,86 @@ function cloneVariableWrites(
   variables: readonly VariableWrite[],
 ): VariableWrite[] {
   return variables.map((variable) => ({ ...variable }));
+}
+
+/** Projects workspace properties and redacted variables onto editable content. */
+function workspacePropertiesDraft(
+  workspace: WorkspaceView,
+  profile: VariableProfileView,
+): WorkspacePropertiesDraft {
+  return {
+    name: workspace.name,
+    baseUrl: workspace.baseUrl,
+    headers: workspace.headers.map((header) => ({ ...header })),
+    variables: variableViewsToWrites(profile.variables),
+  };
+}
+
+/** Clones a workspace editor draft without sharing mutable field objects. */
+function cloneWorkspacePropertiesDraft(
+  draft: WorkspacePropertiesDraft,
+): WorkspacePropertiesDraft {
+  return {
+    ...draft,
+    headers: draft.headers.map((header) => ({ ...header })),
+    variables: cloneVariableWrites(draft.variables),
+  };
+}
+
+/** Projects collection properties and redacted variables onto editable content. */
+function collectionPropertiesDraft(
+  collection: CollectionView,
+  profile: VariableProfileView,
+): CollectionPropertiesDraft {
+  return {
+    name: collection.name,
+    pathPrefix: collection.pathPrefix,
+    headers: collection.headers.map((header) => ({ ...header })),
+    variables: variableViewsToWrites(profile.variables),
+  };
+}
+
+/** Clones a collection editor draft without sharing mutable field objects. */
+function cloneCollectionPropertiesDraft(
+  draft: CollectionPropertiesDraft,
+): CollectionPropertiesDraft {
+  return {
+    ...draft,
+    headers: draft.headers.map((header) => ({ ...header })),
+    variables: cloneVariableWrites(draft.variables),
+  };
+}
+
+/** Projects one redacted environment onto editable content. */
+function environmentDraft(environment: EnvironmentView): EnvironmentDraft {
+  return {
+    name: environment.name,
+    variables: environment.variables.map((variable) => {
+      const common = { variableId: variable.variableId, name: variable.name };
+      switch (variable.kind) {
+        case "value":
+          return { ...common, kind: "value" as const, value: variable.value };
+        case "alias":
+          return { ...common, kind: "alias" as const, target: variable.target };
+        case "unset":
+          return { ...common, kind: "unset" as const };
+        case "secret":
+          return { ...common, kind: "secret" as const };
+      }
+    }),
+    includedEnvironmentIds: environment.includedEnvironments.map(
+      (included) => included.environmentId,
+    ),
+  };
+}
+
+/** Clones an environment editor draft without sharing mutation payloads. */
+function cloneEnvironmentDraft(draft: EnvironmentDraft): EnvironmentDraft {
+  return {
+    name: draft.name,
+    variables: draft.variables.map((variable) => ({ ...variable })),
+    includedEnvironmentIds: [...draft.includedEnvironmentIds],
+  };
 }
 
 /** Returns the display name used for one unsaved request-variable source. */

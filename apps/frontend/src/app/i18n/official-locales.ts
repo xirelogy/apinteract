@@ -75,7 +75,7 @@ const zhHansMessages = {
     moreActions: "{name} 的更多操作",
     properties: "工作区属性",
     propertiesDescription: "重命名此工作区并管理所有请求继承的请求头和变量。",
-    propertiesTitle: "工作区属性",
+    propertiesTitle: "工作区",
     reorderHint:
       "拖动以移动。使用键盘时，请按住 Alt 并使用方向键重新排序、缩进或减少缩进。",
     reorderRequested: "已将{name}移动到第 {position} 位。",
@@ -115,7 +115,7 @@ const zhHansMessages = {
     newSubcollection: "新建子集合",
     properties: "集合属性",
     propertiesDescription: "重命名此集合并管理继承的请求头和变量。",
-    propertiesTitle: "集合属性",
+    propertiesTitle: "集合",
   },
   environment: {
     addVariable: "添加变量",
@@ -236,6 +236,12 @@ const zhHansMessages = {
       request: "请求",
       workspace: "工作区",
     },
+  },
+  workbench: {
+    close: "关闭标签页",
+    closeNamed: "关闭 {name}",
+    noOpenTabs: "没有打开的标签页",
+    openTabs: "打开的标签页",
   },
   request: {
     addHeader: "添加请求头",
@@ -544,7 +550,7 @@ const zhHantMessages = {
     moreActions: "{name} 的更多操作",
     properties: "工作區屬性",
     propertiesDescription: "重新命名此工作區並管理所有請求繼承的標頭和變數。",
-    propertiesTitle: "工作區屬性",
+    propertiesTitle: "工作區",
     reorderHint:
       "拖曳以移動。使用鍵盤時，請按住 Alt 並使用方向鍵重新排序、縮排或減少縮排。",
     reorderRequested: "已將{name}移至第 {position} 位。",
@@ -583,7 +589,7 @@ const zhHantMessages = {
     newSubcollection: "新增子集合",
     properties: "集合屬性",
     propertiesDescription: "重新命名此集合並管理繼承的標頭和變數。",
-    propertiesTitle: "集合屬性",
+    propertiesTitle: "集合",
   },
   environment: {
     addVariable: "新增變數",
@@ -705,6 +711,12 @@ const zhHantMessages = {
       request: "請求",
       workspace: "工作區",
     },
+  },
+  workbench: {
+    close: "關閉分頁",
+    closeNamed: "關閉 {name}",
+    noOpenTabs: "沒有開啟的分頁",
+    openTabs: "開啟的分頁",
   },
   request: {
     addHeader: "新增標頭",

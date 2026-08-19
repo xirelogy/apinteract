@@ -6,11 +6,14 @@ import type {
   VariableWrite,
 } from "@/model/contracts/backend";
 import type {
+  CollectionPropertiesDraft,
+  EnvironmentDraft,
   RequestDraftInput,
   RequestRecoveryWarning,
+  WorkspacePropertiesDraft,
 } from "@/model/domain/application";
 
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
 const MANIFEST_KEY_PREFIX = "apinteract.request-session.v1";
 const DATABASE_NAME = "apinteract-local-requests";
 const DATABASE_VERSION = 1;
@@ -42,11 +45,50 @@ export interface LocalRequestTabSnapshot {
   readonly recoveryWarnings: readonly RequestRecoveryWarning[];
 }
 
+/** Secret-safe editable state retained for one resource workbench tab. */
+export type LocalResourceTabSnapshot =
+  | {
+      readonly kind: "workspace";
+      readonly tabId: string;
+      readonly workspaceId: string;
+      readonly resourceId: string;
+      readonly baseRevision: number;
+      readonly baseVariableRevision: number;
+      readonly draft: WorkspacePropertiesDraft;
+      readonly dirty: boolean;
+      readonly omittedSecretValues: boolean;
+    }
+  | {
+      readonly kind: "collection";
+      readonly tabId: string;
+      readonly workspaceId: string;
+      readonly resourceId: string;
+      readonly baseRevision: number;
+      readonly baseVariableRevision: number;
+      readonly draft: CollectionPropertiesDraft;
+      readonly dirty: boolean;
+      readonly omittedSecretValues: boolean;
+    }
+  | {
+      readonly kind: "environment";
+      readonly tabId: string;
+      readonly workspaceId: string;
+      readonly resourceId: string | null;
+      readonly baseRevision: number | null;
+      readonly baseVariableRevision: null;
+      readonly draft: EnvironmentDraft;
+      readonly dirty: boolean;
+      readonly omittedSecretValues: boolean;
+    };
+
 /** Complete local state projected from the current user's request workbench. */
 export interface LocalRequestSessionSnapshot {
   readonly selectedWorkspaceId: string | null;
   readonly activeRequestTabId: string | null;
   readonly tabs: readonly LocalRequestTabSnapshot[];
+  readonly activeWorkbenchTabId: string | null;
+  readonly workbenchTabOrder: readonly string[];
+  readonly resourceTabs: readonly LocalResourceTabSnapshot[];
 }
 
 /** One manifest entry joined with its optional IndexedDB payload. */
@@ -62,6 +104,18 @@ export interface RestoredRequestSession {
   readonly selectedWorkspaceId: string | null;
   readonly activeRequestTabId: string | null;
   readonly tabs: readonly RestoredRequestTabEntry[];
+  readonly activeWorkbenchTabId: string | null;
+  readonly workbenchTabOrder: readonly string[];
+  readonly resourceTabs: readonly RestoredResourceTabEntry[];
+}
+
+/** One resource manifest entry joined with its validated IndexedDB payload. */
+export interface RestoredResourceTabEntry {
+  readonly kind: LocalResourceTabSnapshot["kind"];
+  readonly tabId: string;
+  readonly workspaceId: string;
+  readonly resourceId: string | null;
+  readonly snapshot: LocalResourceTabSnapshot | null;
 }
 
 /** Persists small tab manifests separately from potentially large draft bodies. */
@@ -72,11 +126,21 @@ export interface RequestSessionStorage {
 }
 
 interface StoredManifest {
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly userId: string;
   readonly selectedWorkspaceId: string | null;
   readonly activeRequestTabId: string | null;
   readonly tabs: readonly StoredManifestTab[];
+  readonly activeWorkbenchTabId?: string | null;
+  readonly workbenchTabOrder?: readonly string[];
+  readonly resourceTabs?: readonly StoredResourceManifestTab[];
+}
+
+interface StoredResourceManifestTab {
+  readonly kind: LocalResourceTabSnapshot["kind"];
+  readonly tabId: string;
+  readonly workspaceId: string;
+  readonly resourceId: string | null;
 }
 
 interface StoredManifestTab {
@@ -106,6 +170,14 @@ export class BrowserRequestSessionStorage implements RequestSessionStorage {
         selectedWorkspaceId: manifest.selectedWorkspaceId,
         activeRequestTabId: manifest.activeRequestTabId,
         tabs: manifest.tabs.map((tab) => ({ ...tab, snapshot: null })),
+        activeWorkbenchTabId:
+          manifest.activeWorkbenchTabId ?? manifest.activeRequestTabId,
+        workbenchTabOrder:
+          manifest.workbenchTabOrder ?? manifest.tabs.map((tab) => tab.tabId),
+        resourceTabs: (manifest.resourceTabs ?? []).map((tab) => ({
+          ...tab,
+          snapshot: null,
+        })),
       };
     }
     const transaction = database.transaction(TAB_STORE_NAME, "readonly");
@@ -124,11 +196,32 @@ export class BrowserRequestSessionStorage implements RequestSessionStorage {
         };
       }),
     );
+    const resourceEntries = await Promise.all(
+      (manifest.resourceTabs ?? []).map(
+        async (tab): Promise<RestoredResourceTabEntry> => {
+          const getRequest = store.get(
+            tabStorageKey(userId, tab.tabId),
+          ) as IDBRequest<StoredTabRecord | undefined>;
+          const record = await requestResult<StoredTabRecord | undefined>(
+            getRequest,
+          );
+          return {
+            ...tab,
+            snapshot: parseResourceTabRecord(record, userId, tab),
+          };
+        },
+      ),
+    );
     await transactionCompletion(transaction);
     return {
       selectedWorkspaceId: manifest.selectedWorkspaceId,
       activeRequestTabId: manifest.activeRequestTabId,
       tabs: entries,
+      activeWorkbenchTabId:
+        manifest.activeWorkbenchTabId ?? manifest.activeRequestTabId,
+      workbenchTabOrder:
+        manifest.workbenchTabOrder ?? manifest.tabs.map((tab) => tab.tabId),
+      resourceTabs: resourceEntries,
     };
   }
 
@@ -143,7 +236,10 @@ export class BrowserRequestSessionStorage implements RequestSessionStorage {
     }
     const database = await this.#database();
     if (database !== null) {
-      await writeTabRecords(database, userId, snapshot.tabs);
+      await writeTabRecords(database, userId, [
+        ...snapshot.tabs,
+        ...snapshot.resourceTabs,
+      ]);
     }
     writeManifest(userId, snapshot);
   }
@@ -177,13 +273,31 @@ function manifestRemovalSnapshot(
   const previousManifest = readManifest(userId);
   if (previousManifest === null) return null;
   const retainedTabIds = new Set(snapshot.tabs.map((tab) => tab.tabId));
-  if (!previousManifest.tabs.some((tab) => !retainedTabIds.has(tab.tabId))) {
+  const retainedResourceTabIds = new Set(
+    snapshot.resourceTabs.map((tab) => tab.tabId),
+  );
+  if (
+    !previousManifest.tabs.some((tab) => !retainedTabIds.has(tab.tabId)) &&
+    !(previousManifest.resourceTabs ?? []).some(
+      (tab) => !retainedResourceTabIds.has(tab.tabId),
+    )
+  ) {
     return null;
   }
   const previousTabIds = new Set(previousManifest.tabs.map((tab) => tab.tabId));
   const retainedTabs = snapshot.tabs.filter((tab) =>
     previousTabIds.has(tab.tabId),
   );
+  const previousResourceIds = new Set(
+    (previousManifest.resourceTabs ?? []).map((tab) => tab.tabId),
+  );
+  const retainedResourceTabs = snapshot.resourceTabs.filter((tab) =>
+    previousResourceIds.has(tab.tabId),
+  );
+  const retainedIds = new Set([
+    ...retainedTabs.map((tab) => tab.tabId),
+    ...retainedResourceTabs.map((tab) => tab.tabId),
+  ]);
   return {
     selectedWorkspaceId: snapshot.selectedWorkspaceId,
     activeRequestTabId: retainedTabs.some(
@@ -192,6 +306,15 @@ function manifestRemovalSnapshot(
       ? snapshot.activeRequestTabId
       : null,
     tabs: retainedTabs,
+    activeWorkbenchTabId:
+      snapshot.activeWorkbenchTabId !== null &&
+      retainedIds.has(snapshot.activeWorkbenchTabId)
+        ? snapshot.activeWorkbenchTabId
+        : null,
+    workbenchTabOrder: snapshot.workbenchTabOrder.filter((tabId) =>
+      retainedIds.has(tabId),
+    ),
+    resourceTabs: retainedResourceTabs,
   };
 }
 
@@ -242,6 +365,14 @@ function writeManifest(
       workspaceId: tab.workspaceId,
       requestId: tab.requestId,
     })),
+    activeWorkbenchTabId: snapshot.activeWorkbenchTabId,
+    workbenchTabOrder: snapshot.workbenchTabOrder,
+    resourceTabs: snapshot.resourceTabs.map((tab) => ({
+      kind: tab.kind,
+      tabId: tab.tabId,
+      workspaceId: tab.workspaceId,
+      resourceId: tab.resourceId,
+    })),
   };
   storage.setItem(manifestKey(userId), JSON.stringify(manifest));
 }
@@ -285,6 +416,7 @@ function openDatabase(): Promise<IDBDatabase | null> {
   }
   return new Promise((resolve) => {
     let settled = false;
+    /** Resolves the open attempt exactly once and closes late database handles. */
     const finish = (database: IDBDatabase | null): void => {
       if (settled) {
         database?.close();
@@ -316,7 +448,7 @@ function openDatabase(): Promise<IDBDatabase | null> {
 async function writeTabRecords(
   database: IDBDatabase,
   userId: string,
-  snapshots: readonly LocalRequestTabSnapshot[],
+  snapshots: readonly (LocalRequestTabSnapshot | LocalResourceTabSnapshot)[],
 ): Promise<void> {
   const transaction = database.transaction(TAB_STORE_NAME, "readwrite");
   const store = transaction.objectStore(TAB_STORE_NAME);
@@ -415,6 +547,28 @@ function parseTabRecord(
   }
 }
 
+/** Parses and validates one resource-editor payload against manifest identity. */
+function parseResourceTabRecord(
+  record: StoredTabRecord | undefined,
+  userId: string,
+  manifestTab: StoredResourceManifestTab,
+): LocalResourceTabSnapshot | null {
+  if (
+    record === undefined ||
+    record.userId !== userId ||
+    record.tabId !== manifestTab.tabId ||
+    record.storageKey !== tabStorageKey(userId, manifestTab.tabId)
+  ) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(record.payload);
+    return isLocalResourceTabSnapshot(parsed, manifestTab) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Validates the localStorage trust boundary for one user's manifest. */
 function isStoredManifest(
   value: unknown,
@@ -422,7 +576,7 @@ function isStoredManifest(
 ): value is StoredManifest {
   if (
     !isRecord(value) ||
-    value.version !== STORAGE_VERSION ||
+    (value.version !== 1 && value.version !== STORAGE_VERSION) ||
     value.userId !== userId
   ) {
     return false;
@@ -434,8 +588,24 @@ function isStoredManifest(
   ) {
     return false;
   }
+  if (
+    value.activeWorkbenchTabId !== undefined &&
+    !isNullableString(value.activeWorkbenchTabId)
+  ) {
+    return false;
+  }
+  if (
+    value.workbenchTabOrder !== undefined &&
+    (!Array.isArray(value.workbenchTabOrder) ||
+      !value.workbenchTabOrder.every((tabId) => typeof tabId === "string"))
+  ) {
+    return false;
+  }
+  if (value.resourceTabs !== undefined && !Array.isArray(value.resourceTabs)) {
+    return false;
+  }
   const tabIds = new Set<string>();
-  return value.tabs.every((tab) => {
+  const requestTabsValid = value.tabs.every((tab) => {
     if (
       !isRecord(tab) ||
       typeof tab.tabId !== "string" ||
@@ -445,6 +615,24 @@ function isStoredManifest(
     ) {
       return false;
     }
+    tabIds.add(tab.tabId);
+    return true;
+  });
+  if (!requestTabsValid) return false;
+  return (value.resourceTabs ?? []).every((tab) => {
+    if (
+      !isRecord(tab) ||
+      (tab.kind !== "workspace" &&
+        tab.kind !== "collection" &&
+        tab.kind !== "environment") ||
+      typeof tab.tabId !== "string" ||
+      typeof tab.workspaceId !== "string" ||
+      !isNullableString(tab.resourceId) ||
+      tabIds.has(tab.tabId)
+    ) {
+      return false;
+    }
+    if (tab.kind !== "environment" && tab.resourceId === null) return false;
     tabIds.add(tab.tabId);
     return true;
   });
@@ -475,6 +663,91 @@ function isLocalRequestTabSnapshot(
       (warning) => warning === "stale" || warning === "secrets-omitted",
     )
   );
+}
+
+/** Validates one secret-safe resource draft loaded from browser storage. */
+function isLocalResourceTabSnapshot(
+  value: unknown,
+  manifestTab: StoredResourceManifestTab,
+): value is LocalResourceTabSnapshot {
+  if (
+    !isRecord(value) ||
+    value.kind !== manifestTab.kind ||
+    value.tabId !== manifestTab.tabId ||
+    value.workspaceId !== manifestTab.workspaceId ||
+    value.resourceId !== manifestTab.resourceId ||
+    typeof value.omittedSecretValues !== "boolean" ||
+    typeof value.dirty !== "boolean"
+  ) {
+    return false;
+  }
+  if (value.kind === "workspace") {
+    return (
+      typeof value.baseRevision === "number" &&
+      typeof value.baseVariableRevision === "number" &&
+      isWorkspacePropertiesDraft(value.draft)
+    );
+  }
+  if (value.kind === "collection") {
+    return (
+      typeof value.baseRevision === "number" &&
+      typeof value.baseVariableRevision === "number" &&
+      isCollectionPropertiesDraft(value.draft)
+    );
+  }
+  return (
+    value.kind === "environment" &&
+    isNullableNumber(value.baseRevision) &&
+    value.baseVariableRevision === null &&
+    isEnvironmentDraft(value.draft)
+  );
+}
+
+/** Validates one persisted workspace-properties draft. */
+function isWorkspacePropertiesDraft(
+  value: unknown,
+): value is WorkspacePropertiesDraft {
+  return (
+    isRecord(value) &&
+    typeof value.name === "string" &&
+    typeof value.baseUrl === "string" &&
+    isFieldArray(value.headers) &&
+    isVariableWriteArray(value.variables)
+  );
+}
+
+/** Validates one persisted collection-properties draft. */
+function isCollectionPropertiesDraft(
+  value: unknown,
+): value is CollectionPropertiesDraft {
+  return (
+    isRecord(value) &&
+    typeof value.name === "string" &&
+    typeof value.pathPrefix === "string" &&
+    isFieldArray(value.headers) &&
+    isVariableWriteArray(value.variables)
+  );
+}
+
+/** Validates one persisted environment draft. */
+function isEnvironmentDraft(value: unknown): value is EnvironmentDraft {
+  return (
+    isRecord(value) &&
+    typeof value.name === "string" &&
+    isVariableWriteArray(value.variables) &&
+    Array.isArray(value.includedEnvironmentIds) &&
+    value.includedEnvironmentIds.every((id) => typeof id === "string")
+  );
+}
+
+/** Validates an array of structured request fields. */
+function isFieldArray(value: unknown): value is RequestField[] {
+  return Array.isArray(value) && value.every(isRequestField);
+}
+
+/** Validates an array of secret-safe variable writes. */
+function isVariableWriteArray(value: unknown): value is VariableWrite[] {
+  return Array.isArray(value) && value.every(isVariableWrite);
 }
 
 /** Validates editable request content before it crosses into application state. */

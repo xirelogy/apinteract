@@ -123,6 +123,87 @@ describe("ApplicationController workspaces", () => {
     expect(store.expandedCollectionIds).toEqual([]);
     expect(command).not.toHaveBeenCalled();
   });
+
+  it("opens and deduplicates resource editors in one ordered workbench", async () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151ce4";
+    const collectionId = "019facab-1eee-765f-bd9f-ac2449151ce5";
+    const environmentId = "019facab-1eee-765f-bd9f-ac2449151ce6";
+    const command = vi.fn((type: string, payload: Record<string, unknown>) => {
+      if (type === "workspace.get") {
+        return {
+          workspaceId,
+          name: "Workspace",
+          role: "owner",
+          baseUrl: "https://example.test",
+          headers: [],
+          revision: 1,
+        };
+      }
+      if (type === "collection.get") {
+        return {
+          collectionId,
+          workspaceId,
+          parentCollectionId: null,
+          name: "Collection",
+          pathPrefix: "/v1",
+          inheritedTarget: "https://example.test",
+          effectivePath: "https://example.test/v1",
+          headers: [],
+          inheritedHeaders: [],
+          effectiveHeaders: [],
+          revision: 1,
+        };
+      }
+      if (type === "environment.get") {
+        return {
+          environmentId,
+          workspaceId,
+          name: "Development",
+          revision: 1,
+          includedEnvironments: [],
+          variables: [],
+          inheritedVariables: [],
+        };
+      }
+      if (type === "variable_profile.get") {
+        return {
+          workspaceId,
+          scopeKind: payload.scopeKind,
+          scopeId: payload.scopeId,
+          scopeName: "Variables",
+          revision: 1,
+          variables: [],
+          inheritedVariables: [],
+        };
+      }
+      throw new Error(`Unexpected command ${type}`);
+    });
+    const controller = new ApplicationController(
+      {} as SessionController,
+      { command, onEvent: vi.fn() } as unknown as BackendWebSocketClient,
+    );
+    const store = useApplicationStore();
+    store.selectedWorkspaceId = workspaceId;
+
+    await controller.openWorkspacePropertiesTab(workspaceId);
+    await controller.openWorkspacePropertiesTab(workspaceId);
+    await controller.openCollectionPropertiesTab(collectionId);
+    await controller.openEnvironmentTab(environmentId);
+    await controller.openEnvironmentTab(null);
+
+    expect(store.resourceTabs.map((tab) => tab.kind)).toEqual([
+      "workspace",
+      "collection",
+      "environment",
+      "environment",
+    ]);
+    expect(store.workbenchTabOrder).toEqual(
+      store.resourceTabs.map((tab) => tab.tabId),
+    );
+    expect(store.activeWorkbenchTabId).toBe(store.resourceTabs[3]?.tabId);
+    expect(store.activeRequestTabId).toBeNull();
+  });
 });
 
 describe("ApplicationController local request recovery", () => {
@@ -171,6 +252,9 @@ describe("ApplicationController local request recovery", () => {
     const storage = new FakeRequestSessionStorage({
       selectedWorkspaceId: workspaceId,
       activeRequestTabId: temporaryTabId,
+      activeWorkbenchTabId: temporaryTabId,
+      workbenchTabOrder: [savedTabId, temporaryTabId],
+      resourceTabs: [],
       tabs: [
         {
           tabId: savedTabId,
@@ -294,6 +378,8 @@ describe("ApplicationController local request recovery", () => {
     await controller.initializeWorkspace();
     store.$patch({
       activeRequestTabId: tabId,
+      activeWorkbenchTabId: tabId,
+      workbenchTabOrder: [tabId, "019facab-1eee-765f-bd9f-ac2449151dc5"],
       requestTabs: [
         {
           tabId,
@@ -326,6 +412,23 @@ describe("ApplicationController local request recovery", () => {
           busy: false,
         },
       ],
+      resourceTabs: [
+        {
+          kind: "environment",
+          tabId: "019facab-1eee-765f-bd9f-ac2449151dc5",
+          workspaceId,
+          environment: null,
+          draft: {
+            name: "Local",
+            variables: [
+              { name: "api-key", kind: "secret", value: "do-not-store" },
+            ],
+            includedEnvironmentIds: [],
+          },
+          baseline: null,
+          busy: false,
+        },
+      ],
     });
 
     await vi.advanceTimersByTimeAsync(151);
@@ -337,6 +440,11 @@ describe("ApplicationController local request recovery", () => {
     ]);
     expect(persistedTab?.omittedSecretValues).toBe(true);
     expect(persistedTab?.recoveryWarnings).toContain("secrets-omitted");
+    const persistedResource = storage.saves.at(-1)?.resourceTabs[0];
+    expect(persistedResource?.draft.variables).toEqual([
+      { name: "api-key", kind: "secret" },
+    ]);
+    expect(persistedResource?.omittedSecretValues).toBe(true);
     await controller.logout();
   });
 

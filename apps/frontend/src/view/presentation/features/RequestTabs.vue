@@ -1,14 +1,26 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { LoaderCircle, Plus, X } from "@lucide/vue";
+import {
+  Folder,
+  Layers3,
+  LoaderCircle,
+  PanelsTopLeft,
+  Plus,
+  Send,
+  X,
+} from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
-import { isRequestTabDirty, type RequestTab } from "@/model/domain/application";
+import {
+  isWorkbenchTabDirty,
+  workbenchTabId,
+  type WorkbenchTab,
+} from "@/model/domain/application";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 
 const props = defineProps<{
-  tabs: readonly RequestTab[];
+  tabs: readonly WorkbenchTab[];
   activeTabId: string | null;
 }>();
 const { t } = useI18n();
@@ -20,27 +32,61 @@ const emit = defineEmits<{
 }>();
 
 const activeTab = computed(
-  () => props.tabs.find((tab) => tab.tabId === props.activeTabId) ?? null,
+  () =>
+    props.tabs.find((tab) => workbenchTabId(tab) === props.activeTabId) ?? null,
 );
 const mobileOptions = computed(() =>
   props.tabs.map((tab) => ({
-    value: tab.tabId,
-    label: requestTabLabel(tab),
+    value: workbenchTabId(tab),
+    label: workbenchTabLabel(tab),
   })),
 );
 
 /** Formats one request for the compact mobile tab switcher. */
-function requestTabLabel(tab: RequestTab): string {
-  const name = tab.draft.name.trim() || t("request.untitled");
-  return `${tab.draft.method} ${name}${isRequestTabDirty(tab) ? " *" : ""}`;
+function workbenchTabLabel(tab: WorkbenchTab): string {
+  const name = workbenchTabName(tab);
+  const prefix =
+    tab.kind === "request" ? `${tab.requestTab.draft.method} ` : "";
+  return `${prefix}${name}${isWorkbenchTabDirty(tab) ? " *" : ""}`;
+}
+
+/** Returns the user-authored or fallback name for any workbench document. */
+function workbenchTabName(tab: WorkbenchTab): string {
+  if (tab.kind === "request") {
+    return tab.requestTab.draft.name.trim() || t("request.untitled");
+  }
+  if (tab.kind === "environment") {
+    return tab.draft.name.trim() || t("environment.create");
+  }
+  return tab.draft.name.trim();
+}
+
+/** Finds one tab for rendering a typed icon inside mobile menu options. */
+function workbenchTabById(tabId: string): WorkbenchTab | null {
+  return props.tabs.find((tab) => workbenchTabId(tab) === tabId) ?? null;
+}
+
+/** Selects the visual resource-kind icon for a workbench tab. */
+function workbenchTabIcon(tab: WorkbenchTab | null) {
+  if (tab?.kind === "workspace") return PanelsTopLeft;
+  if (tab?.kind === "collection") return Folder;
+  if (tab?.kind === "environment") return Layers3;
+  return Send;
+}
+
+/** Reports whether a request tab currently owns a running execution. */
+function isWorkbenchTabRunning(tab: WorkbenchTab | null): boolean {
+  return (
+    tab?.kind === "request" && tab.requestTab.execution?.state === "running"
+  );
 }
 
 /** Formats the close action for the active mobile request. */
-function closeTabLabel(tab: RequestTab | null): string {
+function closeTabLabel(tab: WorkbenchTab | null): string {
   return tab === null
-    ? t("request.close")
-    : t("request.closeNamed", {
-        name: tab.draft.name || t("request.untitled"),
+    ? t("workbench.close")
+    : t("workbench.closeNamed", {
+        name: workbenchTabName(tab),
       });
 }
 
@@ -63,7 +109,7 @@ function handleTabKeydown(event: KeyboardEvent): void {
     event.preventDefault();
     const tab = props.tabs[currentIndex];
     if (tab !== undefined) {
-      emit("close", tab.tabId);
+      emit("close", workbenchTabId(tab));
     }
     return;
   }
@@ -85,7 +131,7 @@ function handleTabKeydown(event: KeyboardEvent): void {
     triggers[nextIndex]?.focus();
     const tab = props.tabs[nextIndex];
     if (tab !== undefined) {
-      emit("activate", tab.tabId);
+      emit("activate", workbenchTabId(tab));
     }
   }
 }
@@ -96,41 +142,65 @@ function handleTabKeydown(event: KeyboardEvent): void {
     <div
       class="request-tab-list"
       role="tablist"
-      :aria-label="t('request.openRequests')"
+      :aria-label="t('workbench.openTabs')"
       @keydown="handleTabKeydown"
     >
       <div
         v-for="tab in tabs"
-        :key="tab.tabId"
+        :key="workbenchTabId(tab)"
         class="request-tab"
-        :class="{ 'is-active': tab.tabId === activeTabId }"
+        :class="{ 'is-active': workbenchTabId(tab) === activeTabId }"
       >
         <button
-          :id="`request-tab-${tab.tabId}`"
+          :id="`request-tab-${workbenchTabId(tab)}`"
           class="request-tab-main"
           type="button"
           role="tab"
-          :aria-selected="tab.tabId === activeTabId"
+          :aria-selected="workbenchTabId(tab) === activeTabId"
           aria-controls="request-workbench"
-          :tabindex="tab.tabId === activeTabId ? 0 : -1"
-          @click="emit('activate', tab.tabId)"
+          :tabindex="workbenchTabId(tab) === activeTabId ? 0 : -1"
+          @click="emit('activate', workbenchTabId(tab))"
         >
           <span class="request-tab-label">
             <LoaderCircle
-              v-if="tab.execution?.state === 'running'"
+              v-if="isWorkbenchTabRunning(tab)"
               class="request-tab-spinner"
               :size="13"
               aria-hidden="true"
             />
-            <span v-else class="request-tab-method">{{
-              tab.draft.method
-            }}</span>
+            <Send
+              v-else-if="tab.kind === 'request'"
+              class="request-tab-kind-icon"
+              :size="14"
+              aria-hidden="true"
+            />
+            <PanelsTopLeft
+              v-else-if="tab.kind === 'workspace'"
+              class="request-tab-kind-icon"
+              :size="14"
+              aria-hidden="true"
+            />
+            <Folder
+              v-else-if="tab.kind === 'collection'"
+              class="request-tab-kind-icon"
+              :size="14"
+              aria-hidden="true"
+            />
+            <Layers3
+              v-else
+              class="request-tab-kind-icon"
+              :size="14"
+              aria-hidden="true"
+            />
+            <span v-if="tab.kind === 'request'" class="request-tab-method">
+              {{ tab.requestTab.draft.method }}
+            </span>
             <span class="request-tab-name">
-              {{ tab.draft.name.trim() || t("request.untitled") }}
+              {{ workbenchTabName(tab) }}
             </span>
           </span>
           <span
-            v-if="isRequestTabDirty(tab)"
+            v-if="isWorkbenchTabDirty(tab)"
             class="request-tab-dirty"
             :title="t('request.unsavedChanges')"
             :aria-label="t('request.unsavedChanges')"
@@ -140,11 +210,11 @@ function handleTabKeydown(event: KeyboardEvent): void {
           class="request-tab-close"
           size="compact"
           :label="
-            t('request.closeNamed', {
-              name: tab.draft.name || t('request.untitled'),
+            t('workbench.closeNamed', {
+              name: workbenchTabName(tab),
             })
           "
-          @click="emit('close', tab.tabId)"
+          @click="emit('close', workbenchTabId(tab))"
         >
           <X :size="14" aria-hidden="true" />
         </IconButton>
@@ -155,34 +225,72 @@ function handleTabKeydown(event: KeyboardEvent): void {
         class="request-tab-mobile-switcher"
         :model-value="activeTabId ?? ''"
         :options="mobileOptions"
-        :label="t('request.openRequests')"
-        :placeholder="t('request.noOpenRequests')"
+        :label="t('workbench.openTabs')"
+        :placeholder="t('workbench.noOpenTabs')"
         :disabled="tabs.length === 0"
         density="compact"
         mobile-presentation="popover"
         @update:model-value="emit('activate', $event)"
       >
+        <template #option="{ option }">
+          <span class="request-tab-label">
+            <component
+              :is="workbenchTabIcon(workbenchTabById(option.value))"
+              class="request-tab-kind-icon"
+              :size="14"
+              aria-hidden="true"
+            />
+            <span class="request-tab-name">{{ option.label }}</span>
+          </span>
+        </template>
         <template #selected>
           <span class="request-tab-label">
             <LoaderCircle
-              v-if="activeTab?.execution?.state === 'running'"
+              v-if="isWorkbenchTabRunning(activeTab)"
               class="request-tab-spinner"
               :size="14"
               aria-hidden="true"
             />
-            <span v-else-if="activeTab" class="request-tab-method">
-              {{ activeTab.draft.method }}
+            <Send
+              v-else-if="activeTab?.kind === 'request'"
+              class="request-tab-kind-icon"
+              :size="14"
+              aria-hidden="true"
+            />
+            <PanelsTopLeft
+              v-else-if="activeTab?.kind === 'workspace'"
+              class="request-tab-kind-icon"
+              :size="14"
+              aria-hidden="true"
+            />
+            <Folder
+              v-else-if="activeTab?.kind === 'collection'"
+              class="request-tab-kind-icon"
+              :size="14"
+              aria-hidden="true"
+            />
+            <Layers3
+              v-else-if="activeTab"
+              class="request-tab-kind-icon"
+              :size="14"
+              aria-hidden="true"
+            />
+            <span
+              v-if="activeTab?.kind === 'request'"
+              class="request-tab-method"
+            >
+              {{ activeTab.requestTab.draft.method }}
             </span>
             <span class="request-tab-name">
               {{
                 activeTab === null
-                  ? t("request.noOpenRequests")
-                  : activeTab.draft.name.trim() || t("request.untitled")
+                  ? t("workbench.noOpenTabs")
+                  : workbenchTabName(activeTab)
               }}
             </span>
           </span>
           <span
-            v-if="activeTab && isRequestTabDirty(activeTab)"
+            v-if="activeTab && isWorkbenchTabDirty(activeTab)"
             class="request-tab-dirty"
             :title="t('request.unsavedChanges')"
             :aria-label="t('request.unsavedChanges')"
@@ -193,7 +301,7 @@ function handleTabKeydown(event: KeyboardEvent): void {
         class="request-tab-mobile-close"
         :label="closeTabLabel(activeTab)"
         :disabled="activeTab === null"
-        @click="activeTab && emit('close', activeTab.tabId)"
+        @click="activeTab && emit('close', workbenchTabId(activeTab))"
       >
         <X :size="16" aria-hidden="true" />
       </IconButton>

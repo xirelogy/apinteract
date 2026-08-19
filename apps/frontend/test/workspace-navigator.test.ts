@@ -110,6 +110,31 @@ describe("WorkspaceNavigator selection", () => {
     expect(wrapper.emitted("selectWorkspace")).toEqual([[null]]);
     wrapper.unmount();
   });
+
+  it("opens a collection from its main row without hijacking row controls", async () => {
+    const collection: TreeNode = {
+      nodeId: firstNodeId,
+      kind: "collection",
+      name: "Examples",
+      position: 0,
+      orderRevision: 1,
+    };
+    const wrapper = mountNavigator({ rootNodes: [collection] });
+
+    await wrapper.get(`[data-tree-node-id="${firstNodeId}"]`).trigger("click");
+    expect(wrapper.emitted("editCollectionProperties")).toEqual([
+      [firstNodeId],
+    ]);
+    expect(wrapper.emitted("toggleCollection")).toBeUndefined();
+
+    await wrapper.get('button[aria-label="Expand Examples"]').trigger("click");
+    await wrapper
+      .get('button[aria-label="More actions for Examples"]')
+      .trigger("click");
+    expect(wrapper.emitted("editCollectionProperties")).toHaveLength(1);
+    expect(wrapper.emitted("toggleCollection")).toEqual([[firstNodeId]]);
+    wrapper.unmount();
+  });
 });
 
 describe("WorkspaceNavigator tree reordering", () => {
