@@ -99,6 +99,11 @@ interface VariableProfileCloneOptions {
   readonly userId: EntityId;
 }
 
+/** Restricts exceptional secret creation behavior to trusted internal workflows. */
+interface VariableProfileCreateOptions {
+  readonly allowUnconfiguredSecrets?: boolean;
+}
+
 /** Raised when a persisted variable changes kind or a profile revision is stale. */
 export class VariableProfileConflictError extends Error {}
 
@@ -126,6 +131,7 @@ export class VariableProfileStore {
     revision: number,
     userId: EntityId,
     writes: readonly VariableWrite[],
+    options: VariableProfileCreateOptions = {},
   ): Promise<SecretMutation[]> {
     const profileId = createEntityId();
     const result = await transaction
@@ -146,7 +152,12 @@ export class VariableProfileStore {
     if (result.numInsertedOrUpdatedRows !== 1n) {
       throw new VariableProfileConflictError("The variable profile changed");
     }
-    return this.#replaceRows(transaction, profileId, writes);
+    return this.#replaceRows(
+      transaction,
+      profileId,
+      writes,
+      options.allowUnconfiguredSecrets ?? false,
+    );
   }
 
   /** Clones one profile with fresh variable IDs without exposing secret payloads. */
@@ -243,6 +254,7 @@ export class VariableProfileStore {
       transaction,
       profile.profileId,
       writes,
+      false,
     );
     const result = await transaction
       .updateTable("variable_profiles")
@@ -394,6 +406,7 @@ export class VariableProfileStore {
     transaction: Transaction<DatabaseSchema>,
     profileId: EntityId,
     writes: readonly VariableWrite[],
+    allowUnconfiguredSecrets: boolean,
   ): Promise<SecretMutation[]> {
     const existingRows = await transaction
       .selectFrom("variables as variable")
@@ -443,7 +456,11 @@ export class VariableProfileStore {
         if (replacing && write.clearValue === true) {
           throw new Error("A secret cannot be replaced and cleared together");
         }
-        if (previous?.kind !== "secret" && !replacing) {
+        if (
+          previous?.kind !== "secret" &&
+          !replacing &&
+          !allowUnconfiguredSecrets
+        ) {
           throw new Error("A new secret requires a value");
         }
       }

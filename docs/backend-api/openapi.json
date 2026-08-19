@@ -702,10 +702,25 @@
             "$ref": "#/components/schemas/VariablePreviewCommand"
           },
           {
+            "$ref": "#/components/schemas/ImportProvidersCommand"
+          },
+          {
+            "$ref": "#/components/schemas/ImportPreviewCommand"
+          },
+          {
+            "$ref": "#/components/schemas/ImportApplyCommand"
+          },
+          {
             "$ref": "#/components/schemas/RequestCreateCommand"
           },
           {
             "$ref": "#/components/schemas/RequestGetCommand"
+          },
+          {
+            "$ref": "#/components/schemas/RequestExchangeListCommand"
+          },
+          {
+            "$ref": "#/components/schemas/RequestExchangeGetCommand"
           },
           {
             "$ref": "#/components/schemas/RequestRevisionListCommand"
@@ -1605,6 +1620,347 @@
           }
         ]
       },
+      "ImportProviderId": {
+        "type": "string",
+        "enum": ["openapi-json", "har"]
+      },
+      "ImportProviderManifest": {
+        "description": "Declarative capabilities for one installed source adapter.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "version",
+          "label",
+          "acceptedExtensions",
+          "acceptedMediaTypes",
+          "inputKinds",
+          "capabilities"
+        ],
+        "properties": {
+          "id": { "$ref": "#/components/schemas/ImportProviderId" },
+          "version": { "type": "string" },
+          "label": { "type": "string" },
+          "acceptedExtensions": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "acceptedMediaTypes": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "inputKinds": {
+            "type": "array",
+            "items": { "type": "string", "const": "file" }
+          },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "multipleRequests",
+              "hierarchy",
+              "attachments",
+              "capturedResponses",
+              "responseExamples",
+              "variables"
+            ],
+            "properties": {
+              "multipleRequests": { "type": "boolean" },
+              "hierarchy": { "type": "boolean" },
+              "attachments": { "type": "boolean" },
+              "capturedResponses": { "type": "boolean" },
+              "responseExamples": { "type": "boolean" },
+              "variables": { "type": "boolean" }
+            }
+          }
+        }
+      },
+      "ImportProvidersView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["providers"],
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ImportProviderManifest" }
+          }
+        }
+      },
+      "ImportDiagnostic": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "severity", "message"],
+        "properties": {
+          "code": { "type": "string" },
+          "severity": {
+            "type": "string",
+            "enum": ["info", "warning", "error"]
+          },
+          "message": { "type": "string" },
+          "itemId": { "type": "string" },
+          "sourceLocation": { "type": "string" }
+        }
+      },
+      "CapturedExchangeView": {
+        "description": "An imported HTTP response capture that was not executed by APInteract.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "status",
+          "statusText",
+          "headers",
+          "contentType",
+          "body",
+          "bodyEncoding",
+          "bodyComplete",
+          "bodyBytes",
+          "recordedAt"
+        ],
+        "properties": {
+          "capturedExchangeId": { "$ref": "#/components/schemas/UuidV7" },
+          "source": { "type": "string", "const": "har" },
+          "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+          "statusText": { "type": "string", "maxLength": 1024 },
+          "headers": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/HeaderField" }
+          },
+          "contentType": {
+            "oneOf": [
+              { "type": "string", "maxLength": 512 },
+              { "type": "null" }
+            ]
+          },
+          "body": { "type": "string", "maxLength": 262144 },
+          "bodyEncoding": { "type": "string", "enum": ["text", "base64"] },
+          "bodyComplete": { "type": "boolean" },
+          "bodyBytes": { "type": "integer", "minimum": 0 },
+          "recordedAt": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/UtcDateTime" },
+              { "type": "null" }
+            ]
+          },
+          "importedAt": { "$ref": "#/components/schemas/UtcDateTime" }
+        }
+      },
+      "ImportedRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "itemId",
+          "sourceLocation",
+          "name",
+          "method",
+          "targetMode",
+          "targetUrl",
+          "query",
+          "headers",
+          "requestBody",
+          "body",
+          "preRequestScript",
+          "postResponseScript",
+          "variables"
+        ],
+        "properties": {
+          "itemId": { "type": "string" },
+          "sourceLocation": { "type": "string" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "method": { "$ref": "#/components/schemas/HttpMethod" },
+          "targetMode": {
+            "type": "string",
+            "enum": ["absolute", "composed"]
+          },
+          "targetUrl": { "type": "string", "maxLength": 8192 },
+          "query": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RequestField" }
+          },
+          "headers": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RequestField" }
+          },
+          "requestBody": {
+            "$ref": "#/components/schemas/RequestBodyDefinition"
+          },
+          "body": { "type": "string", "maxLength": 786432 },
+          "preRequestScript": { "type": "string", "maxLength": 65536 },
+          "postResponseScript": { "type": "string", "maxLength": 65536 },
+          "variables": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/VariableWrite" }
+          },
+          "capturedExchange": {
+            "$ref": "#/components/schemas/CapturedExchangeView"
+          }
+        }
+      },
+      "ImportPlan": {
+        "description": "A mutation-free, source-neutral preview produced by one provider.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "providerId",
+          "providerVersion",
+          "sourceName",
+          "sourceFingerprint",
+          "suggestedName",
+          "pathPrefix",
+          "requests",
+          "diagnostics"
+        ],
+        "properties": {
+          "schemaVersion": { "type": "integer", "const": 1 },
+          "providerId": { "$ref": "#/components/schemas/ImportProviderId" },
+          "providerVersion": { "type": "string" },
+          "sourceName": { "type": "string" },
+          "sourceFingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "suggestedName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "pathPrefix": { "type": "string", "maxLength": 8192 },
+          "requests": {
+            "type": "array",
+            "maxItems": 200,
+            "items": { "$ref": "#/components/schemas/ImportedRequest" }
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ImportDiagnostic" }
+          }
+        }
+      },
+      "ImportApplyResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["collectionId", "requests"],
+        "properties": {
+          "collectionId": { "$ref": "#/components/schemas/CollectionId" },
+          "requests": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RequestView" }
+          }
+        }
+      },
+      "ImportProvidersCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "import.providers" },
+              "payload": { "type": "object", "additionalProperties": false }
+            }
+          }
+        ]
+      },
+      "ImportPreviewCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "import.preview" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["providerId", "sourceName", "sourceText"],
+                "properties": {
+                  "providerId": {
+                    "oneOf": [
+                      { "$ref": "#/components/schemas/ImportProviderId" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "sourceName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "sourceText": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 524288
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ImportApplyCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "import.apply" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "providerId",
+                  "sourceName",
+                  "sourceText",
+                  "workspaceId",
+                  "parentCollectionId",
+                  "collectionName",
+                  "selectedItemIds",
+                  "expectedSourceFingerprint"
+                ],
+                "properties": {
+                  "providerId": {
+                    "oneOf": [
+                      { "$ref": "#/components/schemas/ImportProviderId" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "sourceName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "sourceText": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 524288
+                  },
+                  "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+                  "parentCollectionId": {
+                    "oneOf": [
+                      { "$ref": "#/components/schemas/CollectionId" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "collectionName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "selectedItemIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "uniqueItems": true,
+                    "items": { "type": "string" }
+                  },
+                  "expectedSourceFingerprint": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
       "RequestCreateCommand": {
         "allOf": [
           {
@@ -1716,6 +2072,51 @@
                 "properties": {
                   "requestId": {
                     "$ref": "#/components/schemas/RequestId"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RequestExchangeListCommand": {
+        "description": "Lists persisted executions and imported captures owned by one request.",
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "request.exchange.list" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requestId"],
+                "properties": {
+                  "requestId": { "$ref": "#/components/schemas/RequestId" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RequestExchangeGetCommand": {
+        "description": "Loads one selected immutable request-response exchange.",
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "request.exchange.get" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requestId", "exchangeId", "kind"],
+                "properties": {
+                  "requestId": { "$ref": "#/components/schemas/RequestId" },
+                  "exchangeId": { "$ref": "#/components/schemas/UuidV7" },
+                  "kind": {
+                    "type": "string",
+                    "enum": ["execution", "capture"]
                   }
                 }
               }
@@ -2090,6 +2491,11 @@
           { "$ref": "#/components/schemas/EnvironmentView" },
           { "$ref": "#/components/schemas/VariableProfileView" },
           { "$ref": "#/components/schemas/VariablePreviewResult" },
+          { "$ref": "#/components/schemas/ImportProvidersView" },
+          { "$ref": "#/components/schemas/ImportPlan" },
+          { "$ref": "#/components/schemas/ImportApplyResult" },
+          { "$ref": "#/components/schemas/RequestExchangeListView" },
+          { "$ref": "#/components/schemas/RequestExchangeView" },
           { "type": "object", "additionalProperties": true }
         ]
       },
@@ -2885,6 +3291,9 @@
             "type": "string",
             "maxLength": 65536
           },
+          "capturedExchange": {
+            "$ref": "#/components/schemas/CapturedExchangeView"
+          },
           "draftRevision": {
             "type": "integer",
             "minimum": 0
@@ -2929,6 +3338,79 @@
             }
           }
         ]
+      },
+      "RequestExchangeSummary": {
+        "description": "Compact metadata for one persisted request-response record.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exchangeId",
+          "requestId",
+          "requestRevisionId",
+          "kind",
+          "source",
+          "state",
+          "bodyAvailability",
+          "occurredAt"
+        ],
+        "properties": {
+          "exchangeId": { "$ref": "#/components/schemas/UuidV7" },
+          "requestId": { "$ref": "#/components/schemas/RequestId" },
+          "requestRevisionId": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/UuidV7" },
+              { "type": "null" }
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["execution", "capture"]
+          },
+          "source": {
+            "type": "string",
+            "enum": ["apinteract", "har"]
+          },
+          "state": {
+            "type": "string",
+            "enum": ["created", "running", "completed", "failed"]
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          },
+          "bodyAvailability": {
+            "type": "string",
+            "enum": ["complete", "truncated", "unavailable"]
+          },
+          "occurredAt": { "$ref": "#/components/schemas/UtcDateTime" }
+        }
+      },
+      "RequestExchangeListView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["exchanges"],
+        "properties": {
+          "exchanges": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/RequestExchangeSummary"
+            }
+          }
+        }
+      },
+      "RequestExchangeView": {
+        "description": "One selected exchange projected for immutable response display.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["summary", "execution"],
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/RequestExchangeSummary"
+          },
+          "execution": { "$ref": "#/components/schemas/ExecutionView" }
+        }
       },
       "ExecutionView": {
         "type": "object",

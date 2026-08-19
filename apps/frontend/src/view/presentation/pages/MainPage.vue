@@ -8,6 +8,7 @@ import { useApplicationController } from "@/app/dependencies";
 import { useApplicationStore } from "@/control/state/application-store";
 import type {
   EnvironmentVariableWrite,
+  ExecutionView,
   RequestAttachment,
   RequestField,
   RequestView,
@@ -22,6 +23,7 @@ import AppHeader from "@/view/presentation/layout/AppHeader.vue";
 import DiscardChangesDialog from "@/view/presentation/features/DiscardChangesDialog.vue";
 import CollectionPropertiesDialog from "@/view/presentation/features/CollectionPropertiesDialog.vue";
 import EnvironmentManager from "@/view/presentation/features/EnvironmentManager.vue";
+import ImportDialog from "@/view/presentation/features/ImportDialog.vue";
 import RequestDuplicateDialog from "@/view/presentation/features/RequestDuplicateDialog.vue";
 import RequestEditor from "@/view/presentation/features/RequestEditor.vue";
 import RequestTabs from "@/view/presentation/features/RequestTabs.vue";
@@ -39,6 +41,7 @@ const saveDialogTab = ref<RequestTab | null>(null);
 const discardDialogTab = ref<RequestTab | null>(null);
 const collectionPropertiesOpen = ref(false);
 const workspacePropertiesOpen = ref(false);
+const importDialogOpen = ref(false);
 const requestDuplicateTarget = ref<{
   readonly requestId: string;
   readonly name: string;
@@ -80,6 +83,57 @@ const activeTab = computed(
     requestTabs.value.find((tab) => tab.tabId === activeRequestTabId.value) ??
     null,
 );
+const displayedExecution = computed<ExecutionView | null>(() => {
+  const tab = activeTab.value;
+  if (
+    tab?.execution !== null &&
+    tab?.execution !== undefined &&
+    (tab.request === null ||
+      tab.selectedExchangeId === tab.execution.executionId)
+  ) {
+    return tab.execution;
+  }
+  if (tab?.selectedExchange !== null && tab?.selectedExchange !== undefined) {
+    return tab.selectedExchange.execution;
+  }
+  if (tab?.viewingRevision !== null && tab?.viewingRevision !== undefined) {
+    return null;
+  }
+  const capture = tab?.capturedExchange;
+  if (capture === null || capture === undefined) return null;
+  const timestamp =
+    capture.recordedAt ?? capture.importedAt ?? "1970-01-01T00:00:00.000Z";
+  return {
+    executionId:
+      capture.capturedExchangeId ?? tab?.tabId ?? "captured-response",
+    state: "completed",
+    status: capture.status,
+    headers: capture.headers,
+    bodyComplete: capture.bodyComplete,
+    bodyBytes: capture.bodyBytes,
+    ...(capture.body !== "" || capture.bodyBytes === 0
+      ? { bodyPreview: capture.body }
+      : {}),
+    createdAt: timestamp,
+    completedAt: timestamp,
+    scriptLogs: [],
+    scriptTests: [],
+  };
+});
+const displayingCapturedResponse = computed(() => {
+  const tab = activeTab.value;
+  if (tab === null) return false;
+  const selectedSummary = (tab.exchangeSummaries ?? []).find(
+    (summary) => summary.exchangeId === tab.selectedExchangeId,
+  );
+  if (selectedSummary !== undefined) return selectedSummary.kind === "capture";
+  return (
+    tab.execution === null &&
+    tab.capturedExchange !== null &&
+    tab.capturedExchange !== undefined &&
+    tab.viewingRevision === null
+  );
+});
 const visibleRequestTabs = computed(() =>
   requestTabs.value.filter(
     (tab) => tab.workspaceId === selectedWorkspaceId.value,
@@ -177,6 +231,12 @@ function toggleNavigator(): void {
 /** Closes the mobile workspace navigator drawer. */
 function closeNavigator(): void {
   navigatorOpen.value = false;
+}
+
+/** Opens the source-neutral import workflow for the current workspace context. */
+function openImportDialog(): void {
+  importDialogOpen.value = true;
+  closeNavigator();
 }
 
 /** Constrains the desktop navigator while preserving useful request width. */
@@ -345,6 +405,13 @@ async function confirmRequestDeletion(): Promise<void> {
 function selectActiveRevision(revisionId: string | null): void {
   if (activeTab.value !== null) {
     void controller.selectRequestRevision(activeTab.value.tabId, revisionId);
+  }
+}
+
+/** Displays one persisted request-response exchange in the active response pane. */
+function selectActiveExchange(exchangeId: string): void {
+  if (activeTab.value !== null) {
+    void controller.selectRequestExchange(activeTab.value.tabId, exchangeId);
   }
 }
 
@@ -678,6 +745,7 @@ function discardRequestTab(): void {
         @create-request="createRequestInCollection"
         @edit-collection-properties="editCollectionProperties"
         @edit-workspace-properties="editWorkspaceProperties"
+        @import="openImportDialog"
         @select-request="selectRequest"
         @duplicate-request="duplicateRequest"
         @delete-request="requestRequestDeletion"
@@ -743,7 +811,10 @@ function discardRequestTab(): void {
           <RequestEditor
             :request="activeTab?.request ?? null"
             :draft="activeTab?.draft ?? null"
-            :execution="activeTab?.execution ?? null"
+            :execution="displayedExecution"
+            :captured-response="displayingCapturedResponse"
+            :exchange-summaries="activeTab?.exchangeSummaries ?? []"
+            :selected-exchange-id="activeTab?.selectedExchangeId ?? null"
             :tab-id="activeTab?.tabId ?? null"
             :temporary="activeTab?.request === null"
             :inherited-target="displayedInheritedTarget"
@@ -771,6 +842,7 @@ function discardRequestTab(): void {
             @name-revision="nameActiveRevision"
             @restore-revision="restoreActiveRevision"
             @execute-revision="executeActiveRevision"
+            @select-exchange="selectActiveExchange"
             @download="downloadExecutionBody"
           />
         </template>
@@ -786,6 +858,23 @@ function discardRequestTab(): void {
       @close="saveDialogTab = null"
       @expand-collection="controller.loadCollectionChildren($event)"
       @save="saveTemporaryRequest"
+    />
+    <ImportDialog
+      v-if="importDialogOpen && selectedWorkspaceId !== null"
+      :selected-collection-id="selectedCollectionId"
+      :selected-collection-name="selectedCollection?.name ?? null"
+      :busy="busy"
+      :list-providers="() => controller.listImportProviders()"
+      :preview-import="
+        (providerId, sourceName, sourceText) =>
+          controller.previewImport(providerId, sourceName, sourceText)
+      "
+      :apply-import="(options) => controller.applyImport(options)"
+      :open-temporary="
+        (plan, request) =>
+          controller.createImportedTemporaryRequest(plan, request)
+      "
+      @close="importDialogOpen = false"
     />
     <DiscardChangesDialog
       v-if="discardDialogTab"

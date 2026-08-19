@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   BrowserRequestSessionStorage,
@@ -11,6 +11,10 @@ const userId = "019facab-1eee-765f-bd9f-ac2449151da1";
 
 beforeEach(() => {
   window.localStorage.clear();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("BrowserRequestSessionStorage", () => {
@@ -76,6 +80,80 @@ describe("BrowserRequestSessionStorage", () => {
     await expect(
       new BrowserRequestSessionStorage().load(userId),
     ).resolves.toBeNull();
+  });
+
+  it("forgets removed tabs even when IndexedDB cleanup fails", async () => {
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151db2";
+    const tabId = "019facab-1eee-765f-bd9f-ac2449151db3";
+    const snapshot = {
+      selectedWorkspaceId: workspaceId,
+      activeRequestTabId: tabId,
+      tabs: [
+        {
+          tabId,
+          workspaceId,
+          requestId: null,
+          baseDraftRevision: null,
+          baseVariableRevision: null,
+          pendingParentCollectionId: null,
+          draft: {
+            name: "Temporary request",
+            method: "GET" as const,
+            targetMode: "absolute" as const,
+            targetUrl: "",
+            query: [],
+            headers: [],
+            requestBody: { kind: "none" as const },
+            body: "",
+            preRequestScript: "",
+            postResponseScript: "",
+          },
+          draftDirty: true,
+          variableDraft: [],
+          variableDirty: false,
+          omittedSecretValues: false,
+          recoveryWarnings: [],
+        },
+      ],
+    };
+    await new BrowserRequestSessionStorage().save(userId, snapshot);
+    const database = {
+      close: vi.fn(),
+      transaction: vi.fn(() => {
+        throw new Error("IndexedDB cleanup failed");
+      }),
+    } as unknown as IDBDatabase;
+    const openRequest = {
+      result: database,
+      onsuccess: null,
+      onerror: null,
+      onblocked: null,
+      onupgradeneeded: null,
+    } as unknown as IDBOpenDBRequest;
+    vi.stubGlobal("indexedDB", {
+      open: vi.fn(() => {
+        queueMicrotask(() => {
+          openRequest.onsuccess?.(new Event("success"));
+        });
+        return openRequest;
+      }),
+    });
+
+    await expect(
+      new BrowserRequestSessionStorage().save(userId, {
+        selectedWorkspaceId: workspaceId,
+        activeRequestTabId: null,
+        tabs: [],
+      }),
+    ).rejects.toThrow("IndexedDB cleanup failed");
+
+    expect(
+      JSON.parse(
+        window.localStorage.getItem(
+          `apinteract.request-session.v1:${userId}`,
+        ) ?? "null",
+      ),
+    ).toMatchObject({ activeRequestTabId: null, tabs: [] });
   });
 });
 

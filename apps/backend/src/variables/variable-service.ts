@@ -112,6 +112,12 @@ interface RequestProfileCloneOptions {
   readonly targetRequestName: string;
 }
 
+/** Controls trusted profile creation behavior without widening public writes. */
+interface VariableUpdateOptions {
+  readonly sessionId: EntityId | null;
+  readonly allowUnconfiguredSecrets: boolean;
+}
+
 /** Owns persisted workspace, collection, and request variable profiles. */
 export class VariableService {
   readonly #database: Kysely<DatabaseSchema>;
@@ -219,6 +225,45 @@ export class VariableService {
     variables: readonly VariableWrite[],
     sessionId: EntityId | null = null,
   ): Promise<VariableProfileView> {
+    return this.#updateInTransaction(
+      transaction,
+      userId,
+      scopeKind,
+      scopeId,
+      expectedRevision,
+      variables,
+      { sessionId, allowUnconfiguredSecrets: false },
+    );
+  }
+
+  /** Creates an imported request profile that may contain unset credential secrets. */
+  async createImportedRequestProfile(
+    transaction: Transaction<DatabaseSchema>,
+    userId: EntityId,
+    requestId: EntityId,
+    variables: readonly VariableWrite[],
+  ): Promise<void> {
+    await this.#updateInTransaction(
+      transaction,
+      userId,
+      "request",
+      requestId,
+      0,
+      variables,
+      { sessionId: null, allowUnconfiguredSecrets: true },
+    );
+  }
+
+  /** Applies one authorized profile update with explicitly bounded creation policy. */
+  async #updateInTransaction(
+    transaction: Transaction<DatabaseSchema>,
+    userId: EntityId,
+    scopeKind: EditableVariableScopeKind,
+    scopeId: EntityId,
+    expectedRevision: number,
+    variables: readonly VariableWrite[],
+    options: VariableUpdateOptions,
+  ): Promise<VariableProfileView> {
     const identity = await this.#scopeIdentity(transaction, scopeKind, scopeId);
     await this.#workspaces.requireCanEdit(
       transaction,
@@ -245,6 +290,7 @@ export class VariableService {
         revision,
         userId,
         variables,
+        { allowUnconfiguredSecrets: options.allowUnconfiguredSecrets },
       );
     } else {
       ({ revision, mutations } = await this.#profiles.replace(
@@ -263,7 +309,7 @@ export class VariableService {
       data: { scopeKind, scopeId, revision },
     });
     await this.#recordSecretMutations(transaction, userId, identity, mutations);
-    return this.#view(transaction, identity, sessionId);
+    return this.#view(transaction, identity, options.sessionId);
   }
 
   /** Clones a request profile inside an already authorized caller transaction. */
@@ -815,7 +861,7 @@ function variableEvidence(
   };
 }
 
-/** Validates and materializes one request-local draft without persisting secrets. */
+/** Materializes one request-local draft while retaining unconfigured secrets. */
 function resolveTemporaryVariableWrites(
   writes: readonly VariableWrite[],
 ): readonly ResolvedVariable[] {
@@ -835,12 +881,6 @@ function resolveTemporaryVariableWrites(
     if (write.kind === "alias") {
       validateVariableName(write.target);
     }
-    if (
-      write.kind === "secret" &&
-      (write.value === undefined || write.clearValue === true)
-    ) {
-      throw new Error("A temporary secret requires a value");
-    }
     return {
       variableId,
       name: write.name,
@@ -848,7 +888,7 @@ function resolveTemporaryVariableWrites(
       value:
         write.kind === "value"
           ? write.value
-          : write.kind === "secret"
+          : write.kind === "secret" && write.clearValue !== true
             ? (write.value ?? null)
             : null,
       aliasTarget: write.kind === "alias" ? write.target : null,

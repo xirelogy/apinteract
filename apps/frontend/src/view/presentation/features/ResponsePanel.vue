@@ -3,8 +3,14 @@ import { computed, ref, watch } from "vue";
 import { Download, LoaderCircle } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
-import type { ExecutionView } from "@/model/contracts/backend";
+import type {
+  ExecutionView,
+  RequestExchangeSummary,
+} from "@/model/contracts/backend";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
+import SelectMenu, {
+  type SelectMenuOption,
+} from "@/view/presentation/controls/SelectMenu.vue";
 import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
 import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
 import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
@@ -12,11 +18,15 @@ import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 
 const props = defineProps<{
   execution: ExecutionView | null;
+  capturedResponse?: boolean;
+  exchangeSummaries?: readonly RequestExchangeSummary[];
+  selectedExchangeId?: string | null;
 }>();
 const emit = defineEmits<{
   download: [executionId: string];
+  selectExchange: [exchangeId: string];
 }>();
-const { t } = useI18n();
+const { locale, t } = useI18n();
 
 type ResponseDetailTab = "error" | "request" | "headers" | "raw" | "scripts";
 const selectedTab = ref<ResponseDetailTab>("raw");
@@ -157,6 +167,32 @@ const showsStandaloneError = computed(
   () => props.execution?.error !== undefined && !hasTabbedError.value,
 );
 
+/** Formats compact history options without obscuring kind or provenance. */
+const exchangeOptions = computed<readonly SelectMenuOption[]>(() =>
+  (props.exchangeSummaries ?? []).map((summary) => ({
+    value: summary.exchangeId,
+    label: [
+      exchangeStatusLabel(summary),
+      t(`response.exchange.kind.${summary.kind}`),
+      t(`response.exchange.source.${summary.source}`),
+      new Intl.DateTimeFormat(locale.value, {
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date(summary.occurredAt)),
+    ].join(" · "),
+  })),
+);
+
+/** Returns the response status or lifecycle label used by history options. */
+function exchangeStatusLabel(summary: RequestExchangeSummary): string {
+  if (summary.status !== undefined) return String(summary.status);
+  return summary.state === "failed"
+    ? t("response.exchange.failed")
+    : summary.state === "completed"
+      ? t("response.exchange.completed")
+      : t("response.inProgress");
+}
+
 watch(
   () => [props.execution?.executionId, props.execution?.error !== undefined],
   () => {
@@ -223,7 +259,19 @@ function formatScriptLocation(error: ScriptError): string {
   <section class="response-panel" aria-labelledby="response-heading">
     <div class="response-heading-row">
       <h2 id="response-heading">{{ t("response.heading") }}</h2>
+      <SelectMenu
+        v-if="exchangeOptions.length > 0"
+        class="response-exchange-select"
+        :model-value="selectedExchangeId ?? ''"
+        :options="exchangeOptions"
+        :label="t('response.exchange.label')"
+        density="compact"
+        @update:model-value="emit('selectExchange', $event)"
+      />
       <div v-if="execution" class="response-metadata">
+        <span v-if="capturedResponse" class="captured-response-badge">
+          {{ t("response.captured") }}
+        </span>
         <span
           v-if="execution.state === 'running'"
           class="execution-progress"
@@ -411,7 +459,9 @@ function formatScriptLocation(error: ScriptError): string {
           execution.bodyPreview ??
           (execution.state === "running"
             ? t("response.waitingBody")
-            : t("response.binaryBody"))
+            : capturedResponse
+              ? t("response.capturedBodyUnavailable")
+              : t("response.binaryBody"))
         }}</pre>
       </TabsPanel>
       <TabsPanel

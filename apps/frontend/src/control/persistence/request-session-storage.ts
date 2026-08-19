@@ -132,11 +132,15 @@ export class BrowserRequestSessionStorage implements RequestSessionStorage {
     };
   }
 
-  /** Commits draft payloads before publishing their small ordered manifest. */
+  /** Commits removals before cleanup and additions after their payloads exist. */
   async save(
     userId: string,
     snapshot: LocalRequestSessionSnapshot,
   ): Promise<void> {
+    const removalSnapshot = manifestRemovalSnapshot(userId, snapshot);
+    if (removalSnapshot !== null) {
+      writeManifest(userId, removalSnapshot);
+    }
     const database = await this.#database();
     if (database !== null) {
       await writeTabRecords(database, userId, snapshot.tabs);
@@ -160,6 +164,35 @@ export class BrowserRequestSessionStorage implements RequestSessionStorage {
     }
     return this.#databasePromise;
   }
+}
+
+/**
+ * Builds a manifest that immediately forgets removed tabs without publishing
+ * newly added tabs before their IndexedDB payloads have committed.
+ */
+function manifestRemovalSnapshot(
+  userId: string,
+  snapshot: LocalRequestSessionSnapshot,
+): LocalRequestSessionSnapshot | null {
+  const previousManifest = readManifest(userId);
+  if (previousManifest === null) return null;
+  const retainedTabIds = new Set(snapshot.tabs.map((tab) => tab.tabId));
+  if (!previousManifest.tabs.some((tab) => !retainedTabIds.has(tab.tabId))) {
+    return null;
+  }
+  const previousTabIds = new Set(previousManifest.tabs.map((tab) => tab.tabId));
+  const retainedTabs = snapshot.tabs.filter((tab) =>
+    previousTabIds.has(tab.tabId),
+  );
+  return {
+    selectedWorkspaceId: snapshot.selectedWorkspaceId,
+    activeRequestTabId: retainedTabs.some(
+      (tab) => tab.tabId === snapshot.activeRequestTabId,
+    )
+      ? snapshot.activeRequestTabId
+      : null,
+    tabs: retainedTabs,
+  };
 }
 
 /** Returns variable writes safe for local persistence and whether values were omitted. */

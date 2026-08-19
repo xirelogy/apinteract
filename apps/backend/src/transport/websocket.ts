@@ -13,6 +13,10 @@ import {
 } from "../environments/environment-service.js";
 import { VariableResolutionError } from "../environments/variable-resolver.js";
 import { createEntityId } from "../foundation/id.js";
+import {
+  ImportSourceError,
+  type ImportProviderId,
+} from "../imports/import-types.js";
 import type { RequestAttachmentView } from "../requests/request-attachment-service.js";
 import {
   CollectionProfileConflictError,
@@ -353,6 +357,51 @@ async function dispatch(
           command.payload.temporaryVariables,
         ),
       );
+    case "import.providers":
+      return { providers: application.imports.providers() };
+    case "import.preview":
+      return application.imports.preview(
+        optionalImportProviderId(command.payload.providerId),
+        {
+          name: requireString(command.payload.sourceName, "sourceName"),
+          text: requireStringAllowEmpty(
+            command.payload.sourceText,
+            "sourceText",
+          ),
+        },
+      );
+    case "import.apply":
+      return application.imports.apply(
+        userId,
+        optionalImportProviderId(command.payload.providerId),
+        {
+          name: requireString(command.payload.sourceName, "sourceName"),
+          text: requireStringAllowEmpty(
+            command.payload.sourceText,
+            "sourceText",
+          ),
+        },
+        {
+          workspaceId: requireString(
+            command.payload.workspaceId,
+            "workspaceId",
+          ),
+          parentCollectionId: optionalString(
+            command.payload.parentCollectionId,
+          ),
+          collectionName: requireString(
+            command.payload.collectionName,
+            "collectionName",
+          ),
+          selectedItemIds: requireImportItemIds(
+            command.payload.selectedItemIds,
+          ),
+          expectedSourceFingerprint: requireString(
+            command.payload.expectedSourceFingerprint,
+            "expectedSourceFingerprint",
+          ),
+        },
+      );
     case "request.create":
       return application.requests.createRequest(
         userId,
@@ -382,6 +431,20 @@ async function dispatch(
       return application.requests.get(
         userId,
         requireString(command.payload.requestId, "requestId"),
+      );
+    case "request.exchange.list":
+      return {
+        exchanges: await application.requestExchanges.list(
+          userId,
+          requireString(command.payload.requestId, "requestId"),
+        ),
+      };
+    case "request.exchange.get":
+      return application.requestExchanges.get(
+        userId,
+        requireString(command.payload.requestId, "requestId"),
+        requireString(command.payload.exchangeId, "exchangeId"),
+        requireRequestExchangeKind(command.payload.kind),
       );
     case "request.revision.list":
       return {
@@ -539,6 +602,9 @@ function mapCommandError(cause: unknown): CommandError {
   if (cause instanceof VariableResolutionError) {
     return new CommandError("variable_resolution_failed", cause.message);
   }
+  if (cause instanceof ImportSourceError) {
+    return new CommandError(cause.code, cause.message);
+  }
   return new CommandError(
     "invalid_command",
     cause instanceof Error
@@ -658,6 +724,17 @@ function requireInteger(value: unknown, name: string): number {
   return value as number;
 }
 
+/** Requires one supported request-exchange storage kind. */
+function requireRequestExchangeKind(value: unknown): "execution" | "capture" {
+  if (value !== "execution" && value !== "capture") {
+    throw new CommandError(
+      "validation_failed",
+      "kind must be execution or capture.",
+    );
+  }
+  return value;
+}
+
 /** Validates a bounded complete sibling order supplied by the tree client. */
 function requireNodeIds(value: unknown): string[] {
   if (!Array.isArray(value) || value.length > 2000) {
@@ -694,6 +771,34 @@ function requireMethod(value: unknown): HttpMethod {
     return value;
   }
   throw new CommandError("validation_failed", "method is not supported.");
+}
+
+/** Reads an explicit provider or null for deterministic automatic detection. */
+function optionalImportProviderId(value: unknown): ImportProviderId | null {
+  if (value === null) return null;
+  if (value === "openapi-json" || value === "har") return value;
+  throw new CommandError(
+    "validation_failed",
+    "providerId must be openapi-json, har, or null.",
+  );
+}
+
+/** Validates one bounded, duplicate-free selection from a preview plan. */
+function requireImportItemIds(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 200) {
+    throw new CommandError(
+      "validation_failed",
+      "selectedItemIds must contain between 1 and 200 items.",
+    );
+  }
+  const itemIds = value.map((itemId) => requireString(itemId, "itemId"));
+  if (new Set(itemIds).size !== itemIds.length) {
+    throw new CommandError(
+      "validation_failed",
+      "selectedItemIds must not contain duplicates.",
+    );
+  }
+  return itemIds;
 }
 
 /** Requires an explicit saved-request target interpretation. */

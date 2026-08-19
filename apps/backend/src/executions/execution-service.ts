@@ -868,7 +868,7 @@ function toExecutionError(cause: unknown): {
 }
 
 /** Decodes a bounded preview only when headers identify valid UTF-8 text. */
-function safeTextPreview(
+export function safeTextPreview(
   headers: readonly { readonly name: string; readonly value: string }[],
   bytes: Buffer,
 ): string | undefined {

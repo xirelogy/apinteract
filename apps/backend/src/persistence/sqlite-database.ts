@@ -21,6 +21,7 @@ const COMPOSED_TARGETS_MIGRATION = "0011_composed_targets";
 const ENVIRONMENT_COMPOSITION_MIGRATION = "0012_environment_composition";
 const REQUEST_BODY_DEFINITION_MIGRATION = "0013_request_body_definition";
 const REQUEST_ATTACHMENTS_MIGRATION = "0014_request_attachments";
+const CAPTURED_EXCHANGES_MIGRATION = "0015_captured_exchanges";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -183,6 +184,26 @@ CREATE TABLE request_attachments (
 ) STRICT;
 CREATE INDEX request_attachments_workspace_created
   ON request_attachments(workspace_id, created_at, id);
+
+CREATE TABLE captured_exchanges (
+  id BLOB PRIMARY KEY CHECK(length(id) = 16),
+  workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  request_id BLOB NOT NULL REFERENCES request_drafts(request_id) ON DELETE CASCADE,
+  request_revision_id BLOB NOT NULL REFERENCES request_revisions(id) ON DELETE CASCADE,
+  source_provider_id TEXT NOT NULL CHECK(source_provider_id = 'har'),
+  status INTEGER NOT NULL CHECK(status BETWEEN 100 AND 599),
+  status_text TEXT NOT NULL,
+  headers_json TEXT NOT NULL,
+  content_type TEXT,
+  body_text TEXT NOT NULL,
+  body_encoding TEXT NOT NULL CHECK(body_encoding IN ('text', 'base64')),
+  body_complete INTEGER NOT NULL CHECK(body_complete IN (0, 1)),
+  body_bytes INTEGER NOT NULL CHECK(body_bytes >= 0),
+  recorded_at INTEGER,
+  imported_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX captured_exchanges_request_imported
+  ON captured_exchanges(request_id, imported_at DESC, id DESC);
 
 CREATE TABLE audit_outbox (
   id BLOB PRIMARY KEY CHECK(length(id) = 16),
@@ -387,6 +408,16 @@ export class SqliteDatabase {
     ) {
       this.#migrateRequestAttachments();
     }
+
+    const capturedExchangesApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(CAPTURED_EXCHANGES_MIGRATION);
+    if (
+      capturedExchangesApplied === undefined ||
+      !this.#tableExists("captured_exchanges")
+    ) {
+      this.#migrateCapturedExchanges();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -429,9 +460,11 @@ export class SqliteDatabase {
         ENVIRONMENT_COMPOSITION_MIGRATION,
         REQUEST_BODY_DEFINITION_MIGRATION,
         REQUEST_ATTACHMENTS_MIGRATION,
+        CAPTURED_EXCHANGES_MIGRATION,
       ].some((identifier) => !identifiers.has(identifier)) ||
       !this.#columnExists("request_drafts", "body_json") ||
-      !this.#tableExists("request_attachments")
+      !this.#tableExists("request_attachments") ||
+      !this.#tableExists("captured_exchanges")
     );
   }
 
@@ -959,6 +992,41 @@ export class SqliteDatabase {
         .get(REQUEST_ATTACHMENTS_MIGRATION);
       if (applied === undefined) {
         this.#recordMigration(REQUEST_ATTACHMENTS_MIGRATION);
+      }
+    })();
+  }
+
+  /** Adds immutable HAR response captures without conflating them with executions. */
+  #migrateCapturedExchanges(): void {
+    this.#driver.transaction(() => {
+      if (!this.#tableExists("captured_exchanges")) {
+        this.#driver.exec(`
+          CREATE TABLE captured_exchanges (
+            id BLOB PRIMARY KEY CHECK(length(id) = 16),
+            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            request_id BLOB NOT NULL REFERENCES request_drafts(request_id) ON DELETE CASCADE,
+            request_revision_id BLOB NOT NULL REFERENCES request_revisions(id) ON DELETE CASCADE,
+            source_provider_id TEXT NOT NULL CHECK(source_provider_id = 'har'),
+            status INTEGER NOT NULL CHECK(status BETWEEN 100 AND 599),
+            status_text TEXT NOT NULL,
+            headers_json TEXT NOT NULL,
+            content_type TEXT,
+            body_text TEXT NOT NULL,
+            body_encoding TEXT NOT NULL CHECK(body_encoding IN ('text', 'base64')),
+            body_complete INTEGER NOT NULL CHECK(body_complete IN (0, 1)),
+            body_bytes INTEGER NOT NULL CHECK(body_bytes >= 0),
+            recorded_at INTEGER,
+            imported_at INTEGER NOT NULL
+          ) STRICT;
+          CREATE INDEX captured_exchanges_request_imported
+            ON captured_exchanges(request_id, imported_at DESC, id DESC);
+        `);
+      }
+      const applied = this.#driver
+        .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+        .get(CAPTURED_EXCHANGES_MIGRATION);
+      if (applied === undefined) {
+        this.#recordMigration(CAPTURED_EXCHANGES_MIGRATION);
       }
     })();
   }

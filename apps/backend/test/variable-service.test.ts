@@ -307,6 +307,30 @@ describe("persisted variable scopes", () => {
           },
         ],
       });
+      await expect(
+        variables.previewVariables(
+          userId,
+          sessionId,
+          workspace.workspaceId,
+          leaf.nodeId,
+          null,
+          ["bearerAuth"],
+          {
+            scopeId: temporaryScopeId,
+            scopeName: "Imported request",
+            variables: [{ name: "bearerAuth", kind: "secret" }],
+          },
+        ),
+      ).resolves.toMatchObject({
+        previews: [
+          {
+            name: "bearerAuth",
+            status: "error",
+            effectiveKind: "secret",
+            diagnostic: "Secret variable bearerAuth has no value",
+          },
+        ],
+      });
 
       expect(workspaceProfile.variables).toEqual(
         expect.arrayContaining([

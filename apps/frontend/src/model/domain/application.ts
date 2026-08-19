@@ -1,10 +1,13 @@
 import type {
   CollectionView,
+  CapturedExchangeView,
   CurrentSession,
   ExecutionView,
   HttpMethod,
   RequestField,
   RequestBodyDefinition,
+  RequestExchangeSummary,
+  RequestExchangeView,
   RequestRevisionSummary,
   RequestRevisionView,
   RequestView,
@@ -54,7 +57,11 @@ export interface RequestTab {
   readonly pendingParentCollectionId: string | null;
   readonly inheritedTarget: string;
   readonly inheritedHeaders: readonly RequestField[];
+  readonly capturedExchange?: CapturedExchangeView | null;
   readonly execution: ExecutionView | null;
+  readonly exchangeSummaries: readonly RequestExchangeSummary[];
+  readonly selectedExchangeId: string | null;
+  readonly selectedExchange: RequestExchangeView | null;
   readonly revisions: readonly RequestRevisionSummary[];
   readonly viewingRevision: RequestRevisionView | null;
   readonly recoveryWarnings?: readonly RequestRecoveryWarning[];

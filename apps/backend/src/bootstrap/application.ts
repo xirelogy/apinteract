@@ -3,7 +3,9 @@ import { AuditService } from "../audit/audit-service.js";
 import { LocalBlobStore } from "../blobs/local-blob-store.js";
 import { ExecutionService } from "../executions/execution-service.js";
 import { EnvironmentService } from "../environments/environment-service.js";
+import { RequestExchangeService } from "../exchanges/request-exchange-service.js";
 import { IdentityService } from "../identity/identity-service.js";
+import { ImportService } from "../imports/import-service.js";
 import { SqliteDatabase } from "../persistence/sqlite-database.js";
 import { ProxyClient } from "../proxy/proxy-client.js";
 import { ScriptService } from "../scripting/script-service.js";
@@ -24,7 +26,9 @@ export interface Application {
   readonly variables: VariableService;
   readonly requestAttachments: RequestAttachmentService;
   readonly requests: RequestService;
+  readonly imports: ImportService;
   readonly executions: ExecutionService;
+  readonly requestExchanges: RequestExchangeService;
   readonly proxy: ProxyClient;
   readonly scripts: ScriptService;
   close(): Promise<void>;
@@ -74,6 +78,7 @@ export async function createApplication(
     audit,
     requestAttachments,
   );
+  const imports = new ImportService(requests);
   const proxy = new ProxyClient(
     configuration.proxy.endpoint,
     configuration.proxy.bearerToken,
@@ -88,6 +93,11 @@ export async function createApplication(
     audit,
     scripts,
   );
+  const requestExchanges = new RequestExchangeService(
+    database.db,
+    workspaces,
+    blobs,
+  );
 
   return {
     database,
@@ -100,7 +110,9 @@ export async function createApplication(
     variables,
     requestAttachments,
     requests,
+    imports,
     executions,
+    requestExchanges,
     proxy,
     scripts,
     close: async () => {

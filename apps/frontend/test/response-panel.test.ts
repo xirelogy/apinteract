@@ -5,10 +5,79 @@ import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
-import type { ExecutionView } from "../src/model/contracts/backend";
+import type {
+  ExecutionView,
+  RequestExchangeSummary,
+} from "../src/model/contracts/backend";
+import SelectMenu from "../src/view/presentation/controls/SelectMenu.vue";
 import ResponsePanel from "../src/view/presentation/features/ResponsePanel.vue";
 
 describe("ResponsePanel body transfer", () => {
+  it("offers compact unified history and emits the selected exchange", async () => {
+    const execution: ExecutionView = {
+      executionId: "019fa8be-a510-76b9-b73b-69f4c7af7801",
+      state: "completed",
+      status: 201,
+      bodyComplete: true,
+      bodyBytes: 0,
+      createdAt: "2026-07-28T00:00:00.000Z",
+      completedAt: "2026-07-28T00:00:01.000Z",
+      scriptLogs: [],
+      scriptTests: [],
+    };
+    const exchanges: RequestExchangeSummary[] = [
+      {
+        exchangeId: execution.executionId,
+        requestId: "019fa8be-a510-76b9-b73b-69f4c7af7802",
+        requestRevisionId: null,
+        kind: "execution",
+        source: "apinteract",
+        state: "completed",
+        status: 201,
+        bodyAvailability: "complete",
+        occurredAt: execution.createdAt,
+      },
+      {
+        exchangeId: "019fa8be-a510-76b9-b73b-69f4c7af7803",
+        requestId: "019fa8be-a510-76b9-b73b-69f4c7af7802",
+        requestRevisionId: null,
+        kind: "capture",
+        source: "har",
+        state: "completed",
+        status: 200,
+        bodyAvailability: "complete",
+        occurredAt: "2026-07-27T23:00:00.000Z",
+      },
+    ];
+    const wrapper = mount(ResponsePanel, {
+      props: {
+        execution,
+        exchangeSummaries: exchanges,
+        selectedExchangeId: execution.executionId,
+      },
+      global: {
+        plugins: [
+          createI18n({
+            legacy: false,
+            locale: "en-US",
+            messages: { "en-US": enUsMessages },
+          }),
+        ],
+      },
+    });
+
+    expect(wrapper.get(".response-exchange-select").text()).toContain(
+      "201 · Execution · APInteract",
+    );
+    wrapper
+      .getComponent(SelectMenu)
+      .vm.$emit("update:modelValue", exchanges[1]!.exchangeId);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("selectExchange")).toEqual([
+      [exchanges[1]!.exchangeId],
+    ]);
+  });
+
   it("shows the materialized outgoing request in its own result tab", async () => {
     const execution: ExecutionView = {
       executionId: "019fa8be-a510-76b9-b73b-69f4c7af7874",
@@ -107,6 +176,37 @@ describe("ResponsePanel body transfer", () => {
       .get('button[aria-label="Download response body"]')
       .trigger("click");
     expect(wrapper.emitted("download")).toEqual([[execution.executionId]]);
+  });
+
+  it("explains when an imported HAR omitted its declared response body", () => {
+    const execution: ExecutionView = {
+      executionId: "019fa8be-a510-76b9-b73b-69f4c7af7877",
+      state: "completed",
+      status: 200,
+      headers: [{ name: "content-type", value: "application/json" }],
+      bodyComplete: false,
+      bodyBytes: 84,
+      createdAt: "2026-07-28T00:00:00.000Z",
+      completedAt: "2026-07-28T00:00:01.000Z",
+      scriptLogs: [],
+      scriptTests: [],
+    };
+    const wrapper = mount(ResponsePanel, {
+      props: { execution, capturedResponse: true },
+      global: {
+        plugins: [
+          createI18n({
+            legacy: false,
+            locale: "en-US",
+            messages: { "en-US": enUsMessages },
+          }),
+        ],
+      },
+    });
+
+    expect(wrapper.get(".body-preview").text()).toBe(
+      "Response content was not included in the imported HAR.",
+    );
   });
 
   it("exposes structured execution failures as an alert", () => {

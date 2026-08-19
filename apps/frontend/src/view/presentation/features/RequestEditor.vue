@@ -28,6 +28,7 @@ import type {
   RequestAttachment,
   RequestBodyDefinition,
   RequestField,
+  RequestExchangeSummary,
   RequestRevisionSummary,
   RequestRevisionView,
   RequestView,
@@ -78,6 +79,9 @@ const props = withDefaults(
     request: RequestView | null;
     draft: RequestDraftInput | null;
     execution: ExecutionView | null;
+    capturedResponse?: boolean;
+    exchangeSummaries?: readonly RequestExchangeSummary[];
+    selectedExchangeId?: string | null;
     tabId: string | null;
     temporary: boolean;
     inheritedTarget?: string;
@@ -95,6 +99,9 @@ const props = withDefaults(
   }>(),
   {
     inheritedTarget: "",
+    capturedResponse: false,
+    exchangeSummaries: () => [],
+    selectedExchangeId: null,
     variablePreviews: () => [],
     requestVariableProfile: null,
     requestVariableDraft: null,
@@ -113,6 +120,7 @@ const emit = defineEmits<{
   execute: [draft: RequestDraftInput];
   change: [draft: RequestDraftInput];
   download: [executionId: string];
+  selectExchange: [exchangeId: string];
   preview: [names: readonly string[]];
   loadVariables: [];
   changeVariables: [variables: readonly VariableWrite[]];
@@ -1856,7 +1864,11 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
       ></div>
       <ResponsePanel
         :execution="execution"
+        :captured-response="capturedResponse"
+        :exchange-summaries="exchangeSummaries"
+        :selected-exchange-id="selectedExchangeId"
         @download="emit('download', $event)"
+        @select-exchange="emit('selectExchange', $event)"
       />
     </template>
   </main>

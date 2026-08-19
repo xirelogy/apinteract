@@ -48,7 +48,7 @@ describe("MainPage", () => {
     expect(wrapper.findComponent(RequestEditor).exists()).toBe(false);
   });
 
-  it("passes request revisions to the request editor", () => {
+  it("passes request revisions and unavailable capture bodies to the editor", () => {
     const pinia = createPinia();
     setActivePinia(pinia);
     const store = useApplicationStore();
@@ -107,6 +107,20 @@ describe("MainPage", () => {
           pendingParentCollectionId: null,
           inheritedTarget: "",
           inheritedHeaders: [],
+          capturedExchange: {
+            capturedExchangeId: "019facab-1eee-765f-bd9f-ac2449151cf4",
+            source: "har",
+            status: 200,
+            statusText: "OK",
+            headers: [],
+            contentType: "application/json",
+            body: "",
+            bodyEncoding: "text",
+            bodyComplete: true,
+            bodyBytes: 84,
+            recordedAt: null,
+            importedAt: "2026-08-19T00:00:00.000Z",
+          },
           execution: null,
           revisions: [revision],
           viewingRevision: null,
@@ -139,6 +153,12 @@ describe("MainPage", () => {
     expect(wrapper.getComponent(RequestEditor).props("revisions")).toEqual([
       revision,
     ]);
+    expect(
+      wrapper.getComponent(RequestEditor).props("execution"),
+    ).not.toHaveProperty("bodyPreview");
+    expect(wrapper.getComponent(RequestEditor).props("capturedResponse")).toBe(
+      true,
+    );
     expect(
       wrapper.getComponent(EnvironmentManager).attributes("revisions"),
     ).toBeUndefined();

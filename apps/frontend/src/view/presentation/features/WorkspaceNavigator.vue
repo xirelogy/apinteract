@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, provide, ref, watch } from "vue";
-import { FolderPlus, Plus, Settings2 } from "@lucide/vue";
+import { FileUp, FolderPlus, Plus, Settings2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type { TreeNode, WorkspaceSummary } from "@/model/contracts/backend";
@@ -41,6 +41,7 @@ const emit = defineEmits<{
   createRequest: [parentCollectionId: string];
   editCollectionProperties: [collectionId: string];
   editWorkspaceProperties: [workspaceId: string];
+  import: [];
   selectRequest: [requestId: string];
   duplicateRequest: [requestId: string, name: string];
   deleteRequest: [requestId: string];
@@ -519,6 +520,15 @@ function findLoadedParentCollectionId(nodeId: string): string | null {
       <div class="section-heading">
         <span class="navigator-heading">{{ t("workspace.collections") }}</span>
         <div class="section-actions">
+          <IconButton
+            class="compact-icon-button"
+            size="compact"
+            :label="t('import.action')"
+            :disabled="busy || !canEdit"
+            @click="emit('import')"
+          >
+            <FileUp :size="16" aria-hidden="true" />
+          </IconButton>
           <IconButton
             class="compact-icon-button"
             size="compact"

@@ -233,6 +233,7 @@ describe("ApplicationController local request recovery", () => {
         };
       }
       if (type === "request.get") return request;
+      if (type === "request.exchange.list") return { exchanges: [] };
       throw new Error(`Unexpected command ${type}`);
     });
     const session = { logout: vi.fn().mockResolvedValue(undefined) };
@@ -338,9 +339,246 @@ describe("ApplicationController local request recovery", () => {
     expect(persistedTab?.recoveryWarnings).toContain("secrets-omitted");
     await controller.logout();
   });
+
+  it("persists a closed request tab without waiting for the debounce", async () => {
+    vi.useFakeTimers();
+    setActivePinia(createPinia());
+    const userId = "019facab-1eee-765f-bd9f-ac2449151dd1";
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151dd2";
+    const tabId = "019facab-1eee-765f-bd9f-ac2449151dd3";
+    const storage = new FakeRequestSessionStorage();
+    const controller = new ApplicationController(
+      {
+        logout: vi.fn().mockResolvedValue(undefined),
+      } as unknown as SessionController,
+      {
+        command: vi.fn().mockResolvedValue({ workspaces: [] }),
+        onEvent: vi.fn(),
+      } as unknown as BackendWebSocketClient,
+      storage,
+    );
+    const store = useApplicationStore();
+    store.session = {
+      sessionId: "019facab-1eee-765f-bd9f-ac2449151dd4",
+      user: { userId, username: "alice", displayName: "Alice" },
+      createdAt: "2026-08-17T01:00:00.000Z",
+      absoluteExpiresAt: "2026-08-18T01:00:00.000Z",
+    };
+    await controller.initializeWorkspace();
+    store.$patch({
+      activeRequestTabId: tabId,
+      requestTabs: [
+        {
+          tabId,
+          workspaceId,
+          request: null,
+          draft: {
+            name: "Temporary request",
+            method: "GET",
+            targetMode: "absolute",
+            targetUrl: "",
+            query: [],
+            headers: [],
+            requestBody: { kind: "none" },
+            body: "",
+            preRequestScript: "",
+            postResponseScript: "",
+          },
+          baseline: null,
+          variableProfile: null,
+          variableDraft: [],
+          variableBaseline: [],
+          pendingParentCollectionId: null,
+          inheritedTarget: "",
+          inheritedHeaders: [],
+          execution: null,
+          revisions: [],
+          viewingRevision: null,
+          busy: false,
+        },
+      ],
+    });
+    await vi.advanceTimersByTimeAsync(151);
+    storage.saves.length = 0;
+
+    controller.closeRequestTab(tabId);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(storage.saves).toHaveLength(1);
+    expect(storage.saves[0]?.tabs).toEqual([]);
+    expect(storage.saves[0]?.activeRequestTabId).toBeNull();
+    await controller.logout();
+  });
 });
 
 describe("ApplicationController requests", () => {
+  it("opens every captured import response and keeps the first active", async () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151ae1";
+    const collectionId = "019facab-1eee-765f-bd9f-ac2449151ae2";
+    const importedRequests = [
+      {
+        requestId: "019facab-1eee-765f-bd9f-ac2449151ae3",
+        captured: true,
+      },
+      {
+        requestId: "019facab-1eee-765f-bd9f-ac2449151ae4",
+        captured: false,
+      },
+      {
+        requestId: "019facab-1eee-765f-bd9f-ac2449151ae5",
+        captured: true,
+      },
+    ].map(({ requestId, captured }, index) => ({
+      requestId,
+      workspaceId,
+      parentCollectionId: collectionId,
+      name: `Imported ${index + 1}`,
+      method: "GET" as const,
+      targetMode: "absolute" as const,
+      targetUrl: `https://example.test/${index + 1}`,
+      inheritedTarget: "",
+      queryMode: "structured" as const,
+      query: [],
+      headers: [],
+      inheritedHeaders: [],
+      requestBody: { kind: "none" as const },
+      body: "",
+      preRequestScript: "",
+      postResponseScript: "",
+      draftRevision: 0,
+      ...(captured
+        ? {
+            capturedExchange: {
+              capturedExchangeId: `019facab-1eee-765f-bd9f-ac2449151af${index}`,
+              source: "har" as const,
+              status: 200,
+              statusText: "OK",
+              headers: [],
+              contentType: "text/plain",
+              body: `response ${index + 1}`,
+              bodyEncoding: "text" as const,
+              bodyComplete: true,
+              bodyBytes: 10,
+              recordedAt: null,
+              importedAt: "2026-08-19T00:00:00.000Z",
+            },
+          }
+        : {}),
+    }));
+    const command = vi.fn((type: string, payload?: Record<string, string>) => {
+      if (type === "import.apply") {
+        return { collectionId, requests: importedRequests };
+      }
+      if (type === "tree.list") return { children: [] };
+      if (type === "request.exchange.list") {
+        const request = importedRequests.find(
+          (candidate) => candidate.requestId === payload?.requestId,
+        );
+        const capture = request?.capturedExchange;
+        return {
+          exchanges:
+            capture === undefined
+              ? []
+              : [
+                  {
+                    exchangeId: capture.capturedExchangeId,
+                    requestId: request!.requestId,
+                    requestRevisionId: null,
+                    kind: "capture",
+                    source: "har",
+                    state: "completed",
+                    status: capture.status,
+                    bodyAvailability: "complete",
+                    occurredAt: capture.importedAt,
+                  },
+                ],
+        };
+      }
+      if (type === "request.exchange.get") {
+        const request = importedRequests.find(
+          (candidate) =>
+            candidate.capturedExchange?.capturedExchangeId ===
+            payload?.exchangeId,
+        );
+        if (request?.capturedExchange === undefined) {
+          throw new Error("Missing captured exchange fixture");
+        }
+        return {
+          summary: {
+            exchangeId: request.capturedExchange.capturedExchangeId,
+            requestId: request.requestId,
+            requestRevisionId: null,
+            kind: "capture",
+            source: "har",
+            state: "completed",
+            status: request.capturedExchange.status,
+            bodyAvailability: "complete",
+            occurredAt: request.capturedExchange.importedAt,
+          },
+          execution: {
+            executionId: request.capturedExchange.capturedExchangeId,
+            requestId: request.requestId,
+            state: "completed",
+            status: request.capturedExchange.status,
+            headers: request.capturedExchange.headers,
+            bodyComplete: true,
+            bodyBytes: request.capturedExchange.bodyBytes,
+            bodyPreview: request.capturedExchange.body,
+            createdAt: request.capturedExchange.importedAt,
+            completedAt: request.capturedExchange.importedAt,
+            scriptLogs: [],
+            scriptTests: [],
+          },
+        };
+      }
+      throw new Error(`Unexpected command ${type}`);
+    });
+    const controller = new ApplicationController(
+      {} as SessionController,
+      { command, onEvent: vi.fn() } as unknown as BackendWebSocketClient,
+    );
+    const store = useApplicationStore();
+    store.selectedWorkspaceId = workspaceId;
+
+    await controller.applyImport({
+      providerId: "har",
+      sourceName: "capture.har",
+      sourceText: "{}",
+      plan: {
+        schemaVersion: 1,
+        providerId: "har",
+        providerVersion: "1.0.0",
+        sourceName: "capture.har",
+        sourceFingerprint: "a".repeat(64),
+        suggestedName: "Capture",
+        pathPrefix: "",
+        requests: [],
+        diagnostics: [],
+      },
+      selectedItemIds: ["entry:0", "entry:1", "entry:2"],
+      collectionName: "Capture",
+      parentCollectionId: null,
+    });
+
+    expect(store.requestTabs.map((tab) => tab.request?.requestId)).toEqual([
+      importedRequests[0]?.requestId,
+      importedRequests[2]?.requestId,
+    ]);
+    expect(
+      store.requestTabs.find((tab) => tab.tabId === store.activeRequestTabId)
+        ?.request?.requestId,
+    ).toBe(importedRequests[0]?.requestId);
+    expect(store.requestTabs.map((tab) => tab.capturedExchange?.body)).toEqual([
+      "response 1",
+      "response 3",
+    ]);
+    expect(
+      store.requestTabs.map((tab) => tab.selectedExchange?.summary.kind),
+    ).toEqual(["capture", "capture"]);
+  });
+
   it("defaults root requests to absolute targets and collection requests to composed targets", () => {
     setActivePinia(createPinia());
     const workspaceId = "019facab-1eee-765f-bd9f-ac2449151cd1";
@@ -363,6 +601,129 @@ describe("ApplicationController requests", () => {
       "absolute",
       "composed",
     ]);
+  });
+
+  it("selects the latest saved exchange and can load an older capture", async () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151ad1";
+    const requestId = "019facab-1eee-765f-bd9f-ac2449151ad2";
+    const executionId = "019facab-1eee-765f-bd9f-ac2449151ad3";
+    const captureId = "019facab-1eee-765f-bd9f-ac2449151ad4";
+    const liveExecutionId = "019facab-1eee-765f-bd9f-ac2449151ad5";
+    const request = {
+      requestId,
+      workspaceId,
+      parentCollectionId: null,
+      name: "History",
+      method: "GET" as const,
+      targetMode: "absolute" as const,
+      targetUrl: "https://example.test/history",
+      inheritedTarget: "",
+      queryMode: "structured" as const,
+      query: [],
+      headers: [],
+      inheritedHeaders: [],
+      requestBody: { kind: "none" as const },
+      body: "",
+      preRequestScript: "",
+      postResponseScript: "",
+      draftRevision: 1,
+    };
+    const summaries = [
+      {
+        exchangeId: executionId,
+        requestId,
+        requestRevisionId: null,
+        kind: "execution" as const,
+        source: "apinteract" as const,
+        state: "completed" as const,
+        status: 201,
+        bodyAvailability: "complete" as const,
+        occurredAt: "2026-08-19T02:00:00.000Z",
+      },
+      {
+        exchangeId: captureId,
+        requestId,
+        requestRevisionId: null,
+        kind: "capture" as const,
+        source: "har" as const,
+        state: "completed" as const,
+        status: 200,
+        bodyAvailability: "complete" as const,
+        occurredAt: "2026-08-19T01:00:00.000Z",
+      },
+    ];
+    const command = vi.fn((type: string, payload?: Record<string, string>) => {
+      if (type === "request.get") return request;
+      if (type === "request.exchange.list") return { exchanges: summaries };
+      if (type === "request.exchange.get") {
+        const summary = summaries.find(
+          (candidate) => candidate.exchangeId === payload?.exchangeId,
+        )!;
+        return {
+          summary,
+          execution: {
+            executionId: summary.exchangeId,
+            requestId,
+            state: "completed",
+            status: summary.status,
+            bodyComplete: true,
+            bodyBytes: 4,
+            bodyPreview: summary.kind,
+            createdAt: summary.occurredAt,
+            completedAt: summary.occurredAt,
+            scriptLogs: [],
+            scriptTests: [],
+          },
+        };
+      }
+      if (type === "execution.start_revision") {
+        return {
+          executionId: liveExecutionId,
+          requestId,
+          state: "running",
+          bodyComplete: false,
+          bodyBytes: 0,
+          createdAt: "2026-08-19T03:00:00.000Z",
+          scriptLogs: [],
+          scriptTests: [],
+        };
+      }
+      throw new Error(`Unexpected command ${type}`);
+    });
+    const controller = new ApplicationController(
+      {} as SessionController,
+      { command, onEvent: vi.fn() } as unknown as BackendWebSocketClient,
+    );
+
+    await controller.selectRequest(requestId);
+
+    const tab = useApplicationStore().requestTabs[0]!;
+    expect(tab.selectedExchangeId).toBe(executionId);
+    expect(tab.selectedExchange?.execution.bodyPreview).toBe("execution");
+
+    await controller.selectRequestExchange(tab.tabId, captureId);
+
+    expect(useApplicationStore().requestTabs[0]?.selectedExchangeId).toBe(
+      captureId,
+    );
+    expect(
+      useApplicationStore().requestTabs[0]?.selectedExchange?.execution
+        .bodyPreview,
+    ).toBe("capture");
+
+    await controller.executeRequestRevision(tab.tabId, "revision-id");
+
+    expect(useApplicationStore().requestTabs[0]?.selectedExchangeId).toBe(
+      liveExecutionId,
+    );
+    expect(
+      useApplicationStore().requestTabs[0]?.exchangeSummaries[0],
+    ).toMatchObject({
+      exchangeId: liveExecutionId,
+      kind: "execution",
+      state: "running",
+    });
   });
 
   it("opens persisted form bodies without sharing fields or becoming dirty", async () => {
@@ -409,7 +770,9 @@ describe("ApplicationController requests", () => {
       draftRevision: 2,
     };
     const webSocket = {
-      command: vi.fn().mockResolvedValue(request),
+      command: vi.fn((type: string) =>
+        type === "request.exchange.list" ? { exchanges: [] } : request,
+      ),
       onEvent: vi.fn(),
     } as unknown as BackendWebSocketClient;
     const controller = new ApplicationController(
@@ -554,6 +917,9 @@ describe("ApplicationController requests", () => {
         inheritedTarget: "",
         inheritedHeaders: [],
         execution: null,
+        exchangeSummaries: [],
+        selectedExchangeId: null,
+        selectedExchange: null,
         revisions: [],
         viewingRevision: null,
         busy: false,

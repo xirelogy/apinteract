@@ -231,6 +231,25 @@ export interface RequestAttachmentTable {
   created_at: number;
 }
 
+/** Stores one immutable imported response capture separately from executions. */
+export interface CapturedExchangeTable {
+  id: BinaryId;
+  workspace_id: BinaryId;
+  request_id: BinaryId;
+  request_revision_id: BinaryId;
+  source_provider_id: "har";
+  status: number;
+  status_text: string;
+  headers_json: string;
+  content_type: string | null;
+  body_text: string;
+  body_encoding: "text" | "base64";
+  body_complete: 0 | 1;
+  body_bytes: number;
+  recorded_at: number | null;
+  imported_at: number;
+}
+
 export interface AuditOutboxTable {
   id: BinaryId;
   event_json: string;
@@ -284,6 +303,7 @@ export interface DatabaseSchema {
   blobs: BlobTable;
   blob_references: BlobReferenceTable;
   request_attachments: RequestAttachmentTable;
+  captured_exchanges: CapturedExchangeTable;
   audit_outbox: AuditOutboxTable;
   audit_event_index: AuditEventIndexTable;
   audit_segments: AuditSegmentTable;

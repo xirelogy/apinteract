@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 
 import type { AuditService } from "../audit/audit-service.js";
+import type {
+  CapturedExchangeView,
+  ImportedRequest,
+  ImportProviderId,
+} from "../imports/import-types.js";
 import {
   VariableResolver,
   type SecretReference,
@@ -140,6 +145,8 @@ export interface RequestView {
   readonly preRequestScript: string;
   readonly postResponseScript: string;
   readonly draftRevision: number;
+  /** Latest recorded import response, which is not an APInteract execution. */
+  readonly capturedExchange?: CapturedExchangeView;
 }
 
 export interface RequestRevisionSummary {
@@ -177,6 +184,12 @@ export interface RequestVariableProfileUpdate {
 /** Carries additive request-creation data without extending positional inputs. */
 export interface RequestCreationOptions {
   readonly variables?: readonly VariableWrite[];
+}
+
+/** Identifies entities created by one atomic provider import. */
+export interface RequestImportResult {
+  readonly collectionId: EntityId;
+  readonly requests: readonly RequestView[];
 }
 
 export interface ExecutionRequestSnapshot extends RequestExecutionInput {
@@ -1000,6 +1013,187 @@ export class RequestService {
         postResponseScript: content.postResponseScript,
         draftRevision: 0,
       };
+    });
+  }
+
+  /** Atomically creates one import collection, its requests, and response captures. */
+  async importRequests(
+    userId: EntityId,
+    workspaceId: EntityId,
+    parentCollectionId: EntityId | null,
+    providerId: ImportProviderId,
+    collectionName: string,
+    pathPrefix: string,
+    requests: readonly ImportedRequest[],
+  ): Promise<RequestImportResult> {
+    if (requests.length === 0 || requests.length > 200) {
+      throw new Error("An import must contain between 1 and 200 requests");
+    }
+    const normalizedCollectionName = normalizeName(collectionName);
+    const normalizedPathPrefix = validateCollectionTargetTemplate(pathPrefix);
+    const normalizedRequests = requests.map((request) => ({
+      request,
+      name: normalizeName(request.name),
+      content: normalizeExecutionInput(request),
+      capture:
+        request.capturedExchange === undefined
+          ? undefined
+          : validateCapturedExchange(request.capturedExchange),
+    }));
+    return this.#database.transaction().execute(async (transaction) => {
+      await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
+      await this.#validateParent(transaction, workspaceId, parentCollectionId);
+      const collectionId = createEntityId();
+      const collectionPosition = await this.#nextPosition(
+        transaction,
+        workspaceId,
+        parentCollectionId,
+      );
+      const collectionOrderRevision = await this.#currentOrderRevision(
+        transaction,
+        workspaceId,
+        parentCollectionId,
+      );
+      const now = Date.now();
+      await transaction
+        .insertInto("workspace_tree_nodes")
+        .values({
+          id: idToBytes(collectionId),
+          workspace_id: idToBytes(workspaceId),
+          parent_collection_id:
+            parentCollectionId === null ? null : idToBytes(parentCollectionId),
+          kind: "collection",
+          position: collectionPosition,
+          name: normalizedCollectionName,
+          order_revision: collectionOrderRevision,
+          created_at: now,
+        })
+        .execute();
+      if (normalizedPathPrefix !== "") {
+        await transaction
+          .insertInto("collection_profiles")
+          .values({
+            collection_id: idToBytes(collectionId),
+            revision: 1,
+            headers_json: "[]",
+            path_prefix: normalizedPathPrefix,
+            updated_by: idToBytes(userId),
+            updated_at: now,
+          })
+          .execute();
+      }
+      await this.#audit.record(transaction, {
+        type: "collection.created",
+        actorUserId: userId,
+        workspaceId,
+        data: {
+          collectionId,
+          parentCollectionId,
+          importProviderId: providerId,
+        },
+      });
+
+      const created: RequestView[] = [];
+      for (const [position, imported] of normalizedRequests.entries()) {
+        const requestId = createEntityId();
+        await transaction
+          .insertInto("workspace_tree_nodes")
+          .values({
+            id: idToBytes(requestId),
+            workspace_id: idToBytes(workspaceId),
+            parent_collection_id: idToBytes(collectionId),
+            kind: "request",
+            position,
+            name: imported.name,
+            order_revision: 0,
+            created_at: now,
+          })
+          .execute();
+        await transaction
+          .insertInto("request_drafts")
+          .values({
+            request_id: idToBytes(requestId),
+            draft_revision: 0,
+            method: imported.content.method,
+            target_mode: imported.content.targetMode,
+            target_url: imported.content.targetUrl,
+            query_mode: "structured",
+            query_json: JSON.stringify(imported.content.query),
+            headers_json: JSON.stringify(imported.content.headers),
+            body_text: imported.content.body,
+            body_json: JSON.stringify(imported.content.requestBody),
+            pre_request_script: imported.content.preRequestScript,
+            post_response_script: imported.content.postResponseScript,
+            updated_by: idToBytes(userId),
+            updated_at: now,
+          })
+          .execute();
+        if (imported.request.variables.length > 0) {
+          await this.#variables.createImportedRequestProfile(
+            transaction,
+            userId,
+            requestId,
+            imported.request.variables,
+          );
+        }
+        await this.#audit.record(transaction, {
+          type: "request.created",
+          actorUserId: userId,
+          workspaceId,
+          data: {
+            requestId,
+            parentCollectionId: collectionId,
+            importProviderId: providerId,
+            importItemId: imported.request.itemId,
+          },
+        });
+        const row = await this.#requestRow(transaction, requestId);
+        const revisionId = await this.#ensureRevision(
+          transaction,
+          row,
+          userId,
+          "manual_save",
+        );
+        if (imported.capture !== undefined) {
+          const captureId = createEntityId();
+          await transaction
+            .insertInto("captured_exchanges")
+            .values({
+              id: idToBytes(captureId),
+              workspace_id: idToBytes(workspaceId),
+              request_id: idToBytes(requestId),
+              request_revision_id: idToBytes(revisionId),
+              source_provider_id: imported.capture.source,
+              status: imported.capture.status,
+              status_text: imported.capture.statusText,
+              headers_json: JSON.stringify(imported.capture.headers),
+              content_type: imported.capture.contentType,
+              body_text: imported.capture.body,
+              body_encoding: imported.capture.bodyEncoding,
+              body_complete: imported.capture.bodyComplete ? 1 : 0,
+              body_bytes: imported.capture.bodyBytes,
+              recorded_at:
+                imported.capture.recordedAt === null
+                  ? null
+                  : Date.parse(imported.capture.recordedAt),
+              imported_at: now,
+            })
+            .execute();
+        }
+        created.push(await this.#requestView(transaction, row));
+      }
+      await this.#audit.record(transaction, {
+        type: "import.applied",
+        actorUserId: userId,
+        workspaceId,
+        data: {
+          providerId,
+          collectionId,
+          parentCollectionId,
+          requestCount: created.length,
+        },
+      });
+      return { collectionId, requests: created };
     });
   }
 
@@ -2177,6 +2371,10 @@ export class RequestService {
     row: RequestRow,
   ): Promise<RequestView> {
     const request = mapRequest(row);
+    const capturedExchange = await this.#latestCapturedExchange(
+      database,
+      request.requestId,
+    );
     return {
       ...request,
       inheritedTarget:
@@ -2193,6 +2391,42 @@ export class RequestService {
         row.parent_collection_id,
         [],
       ),
+      ...(capturedExchange === undefined ? {} : { capturedExchange }),
+    };
+  }
+
+  /** Loads the newest immutable imported capture for one request, if present. */
+  async #latestCapturedExchange(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    requestId: EntityId,
+  ): Promise<CapturedExchangeView | undefined> {
+    const row = await database
+      .selectFrom("captured_exchanges")
+      .selectAll()
+      .where("request_id", "=", idToBytes(requestId))
+      .orderBy("imported_at", "desc")
+      .orderBy("id", "desc")
+      .executeTakeFirst();
+    if (row === undefined) return undefined;
+    return {
+      capturedExchangeId: bytesToId(row.id),
+      source: row.source_provider_id,
+      status: row.status,
+      statusText: row.status_text,
+      headers: JSON.parse(row.headers_json) as readonly {
+        readonly name: string;
+        readonly value: string;
+      }[],
+      contentType: row.content_type,
+      body: row.body_text,
+      bodyEncoding: row.body_encoding,
+      bodyComplete: row.body_complete === 1,
+      bodyBytes: row.body_bytes,
+      recordedAt:
+        row.recorded_at === null
+          ? null
+          : new Date(row.recorded_at).toISOString(),
+      importedAt: new Date(row.imported_at).toISOString(),
     };
   }
 
@@ -2693,6 +2927,36 @@ function attachmentMetadata(
     contentType: attachment.contentType,
     byteLength: attachment.byteLength,
     sha256: attachment.sha256,
+  };
+}
+
+/** Validates one imported response capture before it crosses persistence. */
+function validateCapturedExchange(
+  capture: CapturedExchangeView,
+): CapturedExchangeView {
+  if (
+    capture.source !== "har" ||
+    !Number.isInteger(capture.status) ||
+    capture.status < 100 ||
+    capture.status > 599 ||
+    capture.statusText.length > 1024 ||
+    capture.body.length > 262_144 ||
+    !Number.isSafeInteger(capture.bodyBytes) ||
+    capture.bodyBytes < 0 ||
+    (capture.bodyEncoding !== "text" && capture.bodyEncoding !== "base64") ||
+    (capture.contentType !== null && capture.contentType.length > 512) ||
+    (capture.recordedAt !== null &&
+      !Number.isFinite(Date.parse(capture.recordedAt))) ||
+    capture.headers.length > 2000 ||
+    capture.headers.some(
+      (header) => header.name.length > 8192 || header.value.length > 65_536,
+    )
+  ) {
+    throw new Error("Captured response is invalid");
+  }
+  return {
+    ...capture,
+    headers: capture.headers.map((header) => ({ ...header })),
   };
 }
 

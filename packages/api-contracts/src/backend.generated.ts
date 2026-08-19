@@ -245,8 +245,13 @@ export interface components {
       | components["schemas"]["VariableProfileGetTemporaryCommand"]
       | components["schemas"]["VariableProfileUpdateCommand"]
       | components["schemas"]["VariablePreviewCommand"]
+      | components["schemas"]["ImportProvidersCommand"]
+      | components["schemas"]["ImportPreviewCommand"]
+      | components["schemas"]["ImportApplyCommand"]
       | components["schemas"]["RequestCreateCommand"]
       | components["schemas"]["RequestGetCommand"]
+      | components["schemas"]["RequestExchangeListCommand"]
+      | components["schemas"]["RequestExchangeGetCommand"]
       | components["schemas"]["RequestRevisionListCommand"]
       | components["schemas"]["RequestRevisionGetCommand"]
       | components["schemas"]["RequestRevisionNameCommand"]
@@ -651,6 +656,133 @@ export interface components {
        */
       type: "VariablePreviewCommand";
     };
+    /** @enum {string} */
+    ImportProviderId: "openapi-json" | "har";
+    /** @description Declarative capabilities for one installed source adapter. */
+    ImportProviderManifest: {
+      id: components["schemas"]["ImportProviderId"];
+      version: string;
+      label: string;
+      acceptedExtensions: string[];
+      acceptedMediaTypes: string[];
+      inputKinds: "file"[];
+      capabilities: {
+        multipleRequests: boolean;
+        hierarchy: boolean;
+        attachments: boolean;
+        capturedResponses: boolean;
+        responseExamples: boolean;
+        variables: boolean;
+      };
+    };
+    ImportProvidersView: {
+      providers: components["schemas"]["ImportProviderManifest"][];
+    };
+    ImportDiagnostic: {
+      code: string;
+      /** @enum {string} */
+      severity: "info" | "warning" | "error";
+      message: string;
+      itemId?: string;
+      sourceLocation?: string;
+    };
+    /** @description An imported HTTP response capture that was not executed by APInteract. */
+    CapturedExchangeView: {
+      capturedExchangeId?: components["schemas"]["UuidV7"];
+      /** @constant */
+      source: "har";
+      status: number;
+      statusText: string;
+      headers: components["schemas"]["HeaderField"][];
+      contentType: string | null;
+      body: string;
+      /** @enum {string} */
+      bodyEncoding: "text" | "base64";
+      bodyComplete: boolean;
+      bodyBytes: number;
+      recordedAt: components["schemas"]["UtcDateTime"] | null;
+      importedAt?: components["schemas"]["UtcDateTime"];
+    };
+    ImportedRequest: {
+      itemId: string;
+      sourceLocation: string;
+      name: string;
+      method: components["schemas"]["HttpMethod"];
+      /** @enum {string} */
+      targetMode: "absolute" | "composed";
+      targetUrl: string;
+      query: components["schemas"]["RequestField"][];
+      headers: components["schemas"]["RequestField"][];
+      requestBody: components["schemas"]["RequestBodyDefinition"];
+      body: string;
+      preRequestScript: string;
+      postResponseScript: string;
+      variables: components["schemas"]["VariableWrite"][];
+      capturedExchange?: components["schemas"]["CapturedExchangeView"];
+    };
+    /** @description A mutation-free, source-neutral preview produced by one provider. */
+    ImportPlan: {
+      /** @constant */
+      schemaVersion: 1;
+      providerId: components["schemas"]["ImportProviderId"];
+      providerVersion: string;
+      sourceName: string;
+      sourceFingerprint: string;
+      suggestedName: string;
+      pathPrefix: string;
+      requests: components["schemas"]["ImportedRequest"][];
+      diagnostics: components["schemas"]["ImportDiagnostic"][];
+    };
+    ImportApplyResult: {
+      collectionId: components["schemas"]["CollectionId"];
+      requests: components["schemas"]["RequestView"][];
+    };
+    ImportProvidersCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "import.providers";
+      payload?: Record<string, never>;
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "ImportProvidersCommand";
+    };
+    ImportPreviewCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "import.preview";
+      payload?: {
+        providerId: components["schemas"]["ImportProviderId"] | null;
+        sourceName: string;
+        sourceText: string;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "ImportPreviewCommand";
+    };
+    ImportApplyCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "import.apply";
+      payload?: {
+        providerId: components["schemas"]["ImportProviderId"] | null;
+        sourceName: string;
+        sourceText: string;
+        workspaceId: components["schemas"]["WorkspaceId"];
+        parentCollectionId: components["schemas"]["CollectionId"] | null;
+        collectionName: string;
+        selectedItemIds: string[];
+        expectedSourceFingerprint: string;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "ImportApplyCommand";
+    };
     RequestCreateCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
       type?: "request.create";
@@ -690,6 +822,37 @@ export interface components {
        * @enum {string}
        */
       type: "RequestGetCommand";
+    };
+    /** @description Lists persisted executions and imported captures owned by one request. */
+    RequestExchangeListCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "request.exchange.list";
+      payload?: {
+        requestId: components["schemas"]["RequestId"];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "RequestExchangeListCommand";
+    };
+    /** @description Loads one selected immutable request-response exchange. */
+    RequestExchangeGetCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "request.exchange.get";
+      payload?: {
+        requestId: components["schemas"]["RequestId"];
+        exchangeId: components["schemas"]["UuidV7"];
+        /** @enum {string} */
+        kind: "execution" | "capture";
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "RequestExchangeGetCommand";
     };
     /** @description Creates an adjacent request with a fresh draft and cloned request-scoped variables, excluding execution and revision history. */
     RequestDuplicateCommand: components["schemas"]["CommandEnvelope"] & {
@@ -866,6 +1029,11 @@ export interface components {
       | components["schemas"]["EnvironmentView"]
       | components["schemas"]["VariableProfileView"]
       | components["schemas"]["VariablePreviewResult"]
+      | components["schemas"]["ImportProvidersView"]
+      | components["schemas"]["ImportPlan"]
+      | components["schemas"]["ImportApplyResult"]
+      | components["schemas"]["RequestExchangeListView"]
+      | components["schemas"]["RequestExchangeView"]
       | {
           [key: string]: unknown;
         };
@@ -1153,6 +1321,7 @@ export interface components {
       requestBody?: components["schemas"]["RequestBodyDefinition"];
       preRequestScript: string;
       postResponseScript: string;
+      capturedExchange?: components["schemas"]["CapturedExchangeView"];
       draftRevision: number;
     };
     RequestRevisionSummary: {
@@ -1167,6 +1336,30 @@ export interface components {
     };
     RequestRevisionView: components["schemas"]["RequestRevisionSummary"] & {
       request: components["schemas"]["RequestView"];
+    };
+    /** @description Compact metadata for one persisted request-response record. */
+    RequestExchangeSummary: {
+      exchangeId: components["schemas"]["UuidV7"];
+      requestId: components["schemas"]["RequestId"];
+      requestRevisionId: components["schemas"]["UuidV7"] | null;
+      /** @enum {string} */
+      kind: "execution" | "capture";
+      /** @enum {string} */
+      source: "apinteract" | "har";
+      /** @enum {string} */
+      state: "created" | "running" | "completed" | "failed";
+      status?: number;
+      /** @enum {string} */
+      bodyAvailability: "complete" | "truncated" | "unavailable";
+      occurredAt: components["schemas"]["UtcDateTime"];
+    };
+    RequestExchangeListView: {
+      exchanges: components["schemas"]["RequestExchangeSummary"][];
+    };
+    /** @description One selected exchange projected for immutable response display. */
+    RequestExchangeView: {
+      summary: components["schemas"]["RequestExchangeSummary"];
+      execution: components["schemas"]["ExecutionView"];
     };
     ExecutionView: {
       executionId: components["schemas"]["ExecutionId"];

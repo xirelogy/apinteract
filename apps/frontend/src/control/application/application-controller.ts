@@ -10,12 +10,20 @@ import {
 } from "@/control/persistence/request-session-storage";
 import type {
   CollectionView,
+  ImportApplyResult,
+  ImportPlan,
+  ImportProviderId,
+  ImportProvidersView,
+  ImportedRequest,
   EnvironmentListView,
   EnvironmentVariableWrite,
   EnvironmentView,
   ExecutionView,
   RequestBodyDefinition,
   RequestAttachment,
+  RequestExchangeListView,
+  RequestExchangeSummary,
+  RequestExchangeView,
   RequestField,
   RequestRevisionSummary,
   RequestRevisionView,
@@ -48,6 +56,17 @@ class WorkflowError extends Error {
     super(code);
     this.code = code;
   }
+}
+
+/** Values required to apply one previewed import as a new collection. */
+export interface ImportApplyOptions {
+  readonly providerId: ImportProviderId | null;
+  readonly sourceName: string;
+  readonly sourceText: string;
+  readonly plan: ImportPlan;
+  readonly selectedItemIds: readonly string[];
+  readonly collectionName: string;
+  readonly parentCollectionId: string | null;
 }
 
 /**
@@ -194,7 +213,11 @@ export class ApplicationController {
         pendingParentCollectionId: snapshot.pendingParentCollectionId,
         inheritedTarget: "",
         inheritedHeaders: [],
+        capturedExchange: null,
         execution: null,
+        exchangeSummaries: [],
+        selectedExchangeId: null,
+        selectedExchange: null,
         revisions: [],
         viewingRevision: null,
         recoveryWarnings: snapshotRecoveryWarnings(snapshot),
@@ -234,6 +257,9 @@ export class ApplicationController {
           warnings.add("stale");
         }
       }
+      const exchangeState = await this.#loadRequestExchangeState(
+        request.requestId,
+      );
       return {
         tabId: entry.tabId,
         workspaceId: entry.workspaceId,
@@ -248,7 +274,9 @@ export class ApplicationController {
         inheritedHeaders: request.inheritedHeaders.map((field) => ({
           ...field,
         })),
+        capturedExchange: request.capturedExchange ?? null,
         execution: null,
+        ...exchangeState,
         revisions: [],
         viewingRevision: null,
         recoveryWarnings: [...warnings],
@@ -294,6 +322,15 @@ export class ApplicationController {
       this.#persistenceTimer = null;
       this.#persistLocalRequestSession();
     }, 150);
+  }
+
+  /** Cancels the debounce and immediately queues the current local projection. */
+  #flushLocalSessionPersistence(): void {
+    if (this.#persistenceTimer !== null) {
+      clearTimeout(this.#persistenceTimer);
+      this.#persistenceTimer = null;
+    }
+    this.#persistLocalRequestSession();
   }
 
   /** Queues the latest serializable workbench projection in mutation order. */
@@ -1018,7 +1055,11 @@ export class ApplicationController {
                 ...field,
               })) ?? [])
             : [],
+      capturedExchange: null,
       execution: null,
+      exchangeSummaries: [],
+      selectedExchangeId: null,
+      selectedExchange: null,
       revisions: [],
       viewingRevision: null,
       busy: false,
@@ -1027,6 +1068,117 @@ export class ApplicationController {
     store.activeRequestTabId = tab.tabId;
     store.selectedCollectionId = null;
     store.selectedCollection = null;
+  }
+
+  /** Lists declarative metadata for import providers installed by the backend. */
+  listImportProviders(): Promise<ImportProvidersView> {
+    return this.#run(() =>
+      this.#webSocket.command<ImportProvidersView>("import.providers", {}),
+    );
+  }
+
+  /** Parses one source into a mutation-free provider preview. */
+  previewImport(
+    providerId: ImportProviderId | null,
+    sourceName: string,
+    sourceText: string,
+  ): Promise<ImportPlan> {
+    return this.#run(() =>
+      this.#webSocket.command<ImportPlan>("import.preview", {
+        providerId,
+        sourceName,
+        sourceText,
+      }),
+    );
+  }
+
+  /** Opens one preview item as an unsaved request without persistent mutation. */
+  createImportedTemporaryRequest(
+    plan: ImportPlan,
+    imported: ImportedRequest,
+  ): void {
+    this.createTemporaryRequest(null);
+    const store = useApplicationStore();
+    const tabId = requireSelection(store.activeRequestTabId);
+    const absolutePrefix = plan.pathPrefix.includes("://");
+    const targetMode =
+      imported.targetMode === "composed" && absolutePrefix
+        ? "absolute"
+        : imported.targetMode;
+    const targetUrl =
+      imported.targetMode === "composed"
+        ? joinTargetPreview(plan.pathPrefix, imported.targetUrl)
+        : imported.targetUrl;
+    this.#updateTab(tabId, (tab) => ({
+      ...tab,
+      draft: {
+        name: imported.name,
+        method: imported.method,
+        targetMode,
+        targetUrl,
+        query: imported.query.map((field) => ({ ...field })),
+        headers: imported.headers.map((field) => ({ ...field })),
+        requestBody: cloneRequestBody(imported.requestBody),
+        body: imported.body,
+        preRequestScript: imported.preRequestScript,
+        postResponseScript: imported.postResponseScript,
+      },
+      variableDraft: cloneVariableWrites(imported.variables),
+      variableBaseline: [],
+      inheritedTarget:
+        targetMode === "composed"
+          ? (store.selectedWorkspace?.baseUrl ?? "")
+          : "",
+      capturedExchange: imported.capturedExchange ?? null,
+      execution: null,
+      exchangeSummaries: [],
+      selectedExchangeId: null,
+      selectedExchange: null,
+    }));
+  }
+
+  /** Re-parses and atomically applies selected preview items to one destination. */
+  async applyImport(options: ImportApplyOptions): Promise<ImportApplyResult> {
+    const store = useApplicationStore();
+    const workspaceId = requireSelection(store.selectedWorkspaceId);
+    return this.#run(async () => {
+      const result = await this.#webSocket.command<ImportApplyResult>(
+        "import.apply",
+        {
+          providerId: options.providerId,
+          sourceName: options.sourceName,
+          sourceText: options.sourceText,
+          workspaceId,
+          parentCollectionId: options.parentCollectionId,
+          collectionName: options.collectionName,
+          selectedItemIds: options.selectedItemIds,
+          expectedSourceFingerprint: options.plan.sourceFingerprint,
+        },
+      );
+      await this.#reloadCollection(workspaceId, options.parentCollectionId);
+      await this.#reloadCollection(workspaceId, result.collectionId);
+      store.expandedCollectionIds = includeOnce(
+        store.expandedCollectionIds,
+        result.collectionId,
+      );
+      const capturedRequests = result.requests.filter(
+        (request) => request.capturedExchange !== undefined,
+      );
+      const requestsToOpen =
+        capturedRequests.length > 0
+          ? capturedRequests
+          : result.requests.slice(0, 1);
+      let firstOpenedTabId: string | null = null;
+      for (const request of requestsToOpen) {
+        const tabId = this.#openRequestTab(request);
+        firstOpenedTabId ??= tabId;
+        await this.#refreshRequestExchanges(tabId, request.requestId);
+      }
+      if (firstOpenedTabId !== null) {
+        store.activeRequestTabId = firstOpenedTabId;
+      }
+      return result;
+    });
   }
 
   /** Activates an already open request tab. */
@@ -1053,6 +1205,7 @@ export class ApplicationController {
         store.requestTabs[index - 1]?.tabId ??
         null;
     }
+    this.#flushLocalSessionPersistence();
   }
 
   /** Opens a saved request once or activates its existing tab. */
@@ -1070,7 +1223,8 @@ export class ApplicationController {
         "request.get",
         { requestId },
       );
-      this.#openRequestTab(request);
+      const tabId = this.#openRequestTab(request);
+      await this.#refreshRequestExchanges(tabId, request.requestId);
     });
   }
 
@@ -1092,7 +1246,8 @@ export class ApplicationController {
         duplicate.workspaceId,
         duplicate.parentCollectionId,
       );
-      this.#openRequestTab(duplicate);
+      const tabId = this.#openRequestTab(duplicate);
+      await this.#refreshRequestExchanges(tabId, duplicate.requestId);
     });
   }
 
@@ -1299,8 +1454,46 @@ export class ApplicationController {
               requestId: tab.request.requestId,
             });
       this.#updateTab(tabId, (current) => ({
+        ...(current.request === null
+          ? { ...current, execution }
+          : withLiveExecution(current, execution)),
+      }));
+    });
+  }
+
+  /** Selects and loads one immutable response exchange for a saved request. */
+  async selectRequestExchange(
+    tabId: string,
+    exchangeId: string,
+  ): Promise<void> {
+    const tab = requireTab(tabId);
+    if (tab.request === null) return;
+    const summary = tab.exchangeSummaries.find(
+      (candidate) => candidate.exchangeId === exchangeId,
+    );
+    if (summary === undefined) return;
+    if (tab.execution?.executionId === exchangeId) {
+      this.#updateTab(tabId, (current) => ({
         ...current,
-        execution,
+        selectedExchangeId: exchangeId,
+        selectedExchange: { summary, execution: tab.execution! },
+      }));
+      return;
+    }
+    await this.#runTab(tabId, async () => {
+      const selectedExchange =
+        await this.#webSocket.command<RequestExchangeView>(
+          "request.exchange.get",
+          {
+            requestId: tab.request!.requestId,
+            exchangeId,
+            kind: summary.kind,
+          },
+        );
+      this.#updateTab(tabId, (current) => ({
+        ...current,
+        selectedExchangeId: exchangeId,
+        selectedExchange,
       }));
     });
   }
@@ -1408,7 +1601,9 @@ export class ApplicationController {
         "execution.start_revision",
         { requestId: tab.request!.requestId, revisionId },
       );
-      this.#updateTab(tabId, (current) => ({ ...current, execution }));
+      this.#updateTab(tabId, (current) =>
+        withLiveExecution(current, execution),
+      );
     });
   }
 
@@ -1448,7 +1643,7 @@ export class ApplicationController {
   }
 
   /** Opens a fully loaded saved request in a fresh active tab. */
-  #openRequestTab(request: RequestView): void {
+  #openRequestTab(request: RequestView): string {
     const store = useApplicationStore();
     const draft = requestToDraft(request);
     const tab: RequestTab = {
@@ -1465,7 +1660,11 @@ export class ApplicationController {
       inheritedHeaders: request.inheritedHeaders.map((field) => ({
         ...field,
       })),
+      capturedExchange: request.capturedExchange ?? null,
       execution: null,
+      exchangeSummaries: [],
+      selectedExchangeId: null,
+      selectedExchange: null,
       revisions: [],
       viewingRevision: null,
       recoveryWarnings: [],
@@ -1475,6 +1674,7 @@ export class ApplicationController {
     store.activeRequestTabId = tab.tabId;
     store.selectedCollectionId = null;
     store.selectedCollection = null;
+    return tab.tabId;
   }
 
   /** Refreshes inherited request metadata without replacing editable drafts. */
@@ -1588,6 +1788,48 @@ export class ApplicationController {
     }));
   }
 
+  /** Loads newest exchange summaries and the latest exchange detail. */
+  async #loadRequestExchangeState(requestId: string): Promise<{
+    exchangeSummaries: readonly RequestExchangeSummary[];
+    selectedExchangeId: string | null;
+    selectedExchange: RequestExchangeView | null;
+  }> {
+    const result = await this.#webSocket.command<RequestExchangeListView>(
+      "request.exchange.list",
+      { requestId },
+    );
+    const latest = result.exchanges[0];
+    if (latest === undefined) {
+      return {
+        exchangeSummaries: [],
+        selectedExchangeId: null,
+        selectedExchange: null,
+      };
+    }
+    const selectedExchange = await this.#webSocket.command<RequestExchangeView>(
+      "request.exchange.get",
+      {
+        requestId,
+        exchangeId: latest.exchangeId,
+        kind: latest.kind,
+      },
+    );
+    return {
+      exchangeSummaries: result.exchanges,
+      selectedExchangeId: latest.exchangeId,
+      selectedExchange,
+    };
+  }
+
+  /** Refreshes one open saved tab's exchange selector and latest detail. */
+  async #refreshRequestExchanges(
+    tabId: string,
+    requestId: string,
+  ): Promise<void> {
+    const exchangeState = await this.#loadRequestExchangeState(requestId);
+    this.#updateTab(tabId, (current) => ({ ...current, ...exchangeState }));
+  }
+
   /** Replaces one tab through a mutation-safe state projection. */
   #updateTab(tabId: string, project: (tab: RequestTab) => RequestTab): void {
     const store = useApplicationStore();
@@ -1626,27 +1868,72 @@ export class ApplicationController {
         readonly status: number;
         readonly headers: ExecutionView["headers"];
       };
-      this.#updateTab(tab.tabId, (current) => ({
-        ...current,
-        execution: {
-          ...execution,
-          status: head.status,
-          ...(head.headers === undefined ? {} : { headers: head.headers }),
-        },
-      }));
+      this.#updateLiveExecution(tab.tabId, {
+        ...execution,
+        status: head.status,
+        ...(head.headers === undefined ? {} : { headers: head.headers }),
+      });
     } else if (type === "execution.progress") {
       const progress = envelope.data as { readonly bodyBytes: number };
-      this.#updateTab(tab.tabId, (current) => ({
-        ...current,
-        execution: { ...execution, bodyBytes: progress.bodyBytes },
-      }));
+      this.#updateLiveExecution(tab.tabId, {
+        ...execution,
+        bodyBytes: progress.bodyBytes,
+      });
     } else {
-      this.#updateTab(tab.tabId, (current) => ({
-        ...current,
-        execution: envelope.data as ExecutionView,
-      }));
+      this.#updateLiveExecution(tab.tabId, envelope.data as ExecutionView);
     }
   }
+
+  /** Updates a live execution and its selected saved-history projection. */
+  #updateLiveExecution(tabId: string, execution: ExecutionView): void {
+    this.#updateTab(tabId, (current) =>
+      current.request === null
+        ? { ...current, execution }
+        : withLiveExecution(current, execution, false),
+    );
+  }
+}
+
+/** Projects a saved live execution into history and optionally selects it. */
+function withLiveExecution(
+  tab: RequestTab,
+  execution: ExecutionView,
+  select = true,
+): RequestTab {
+  const existing = tab.exchangeSummaries.find(
+    (summary) => summary.exchangeId === execution.executionId,
+  );
+  const summary: RequestExchangeSummary = {
+    exchangeId: execution.executionId,
+    requestId: tab.request!.requestId,
+    requestRevisionId: existing?.requestRevisionId ?? null,
+    kind: "execution",
+    source: "apinteract",
+    state: execution.state,
+    ...(execution.status === undefined ? {} : { status: execution.status }),
+    bodyAvailability:
+      execution.bodyComplete === true
+        ? "complete"
+        : (execution.bodyBytes ?? 0) > 0
+          ? "truncated"
+          : "unavailable",
+    occurredAt: existing?.occurredAt ?? execution.createdAt,
+  };
+  return {
+    ...tab,
+    execution,
+    exchangeSummaries: [
+      summary,
+      ...tab.exchangeSummaries.filter(
+        (candidate) => candidate.exchangeId !== execution.executionId,
+      ),
+    ],
+    selectedExchangeId: select ? execution.executionId : tab.selectedExchangeId,
+    selectedExchange:
+      select || tab.selectedExchangeId === execution.executionId
+        ? { summary, execution }
+        : tab.selectedExchange,
+  };
 }
 
 /** Projects workbench state into the versioned, secret-safe persistence shape. */

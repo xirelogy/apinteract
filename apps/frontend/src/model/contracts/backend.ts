@@ -22,6 +22,15 @@ export type TemporaryRequestVariableProfile =
 export type VariablePreview = components["schemas"]["VariablePreview"];
 export type VariablePreviewResult =
   components["schemas"]["VariablePreviewResult"];
+export type ImportProviderId = components["schemas"]["ImportProviderId"];
+export type ImportProviderManifest =
+  components["schemas"]["ImportProviderManifest"];
+export type ImportProvidersView = components["schemas"]["ImportProvidersView"];
+export type ImportPlan = components["schemas"]["ImportPlan"];
+export type ImportedRequest = components["schemas"]["ImportedRequest"];
+export type ImportApplyResult = components["schemas"]["ImportApplyResult"];
+export type CapturedExchangeView =
+  components["schemas"]["CapturedExchangeView"];
 export type RequestView = components["schemas"]["RequestView"];
 export type RequestBodyDefinition =
   components["schemas"]["RequestBodyDefinition"];
@@ -33,4 +42,9 @@ export type RequestRevisionView = components["schemas"]["RequestRevisionView"];
 export type HttpMethod = components["schemas"]["HttpMethod"];
 export type RequestField = components["schemas"]["RequestField"];
 export type ExecutionView = components["schemas"]["ExecutionView"];
+export type RequestExchangeSummary =
+  components["schemas"]["RequestExchangeSummary"];
+export type RequestExchangeListView =
+  components["schemas"]["RequestExchangeListView"];
+export type RequestExchangeView = components["schemas"]["RequestExchangeView"];
 export type Problem = components["schemas"]["Problem"];

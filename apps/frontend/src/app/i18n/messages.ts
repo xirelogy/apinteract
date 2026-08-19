@@ -192,6 +192,40 @@ export const enUsMessages = {
     variableValue: "Variable value {index}",
     variables: "Variables",
   },
+  import: {
+    action: "Import",
+    capturedResponse: "Captured response",
+    childCollection: "New collection inside {name}",
+    chooseFile: "Choose an import type first",
+    chooseFormatFile: "Choose {format} file",
+    collectionName: "Collection name",
+    destination: "Destination",
+    diagnostics: "Import notes",
+    failed: "The source could not be imported.",
+    format: "Import type",
+    metadata: {
+      capturedResponses: "Captured responses",
+      format: "Import type",
+      heading: "Import details",
+      serverUrl: "Server URL",
+      source: "Source file",
+      title: "Title",
+    },
+    preview: "Preview",
+    requests: "Requests",
+    selectType: "Select import type",
+    selectedOfTotal: "{selected} of {total} selected",
+    severity: {
+      error: "Error",
+      info: "Information",
+      warning: "Warning",
+    },
+    source: "Source file",
+    sourceTooLarge: "The import source must be 512 KiB or smaller.",
+    temporaryRequest: "Temporary request",
+    title: "Import requests",
+    workspaceCollection: "New collection in workspace",
+  },
   variables: {
     description:
       "Values in this scope override lower-precedence variables with the same name.",
@@ -392,6 +426,9 @@ export const enUsMessages = {
   response: {
     base64Encoded: "base64 encoded",
     binaryBody: "Binary or non-previewable response body.",
+    captured: "Captured",
+    capturedBodyUnavailable:
+      "Response content was not included in the imported HAR.",
     bytes: "{count} byte | {count} bytes",
     details: "Response details",
     derivedHeader: "derived",
@@ -399,6 +436,19 @@ export const enUsMessages = {
     empty: "Send the request to inspect its response.",
     emptyBody: "No request body.",
     error: "Error",
+    exchange: {
+      label: "Response history",
+      failed: "Failed",
+      completed: "Completed",
+      kind: {
+        capture: "Capture",
+        execution: "Execution",
+      },
+      source: {
+        apinteract: "APInteract",
+        har: "HAR",
+      },
+    },
     failure: {
       execution_failed: "Request execution failed",
       unknown: "Request execution failed",
