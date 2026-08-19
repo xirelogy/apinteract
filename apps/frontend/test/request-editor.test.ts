@@ -1172,10 +1172,6 @@ describe("RequestEditor", () => {
       global: { plugins: [i18n] },
     });
 
-    await wrapper
-      .findAll('[role="tab"]')
-      .find((tab) => tab.text().includes("Variables"))
-      ?.trigger("click");
     expect(wrapper.emitted("loadVariables")).toHaveLength(1);
     await wrapper.setProps({
       requestVariableProfile: {
@@ -1192,6 +1188,8 @@ describe("RequestEditor", () => {
       .findAll('[role="tab"]')
       .find((tab) => tab.text().includes("Variables"));
     expect(variablesTab?.text()).toContain("0");
+    await variablesTab?.trigger("click");
+    expect(wrapper.emitted("loadVariables")).toHaveLength(1);
     expect(wrapper.find('.inline-warning[role="alert"]').exists()).toBe(false);
     const variableName = wrapper.get('input[aria-label="Variable name 1"]');
     expect(variableName.attributes("placeholder")).toBe("Add variable");

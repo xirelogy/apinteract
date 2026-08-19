@@ -362,20 +362,24 @@ watch(
 
 watch(
   [
-    activeTab,
     () => props.request?.requestId,
     () => props.tabId,
     () => props.requestVariableProfile?.scopeId,
   ],
-  ([tab, requestId, tabId, profileScopeId]) => {
+  ([requestId, tabId, profileScopeId]) => {
     const expectedProfileScopeId = requestId ?? tabId;
-    if (tab === "variables" && profileScopeId !== expectedProfileScopeId) {
+    if (profileScopeId !== expectedProfileScopeId) {
       emit("loadVariables");
-    } else if (tab === "versions" && requestId !== undefined) {
-      emit("loadRevisions");
     }
   },
+  { immediate: true },
 );
+
+watch([activeTab, () => props.request?.requestId], ([tab, requestId]) => {
+  if (tab === "versions" && requestId !== undefined) {
+    emit("loadRevisions");
+  }
+});
 
 onBeforeUnmount(() => {
   if (previewTimer !== undefined) {
