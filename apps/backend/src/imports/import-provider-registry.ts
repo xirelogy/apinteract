@@ -1,13 +1,17 @@
 import { createHash } from "node:crypto";
 
 import {
+  type ImportDiagnostic,
   ImportSourceError,
+  type ImportedCollection,
+  type ImportedRequest,
   type ImportPlan,
   type ImportProvider,
   type ImportProviderId,
   type ImportProviderManifest,
   type ImportSource,
 } from "./import-types.js";
+import type { VariableWrite } from "../variables/variable-profile-store.js";
 
 export const MAX_IMPORT_SOURCE_BYTES = 524_288;
 export const MAX_IMPORT_REQUESTS = 200;
@@ -60,7 +64,13 @@ export class ImportProviderRegistry {
     if (itemIds.size !== plan.requests.length) {
       throw new Error("Import provider returned duplicate item IDs");
     }
-    return { ...plan, sourceFingerprint: fingerprintSource(source) };
+    validateCollections(plan.collections, plan.requests);
+    const normalizedPlan = normalizeImportVariables(plan);
+    return {
+      ...normalizedPlan,
+      diagnostics: groupDiagnostics(normalizedPlan.diagnostics),
+      sourceFingerprint: fingerprintSource(source),
+    };
   }
 
   /** Selects the single highest-confidence provider above the recognition floor. */
@@ -88,6 +98,236 @@ export class ImportProviderRegistry {
     }
     return first.provider;
   }
+}
+
+/** Validates provider collection identities, ancestry, and request routing. */
+function validateCollections(
+  collections: readonly ImportedCollection[],
+  requests: readonly ImportedRequest[],
+): void {
+  const keys = new Set(
+    collections.map((collection) => collection.collectionKey),
+  );
+  if (keys.size !== collections.length || keys.has("")) {
+    throw new Error("Import provider returned invalid collection keys");
+  }
+  for (const collection of collections) {
+    if (
+      collection.parentCollectionKey !== null &&
+      !keys.has(collection.parentCollectionKey)
+    ) {
+      throw new Error("Import provider returned an unknown collection parent");
+    }
+    const ancestors = new Set<string>([collection.collectionKey]);
+    let parentKey = collection.parentCollectionKey;
+    while (parentKey !== null) {
+      if (ancestors.has(parentKey)) {
+        throw new Error("Import provider returned a collection cycle");
+      }
+      ancestors.add(parentKey);
+      parentKey =
+        collections.find((candidate) => candidate.collectionKey === parentKey)
+          ?.parentCollectionKey ?? null;
+    }
+  }
+  if (
+    requests.some(
+      (request) =>
+        request.collectionKey !== null && !keys.has(request.collectionKey),
+    )
+  ) {
+    throw new Error(
+      "Import provider routed a request to an unknown collection",
+    );
+  }
+}
+
+/** Lifts each request variable baseline to its nearest imported collection. */
+function normalizeImportVariables(
+  plan: Omit<ImportPlan, "sourceFingerprint">,
+): Omit<ImportPlan, "sourceFingerprint"> {
+  const scopeVariables = new Map<string | null, VariableWrite[]>();
+  scopeVariables.set(null, [...plan.variables]);
+  for (const collection of plan.collections) {
+    scopeVariables.set(collection.collectionKey, [...collection.variables]);
+  }
+  const requestsByScope = new Map<string | null, ImportedRequest[]>();
+  for (const request of plan.requests) {
+    const scoped = requestsByScope.get(request.collectionKey) ?? [];
+    scoped.push(request);
+    requestsByScope.set(request.collectionKey, scoped);
+  }
+  const normalizedRequests = new Map<string, ImportedRequest>();
+  for (const [scopeKey, requests] of requestsByScope) {
+    const localBaselines = scopeVariables.get(scopeKey) ?? [];
+    const inheritedBaselines = inheritedScopeVariables(
+      scopeKey,
+      plan.collections,
+      scopeVariables,
+    );
+    const inheritedByName = new Map(
+      inheritedBaselines.map((variable) => [variable.name, variable] as const),
+    );
+    const localByName = new Map(
+      localBaselines.map((variable) => [variable.name, variable] as const),
+    );
+    const candidates = new Map<
+      string,
+      {
+        variable: VariableWrite;
+        signature: string;
+        count: number;
+        order: number;
+      }[]
+    >();
+    let order = 0;
+    for (const request of requests) {
+      for (const variable of request.variables) {
+        const signature = variableSignature(variable);
+        const named = candidates.get(variable.name) ?? [];
+        const existing = named.find(
+          (candidate) => candidate.signature === signature,
+        );
+        if (existing === undefined) {
+          named.push({ variable, signature, count: 1, order });
+        } else {
+          existing.count += 1;
+        }
+        candidates.set(variable.name, named);
+        order += 1;
+      }
+    }
+    for (const [name, named] of candidates) {
+      if (localByName.has(name)) continue;
+      const selected = [...named].sort(
+        (left, right) => right.count - left.count || left.order - right.order,
+      )[0];
+      const inherited = inheritedByName.get(name);
+      if (
+        selected !== undefined &&
+        (inherited === undefined ||
+          variableSignature(inherited) !== selected.signature)
+      ) {
+        localBaselines.push(selected.variable);
+        localByName.set(name, selected.variable);
+      }
+    }
+    scopeVariables.set(scopeKey, localBaselines);
+    const effectiveByName = new Map(inheritedByName);
+    for (const variable of localBaselines) {
+      effectiveByName.set(variable.name, variable);
+    }
+    for (const request of requests) {
+      normalizedRequests.set(request.itemId, {
+        ...request,
+        variables: request.variables.filter((variable) => {
+          const baseline = effectiveByName.get(variable.name);
+          return (
+            baseline === undefined ||
+            variableSignature(baseline) !== variableSignature(variable)
+          );
+        }),
+      });
+    }
+  }
+  return {
+    ...plan,
+    variables: scopeVariables.get(null) ?? [],
+    collections: plan.collections.map((collection) => ({
+      ...collection,
+      variables: scopeVariables.get(collection.collectionKey) ?? [],
+    })),
+    requests: plan.requests.map(
+      (request) => normalizedRequests.get(request.itemId) ?? request,
+    ),
+  };
+}
+
+/** Returns root-to-parent variables inherited by one imported collection scope. */
+function inheritedScopeVariables(
+  scopeKey: string | null,
+  collections: readonly ImportedCollection[],
+  scopeVariables: Map<string | null, VariableWrite[]>,
+): VariableWrite[] {
+  const collectionByKey = new Map(
+    collections.map((collection) => [collection.collectionKey, collection]),
+  );
+  const ancestorKeys: string[] = [];
+  let parentKey =
+    scopeKey === null
+      ? null
+      : (collectionByKey.get(scopeKey)?.parentCollectionKey ?? null);
+  while (parentKey !== null) {
+    ancestorKeys.push(parentKey);
+    parentKey = collectionByKey.get(parentKey)?.parentCollectionKey ?? null;
+  }
+  const effective = new Map<string, VariableWrite>();
+  for (const variable of scopeVariables.get(null) ?? []) {
+    effective.set(variable.name, variable);
+  }
+  for (const key of ancestorKeys.reverse()) {
+    for (const variable of scopeVariables.get(key) ?? []) {
+      effective.set(variable.name, variable);
+    }
+  }
+  return [...effective.values()];
+}
+
+/** Produces an internal comparison key without exposing variable contents. */
+function variableSignature(variable: VariableWrite): string {
+  if (variable.kind === "value")
+    return JSON.stringify(["value", variable.value]);
+  if (variable.kind === "alias")
+    return JSON.stringify(["alias", variable.target]);
+  if (variable.kind === "secret") {
+    return JSON.stringify([
+      "secret",
+      variable.value === undefined ? 0 : 1,
+      variable.value ?? "",
+      variable.clearValue ?? false,
+    ]);
+  }
+  return "unset";
+}
+
+/** Coalesces exact repeated notes while preserving every affected item and location. */
+function groupDiagnostics(
+  diagnostics: readonly ImportDiagnostic[],
+): readonly ImportDiagnostic[] {
+  const groups = new Map<string, ImportDiagnostic[]>();
+  for (const diagnostic of diagnostics) {
+    const key = `${diagnostic.code}\u0000${diagnostic.severity}\u0000${diagnostic.message}`;
+    const group = groups.get(key) ?? [];
+    group.push(diagnostic);
+    groups.set(key, group);
+  }
+  return [...groups.values()].map((group) => {
+    const first = group[0]!;
+    const itemIds = uniqueStrings(
+      group.flatMap((entry) => [entry.itemId, ...(entry.itemIds ?? [])]),
+    );
+    const sourceLocations = uniqueStrings(
+      group.flatMap((entry) => [
+        entry.sourceLocation,
+        ...(entry.sourceLocations ?? []),
+      ]),
+    );
+    if (group.length === 1) return first;
+    return {
+      code: first.code,
+      severity: first.severity,
+      message: first.message,
+      ...(itemIds.length === 0 ? {} : { itemIds }),
+      ...(sourceLocations.length === 0 ? {} : { sourceLocations }),
+    };
+  });
+}
+
+/** Deduplicates optional strings while retaining their first-seen order. */
+function uniqueStrings(values: readonly (string | undefined)[]): string[] {
+  return [
+    ...new Set(values.filter((value): value is string => value !== undefined)),
+  ];
 }
 
 /** Validates the common source boundary before providers inspect its contents. */

@@ -155,8 +155,13 @@ const blockingError = computed(() =>
   plan.value?.diagnostics.some(
     (diagnostic) =>
       diagnostic.severity === "error" &&
-      (diagnostic.itemId === undefined ||
-        selectedItemIds.value.includes(diagnostic.itemId)),
+      (diagnostic.itemId !== undefined
+        ? selectedItemIds.value.includes(diagnostic.itemId)
+        : diagnostic.itemIds !== undefined
+          ? diagnostic.itemIds.some((itemId) =>
+              selectedItemIds.value.includes(itemId),
+            )
+          : true),
   ),
 );
 /** Collapses repeated provider messages and presents the most severe copy first. */

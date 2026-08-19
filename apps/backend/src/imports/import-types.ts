@@ -46,7 +46,18 @@ export interface ImportDiagnostic {
   readonly severity: ImportDiagnosticSeverity;
   readonly message: string;
   readonly itemId?: string;
+  readonly itemIds?: readonly string[];
   readonly sourceLocation?: string;
+  readonly sourceLocations?: readonly string[];
+}
+
+/** Describes one provider-created collection below the imported root. */
+export interface ImportedCollection {
+  readonly collectionKey: string;
+  readonly parentCollectionKey: string | null;
+  readonly name: string;
+  readonly pathPrefix: string;
+  readonly variables: readonly VariableWrite[];
 }
 
 /** Preserves one recorded HTTP response without claiming it was executed here. */
@@ -72,6 +83,7 @@ export interface CapturedExchangeView {
 export interface ImportedRequest {
   readonly itemId: string;
   readonly sourceLocation: string;
+  readonly collectionKey: string | null;
   readonly name: string;
   readonly method: HttpMethod;
   readonly targetMode: "absolute" | "composed";
@@ -95,6 +107,8 @@ export interface ImportPlan {
   readonly sourceFingerprint: string;
   readonly suggestedName: string;
   readonly pathPrefix: string;
+  readonly variables: readonly VariableWrite[];
+  readonly collections: readonly ImportedCollection[];
   readonly requests: readonly ImportedRequest[];
   readonly diagnostics: readonly ImportDiagnostic[];
 }

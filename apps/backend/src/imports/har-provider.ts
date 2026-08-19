@@ -46,6 +46,13 @@ const DERIVED_HEADERS = new Set([
 ]);
 const MAX_CAPTURE_BODY_CHARACTERS = 262_144;
 
+/** Collects provider-specific omitted header names before one grouped report. */
+interface HarHeaderOmissions {
+  readonly requestPseudoHeaders: Map<string, Set<string>>;
+  readonly responsePseudoHeaders: Map<string, Set<string>>;
+  readonly derivedHeaders: Map<string, Set<string>>;
+}
+
 /** Imports HAR 1.2 request entries and their recorded responses. */
 export class HarImportProvider implements ImportProvider {
   readonly manifest: ImportProviderManifest = {
@@ -94,6 +101,11 @@ export class HarImportProvider implements ImportProvider {
     }
     const diagnostics: ImportDiagnostic[] = [];
     const requests: ImportedRequest[] = [];
+    const headerOmissions: HarHeaderOmissions = {
+      requestPseudoHeaders: new Map(),
+      responsePseudoHeaders: new Map(),
+      derivedHeaders: new Map(),
+    };
     log.entries.forEach((rawEntry, index) => {
       const entry = isRecord(rawEntry) ? rawEntry : null;
       const request =
@@ -131,6 +143,7 @@ export class HarImportProvider implements ImportProvider {
         itemId,
         sensitiveVariables,
         diagnostics,
+        headerOmissions,
       );
       if (!headers.some((header) => header.name.toLowerCase() === "cookie")) {
         headers.push(
@@ -149,11 +162,13 @@ export class HarImportProvider implements ImportProvider {
             entry.startedDateTime,
             itemId,
             diagnostics,
+            headerOmissions,
           )
         : undefined;
       requests.push({
         itemId,
         sourceLocation: `#/log/entries/${index}`,
+        collectionKey: null,
         name: harRequestName(method, mappedUrl.targetUrl, entry),
         method: method as HttpMethod,
         targetMode: "absolute",
@@ -168,6 +183,7 @@ export class HarImportProvider implements ImportProvider {
         ...(capturedExchange === undefined ? {} : { capturedExchange }),
       });
     });
+    appendHeaderOmissionDiagnostics(diagnostics, headerOmissions);
     if (requests.length === 0) {
       diagnostics.push({
         code: "har_no_requests",
@@ -183,6 +199,8 @@ export class HarImportProvider implements ImportProvider {
       sourceName: source.name,
       suggestedName: sourceStem(source.name),
       pathPrefix: "",
+      variables: [],
+      collections: [],
       requests,
       diagnostics,
     };
@@ -272,6 +290,7 @@ function mapHarRequestHeaders(
   itemId: string,
   variables: VariableWrite[],
   diagnostics: ImportDiagnostic[],
+  omissions: HarHeaderOmissions,
 ): RequestField[] {
   if (!Array.isArray(rawHeaders)) return [];
   const headers: RequestField[] = [];
@@ -281,21 +300,11 @@ function mapHarRequestHeaders(
     const value = stringValue(rawHeader.value);
     const normalizedName = name.toLowerCase();
     if (isHttpPseudoHeader(normalizedName)) {
-      diagnostics.push({
-        code: "har_pseudo_header_omitted",
-        severity: "info",
-        message: `HTTP pseudo-header ${name} was omitted from the imported request.`,
-        itemId,
-      });
+      recordHeaderOmission(omissions.requestPseudoHeaders, name, itemId);
       continue;
     }
     if (DERIVED_HEADERS.has(normalizedName)) {
-      diagnostics.push({
-        code: "har_derived_header_omitted",
-        severity: "info",
-        message: `Derived header ${name} was omitted.`,
-        itemId,
-      });
+      recordHeaderOmission(omissions.derivedHeaders, name, itemId);
       continue;
     }
     if (isSensitiveHeader(normalizedName)) {
@@ -427,6 +436,7 @@ function mapHarResponse(
   startedDateTime: unknown,
   itemId: string,
   diagnostics: ImportDiagnostic[],
+  omissions: HarHeaderOmissions,
 ): CapturedExchangeView | undefined {
   const status = response.status;
   if (
@@ -484,12 +494,7 @@ function mapHarResponse(
           if (!isRecord(rawHeader)) return [];
           const name = stringValue(rawHeader.name);
           if (isHttpPseudoHeader(name)) {
-            diagnostics.push({
-              code: "har_response_pseudo_header_omitted",
-              severity: "info",
-              message: `HTTP pseudo-header ${name} was omitted from the captured response.`,
-              itemId,
-            });
+            recordHeaderOmission(omissions.responsePseudoHeaders, name, itemId);
             return [];
           }
           return [
@@ -511,6 +516,63 @@ function mapHarResponse(
     bodyBytes: declaredSize,
     recordedAt: optionalTimestamp(startedDateTime),
   };
+}
+
+/** Associates one normalized omitted header with every affected request. */
+function recordHeaderOmission(
+  omissions: Map<string, Set<string>>,
+  name: string,
+  itemId: string,
+): void {
+  const normalizedName = name.toLowerCase();
+  const itemIds = omissions.get(normalizedName) ?? new Set<string>();
+  itemIds.add(itemId);
+  omissions.set(normalizedName, itemIds);
+}
+
+/** Emits one stable diagnostic for each category of headers omitted from HAR. */
+function appendHeaderOmissionDiagnostics(
+  diagnostics: ImportDiagnostic[],
+  omissions: HarHeaderOmissions,
+): void {
+  appendHeaderOmissionDiagnostic(
+    diagnostics,
+    "har_pseudo_header_omitted",
+    "HTTP pseudo-headers omitted from requests",
+    omissions.requestPseudoHeaders,
+  );
+  appendHeaderOmissionDiagnostic(
+    diagnostics,
+    "har_response_pseudo_header_omitted",
+    "HTTP pseudo-headers omitted from captured responses",
+    omissions.responsePseudoHeaders,
+  );
+  appendHeaderOmissionDiagnostic(
+    diagnostics,
+    "har_derived_header_omitted",
+    "Derived headers omitted",
+    omissions.derivedHeaders,
+  );
+}
+
+/** Appends one CSV-style omission note when the category contains headers. */
+function appendHeaderOmissionDiagnostic(
+  diagnostics: ImportDiagnostic[],
+  code: string,
+  label: string,
+  omissions: Map<string, Set<string>>,
+): void {
+  if (omissions.size === 0) return;
+  const names = [...omissions.keys()].sort();
+  const itemIds = [
+    ...new Set(names.flatMap((name) => [...(omissions.get(name) ?? [])])),
+  ];
+  diagnostics.push({
+    code,
+    severity: "info",
+    message: `${label}: ${names.join(", ")}.`,
+    itemIds,
+  });
 }
 
 /** Converts HAR name/value arrays into enabled structured fields. */

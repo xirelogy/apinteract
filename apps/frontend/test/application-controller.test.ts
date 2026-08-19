@@ -554,6 +554,8 @@ describe("ApplicationController requests", () => {
         sourceFingerprint: "a".repeat(64),
         suggestedName: "Capture",
         pathPrefix: "",
+        variables: [],
+        collections: [],
         requests: [],
         diagnostics: [],
       },
@@ -600,6 +602,81 @@ describe("ApplicationController requests", () => {
     expect(store.requestTabs.map((tab) => tab.draft.targetMode)).toEqual([
       "absolute",
       "composed",
+    ]);
+  });
+
+  it("flattens imported collection composition into a temporary request", () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151cf1";
+    const controller = new ApplicationController(
+      {} as SessionController,
+      {
+        command: vi.fn(),
+        onEvent: vi.fn(),
+      } as unknown as BackendWebSocketClient,
+    );
+    const store = useApplicationStore();
+    store.selectedWorkspaceId = workspaceId;
+    store.selectedWorkspace = {
+      workspaceId,
+      name: "Workspace",
+      role: "owner",
+      baseUrl: "",
+      headers: [],
+      revision: 0,
+    };
+    const request = {
+      itemId: "operation:GET:/items",
+      sourceLocation: "#/paths/~1items/get",
+      collectionKey: "server:one",
+      name: "List items",
+      method: "GET" as const,
+      targetMode: "composed" as const,
+      targetUrl: "/items/<<item>>",
+      query: [],
+      headers: [],
+      requestBody: { kind: "none" as const },
+      body: "",
+      preRequestScript: "",
+      postResponseScript: "",
+      variables: [{ name: "version", kind: "value" as const, value: "v2" }],
+    };
+    const plan = {
+      schemaVersion: 1 as const,
+      providerId: "openapi-json" as const,
+      providerVersion: "1.0.0",
+      sourceName: "api.json",
+      sourceFingerprint: "c".repeat(64),
+      suggestedName: "API",
+      pathPrefix: "https://api.example.test/<<version>>",
+      variables: [{ name: "version", kind: "value" as const, value: "v1" }],
+      collections: [
+        {
+          collectionKey: "server:one",
+          parentCollectionKey: null,
+          name: "Server",
+          pathPrefix: "/<<region>>",
+          variables: [
+            { name: "region", kind: "value" as const, value: "eu" },
+            { name: "item", kind: "value" as const, value: "first" },
+          ],
+        },
+      ],
+      requests: [request],
+      diagnostics: [],
+    };
+
+    controller.createImportedTemporaryRequest(plan, request);
+
+    expect(store.requestTabs[0]?.draft).toMatchObject({
+      targetMode: "absolute",
+      targetUrl:
+        "https://api.example.test/<<version>>/<<region>>/items/<<item>>",
+    });
+    expect(store.requestTabs[0]?.variableDraft).toEqual([
+      { name: "version", kind: "value", value: "v2" },
+      { name: "region", kind: "value", value: "eu" },
+      { name: "item", kind: "value", value: "first" },
     ]);
   });
 

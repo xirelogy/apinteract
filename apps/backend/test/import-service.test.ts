@@ -115,7 +115,7 @@ describe("ImportService", () => {
                 request: {
                   method: "GET",
                   url: "https://example.test/two",
-                  headers: [],
+                  headers: [{ name: "Authorization", value: "Bearer second" }],
                 },
                 response: {
                   status: 204,
@@ -134,7 +134,7 @@ describe("ImportService", () => {
         workspaceId: workspace.workspaceId,
         parentCollectionId: null,
         collectionName: "Imported capture",
-        selectedItemIds: [plan.requests[0]!.itemId],
+        selectedItemIds: [plan.requests[1]!.itemId],
         expectedSourceFingerprint: plan.sourceFingerprint,
       });
 
@@ -148,11 +148,11 @@ describe("ImportService", () => {
       ).toEqual({ name: "Imported capture" });
       expect(result.requests[0]).toMatchObject({
         parentCollectionId: result.collectionId,
-        targetUrl: "https://example.test/one",
+        targetUrl: "https://example.test/two",
         capturedExchange: {
           source: "har",
-          status: 200,
-          body: "first",
+          status: 204,
+          body: "",
         },
       });
       expect(
@@ -171,12 +171,12 @@ describe("ImportService", () => {
         userId,
         result.requests[0]!.requestId,
       );
-      expect(reopened.capturedExchange?.status).toBe(200);
+      expect(reopened.capturedExchange?.status).toBe(204);
       const secret = await database.db
         .selectFrom("variable_secrets")
         .select("payload")
         .executeTakeFirstOrThrow();
-      expect(secret.payload).toBe("Bearer private");
+      expect(secret.payload).toBe("Bearer second");
     } finally {
       await database.close();
       await rm(rootPath, { recursive: true, force: true });
@@ -228,6 +228,7 @@ describe("ImportService", () => {
         text: JSON.stringify({
           openapi: "3.1.0",
           info: { title: "Secured API", version: "1" },
+          servers: [{ url: "https://primary.example.test" }],
           components: {
             securitySchemes: {
               bearerAuth: { type: "http", scheme: "bearer" },
@@ -237,6 +238,13 @@ describe("ImportService", () => {
           paths: {
             "/profile": {
               get: { operationId: "getProfile", responses: {} },
+            },
+            "/admin": {
+              get: {
+                operationId: "getAdmin",
+                servers: [{ url: "https://admin.example.test" }],
+                responses: {},
+              },
             },
           },
         }),
@@ -251,10 +259,15 @@ describe("ImportService", () => {
         expectedSourceFingerprint: plan.sourceFingerprint,
       });
 
+      const importedPathCollectionId = result.requests[0]!.parentCollectionId;
+      if (importedPathCollectionId === null) {
+        throw new Error("Expected an imported path collection");
+      }
+      expect(importedPathCollectionId).not.toBe(result.collectionId);
       const profile = await variables.get(
         userId,
-        "request",
-        result.requests[0]!.requestId,
+        "collection",
+        result.collectionId,
       );
       expect(profile.variables).toEqual([
         expect.objectContaining({
@@ -264,11 +277,37 @@ describe("ImportService", () => {
           secretVersion: 1,
         }),
       ]);
+      expect(
+        (await variables.get(userId, "collection", importedPathCollectionId))
+          .variables,
+      ).toEqual([]);
+      const requestProfile = await variables.get(
+        userId,
+        "request",
+        result.requests[0]!.requestId,
+      );
+      expect(requestProfile.variables).toEqual([]);
+      const inheritedSecret = requestProfile.inheritedVariables.find(
+        (entry) => entry.variable.name === "bearerAuth",
+      );
+      expect(inheritedSecret).toMatchObject({
+        variable: { name: "bearerAuth", kind: "secret" },
+        source: {
+          scope: "collection",
+          scopeId: result.collectionId,
+        },
+      });
       const secret = await database.db
         .selectFrom("variable_secrets")
         .select("payload")
         .executeTakeFirstOrThrow();
       expect(secret.payload).toBeNull();
+      expect(
+        await database.db
+          .selectFrom("workspace_tree_nodes")
+          .select(({ fn }) => fn.countAll<number>().as("count"))
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ count: 4 });
       await expect(
         variables.update(userId, "workspace", workspace.workspaceId, 0, [
           { name: "ordinarySecret", kind: "secret" },

@@ -684,7 +684,9 @@ export interface components {
       severity: "info" | "warning" | "error";
       message: string;
       itemId?: string;
+      itemIds?: string[];
       sourceLocation?: string;
+      sourceLocations?: string[];
     };
     /** @description An imported HTTP response capture that was not executed by APInteract. */
     CapturedExchangeView: {
@@ -703,9 +705,18 @@ export interface components {
       recordedAt: components["schemas"]["UtcDateTime"] | null;
       importedAt?: components["schemas"]["UtcDateTime"];
     };
+    /** @description A provider-created collection below the imported root. */
+    ImportedCollection: {
+      collectionKey: string;
+      parentCollectionKey: string | null;
+      name: string;
+      pathPrefix: string;
+      variables: components["schemas"]["VariableWrite"][];
+    };
     ImportedRequest: {
       itemId: string;
       sourceLocation: string;
+      collectionKey: string | null;
       name: string;
       method: components["schemas"]["HttpMethod"];
       /** @enum {string} */
@@ -730,6 +741,8 @@ export interface components {
       sourceFingerprint: string;
       suggestedName: string;
       pathPrefix: string;
+      variables: components["schemas"]["VariableWrite"][];
+      collections: components["schemas"]["ImportedCollection"][];
       requests: components["schemas"]["ImportedRequest"][];
       diagnostics: components["schemas"]["ImportDiagnostic"][];
     };

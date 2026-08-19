@@ -5,6 +5,7 @@ import { sql, type Kysely, type Transaction } from "kysely";
 import type { AuditService } from "../audit/audit-service.js";
 import type {
   CapturedExchangeView,
+  ImportedCollection,
   ImportedRequest,
   ImportProviderId,
 } from "../imports/import-types.js";
@@ -190,6 +191,16 @@ export interface RequestCreationOptions {
 export interface RequestImportResult {
   readonly collectionId: EntityId;
   readonly requests: readonly RequestView[];
+}
+
+/** Carries one validated provider plan into the atomic persistence boundary. */
+export interface RequestImportOptions {
+  readonly providerId: ImportProviderId;
+  readonly collectionName: string;
+  readonly pathPrefix: string;
+  readonly variables: readonly VariableWrite[];
+  readonly collections: readonly ImportedCollection[];
+  readonly requests: readonly ImportedRequest[];
 }
 
 export interface ExecutionRequestSnapshot extends RequestExecutionInput {
@@ -1021,16 +1032,26 @@ export class RequestService {
     userId: EntityId,
     workspaceId: EntityId,
     parentCollectionId: EntityId | null,
-    providerId: ImportProviderId,
-    collectionName: string,
-    pathPrefix: string,
-    requests: readonly ImportedRequest[],
+    options: RequestImportOptions,
   ): Promise<RequestImportResult> {
+    const {
+      providerId,
+      collectionName,
+      pathPrefix,
+      variables,
+      collections,
+      requests,
+    } = options;
     if (requests.length === 0 || requests.length > 200) {
       throw new Error("An import must contain between 1 and 200 requests");
     }
     const normalizedCollectionName = normalizeName(collectionName);
     const normalizedPathPrefix = validateCollectionTargetTemplate(pathPrefix);
+    const normalizedCollections = collections.map((collection) => ({
+      ...collection,
+      name: normalizeName(collection.name),
+      pathPrefix: validateCollectionTargetTemplate(collection.pathPrefix),
+    }));
     const normalizedRequests = requests.map((request) => ({
       request,
       name: normalizeName(request.name),
@@ -1082,6 +1103,15 @@ export class RequestService {
           })
           .execute();
       }
+      if (variables.length > 0) {
+        await this.#variables.createImportedProfile(
+          transaction,
+          userId,
+          "collection",
+          collectionId,
+          variables,
+        );
+      }
       await this.#audit.record(transaction, {
         type: "collection.created",
         actorUserId: userId,
@@ -1093,19 +1123,111 @@ export class RequestService {
         },
       });
 
+      const collectionIds = new Map<string, EntityId>();
+      const pendingCollections = [...normalizedCollections];
+      while (pendingCollections.length > 0) {
+        const creatableIndex = pendingCollections.findIndex(
+          (collection) =>
+            collection.parentCollectionKey === null ||
+            collectionIds.has(collection.parentCollectionKey),
+        );
+        if (creatableIndex < 0) {
+          throw new Error("Imported collection hierarchy is invalid");
+        }
+        const [collection] = pendingCollections.splice(creatableIndex, 1);
+        if (collection === undefined) continue;
+        const importedParentId =
+          collection.parentCollectionKey === null
+            ? collectionId
+            : collectionIds.get(collection.parentCollectionKey);
+        if (importedParentId === undefined) {
+          throw new Error("Imported collection parent is unavailable");
+        }
+        const importedCollectionId = createEntityId();
+        await transaction
+          .insertInto("workspace_tree_nodes")
+          .values({
+            id: idToBytes(importedCollectionId),
+            workspace_id: idToBytes(workspaceId),
+            parent_collection_id: idToBytes(importedParentId),
+            kind: "collection",
+            position: await this.#nextPosition(
+              transaction,
+              workspaceId,
+              importedParentId,
+            ),
+            name: collection.name,
+            order_revision: await this.#currentOrderRevision(
+              transaction,
+              workspaceId,
+              importedParentId,
+            ),
+            created_at: now,
+          })
+          .execute();
+        if (collection.pathPrefix !== "") {
+          await transaction
+            .insertInto("collection_profiles")
+            .values({
+              collection_id: idToBytes(importedCollectionId),
+              revision: 1,
+              headers_json: "[]",
+              path_prefix: collection.pathPrefix,
+              updated_by: idToBytes(userId),
+              updated_at: now,
+            })
+            .execute();
+        }
+        if (collection.variables.length > 0) {
+          await this.#variables.createImportedProfile(
+            transaction,
+            userId,
+            "collection",
+            importedCollectionId,
+            collection.variables,
+          );
+        }
+        collectionIds.set(collection.collectionKey, importedCollectionId);
+        await this.#audit.record(transaction, {
+          type: "collection.created",
+          actorUserId: userId,
+          workspaceId,
+          data: {
+            collectionId: importedCollectionId,
+            parentCollectionId: importedParentId,
+            importProviderId: providerId,
+          },
+        });
+      }
+
       const created: RequestView[] = [];
-      for (const [position, imported] of normalizedRequests.entries()) {
+      for (const imported of normalizedRequests) {
+        const importedParentId =
+          imported.request.collectionKey === null
+            ? collectionId
+            : collectionIds.get(imported.request.collectionKey);
+        if (importedParentId === undefined) {
+          throw new Error("Imported request collection is unavailable");
+        }
         const requestId = createEntityId();
         await transaction
           .insertInto("workspace_tree_nodes")
           .values({
             id: idToBytes(requestId),
             workspace_id: idToBytes(workspaceId),
-            parent_collection_id: idToBytes(collectionId),
+            parent_collection_id: idToBytes(importedParentId),
             kind: "request",
-            position,
+            position: await this.#nextPosition(
+              transaction,
+              workspaceId,
+              importedParentId,
+            ),
             name: imported.name,
-            order_revision: 0,
+            order_revision: await this.#currentOrderRevision(
+              transaction,
+              workspaceId,
+              importedParentId,
+            ),
             created_at: now,
           })
           .execute();
@@ -1129,9 +1251,10 @@ export class RequestService {
           })
           .execute();
         if (imported.request.variables.length > 0) {
-          await this.#variables.createImportedRequestProfile(
+          await this.#variables.createImportedProfile(
             transaction,
             userId,
+            "request",
             requestId,
             imported.request.variables,
           );
@@ -1142,7 +1265,7 @@ export class RequestService {
           workspaceId,
           data: {
             requestId,
-            parentCollectionId: collectionId,
+            parentCollectionId: importedParentId,
             importProviderId: providerId,
             importItemId: imported.request.itemId,
           },

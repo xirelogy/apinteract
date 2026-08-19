@@ -1698,7 +1698,17 @@
           },
           "message": { "type": "string" },
           "itemId": { "type": "string" },
-          "sourceLocation": { "type": "string" }
+          "itemIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true
+          },
+          "sourceLocation": { "type": "string" },
+          "sourceLocations": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true
+          }
         }
       },
       "CapturedExchangeView": {
@@ -1745,12 +1755,37 @@
           "importedAt": { "$ref": "#/components/schemas/UtcDateTime" }
         }
       },
+      "ImportedCollection": {
+        "description": "A provider-created collection below the imported root.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "collectionKey",
+          "parentCollectionKey",
+          "name",
+          "pathPrefix",
+          "variables"
+        ],
+        "properties": {
+          "collectionKey": { "type": "string", "minLength": 1 },
+          "parentCollectionKey": {
+            "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }]
+          },
+          "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "pathPrefix": { "type": "string", "maxLength": 8192 },
+          "variables": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/VariableWrite" }
+          }
+        }
+      },
       "ImportedRequest": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "itemId",
           "sourceLocation",
+          "collectionKey",
           "name",
           "method",
           "targetMode",
@@ -1766,6 +1801,9 @@
         "properties": {
           "itemId": { "type": "string" },
           "sourceLocation": { "type": "string" },
+          "collectionKey": {
+            "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }]
+          },
           "name": { "type": "string", "minLength": 1, "maxLength": 200 },
           "method": { "$ref": "#/components/schemas/HttpMethod" },
           "targetMode": {
@@ -1808,6 +1846,8 @@
           "sourceFingerprint",
           "suggestedName",
           "pathPrefix",
+          "variables",
+          "collections",
           "requests",
           "diagnostics"
         ],
@@ -1826,6 +1866,14 @@
             "maxLength": 200
           },
           "pathPrefix": { "type": "string", "maxLength": 8192 },
+          "variables": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/VariableWrite" }
+          },
+          "collections": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ImportedCollection" }
+          },
           "requests": {
             "type": "array",
             "maxItems": 200,

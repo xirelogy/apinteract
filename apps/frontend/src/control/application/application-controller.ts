@@ -1100,14 +1100,19 @@ export class ApplicationController {
     this.createTemporaryRequest(null);
     const store = useApplicationStore();
     const tabId = requireSelection(store.activeRequestTabId);
-    const absolutePrefix = plan.pathPrefix.includes("://");
+    const collectionChain = importedCollectionChain(plan, imported);
+    const composedPrefix = collectionChain.reduce(
+      (prefix, collection) => joinTargetPreview(prefix, collection.pathPrefix),
+      plan.pathPrefix,
+    );
+    const absolutePrefix = composedPrefix.includes("://");
     const targetMode =
       imported.targetMode === "composed" && absolutePrefix
         ? "absolute"
         : imported.targetMode;
     const targetUrl =
       imported.targetMode === "composed"
-        ? joinTargetPreview(plan.pathPrefix, imported.targetUrl)
+        ? joinTargetPreview(composedPrefix, imported.targetUrl)
         : imported.targetUrl;
     this.#updateTab(tabId, (tab) => ({
       ...tab,
@@ -1123,7 +1128,13 @@ export class ApplicationController {
         preRequestScript: imported.preRequestScript,
         postResponseScript: imported.postResponseScript,
       },
-      variableDraft: cloneVariableWrites(imported.variables),
+      variableDraft: cloneVariableWrites(
+        mergeImportedVariables([
+          plan.variables,
+          ...collectionChain.map((collection) => collection.variables),
+          imported.variables,
+        ]),
+      ),
       variableBaseline: [],
       inheritedTarget:
         targetMode === "composed"
@@ -2126,6 +2137,50 @@ function temporaryVariableProfile(
     scopeName: temporaryVariableScopeName(tab),
     variables: cloneVariableWrites(tab.variableDraft ?? []),
   };
+}
+
+/** Returns imported collections from the root to one request's nearest parent. */
+function importedCollectionChain(
+  plan: ImportPlan,
+  request: ImportedRequest,
+): ImportPlan["collections"] {
+  const collectionByKey = new Map(
+    plan.collections.map((collection) => [
+      collection.collectionKey,
+      collection,
+    ]),
+  );
+  const reversed: ImportPlan["collections"][number][] = [];
+  const visited = new Set<string>();
+  let key = request.collectionKey;
+  while (key !== null && !visited.has(key)) {
+    visited.add(key);
+    const collection = collectionByKey.get(key);
+    if (collection === undefined) break;
+    reversed.push(collection);
+    key = collection.parentCollectionKey;
+  }
+  return reversed.reverse();
+}
+
+/** Flattens inherited imported variables with nearer declarations overriding by name. */
+function mergeImportedVariables(
+  profiles: readonly (readonly VariableWrite[])[],
+): VariableWrite[] {
+  const merged: VariableWrite[] = [];
+  const indexByName = new Map<string, number>();
+  for (const profile of profiles) {
+    for (const variable of profile) {
+      const index = indexByName.get(variable.name);
+      if (index === undefined) {
+        indexByName.set(variable.name, merged.length);
+        merged.push(variable);
+      } else {
+        merged[index] = variable;
+      }
+    }
+  }
+  return merged;
 }
 
 /** Joins an inherited target and local path across a single slash boundary. */

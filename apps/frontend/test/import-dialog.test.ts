@@ -19,10 +19,13 @@ describe("ImportDialog", () => {
       sourceFingerprint: "a".repeat(64),
       suggestedName: "Capture",
       pathPrefix: "",
+      variables: [],
+      collections: [],
       requests: [
         {
           itemId: "entry:0",
           sourceLocation: "#/log/entries/0",
+          collectionKey: null,
           name: "GET /items",
           method: "GET" as const,
           targetMode: "absolute" as const,
@@ -49,6 +52,12 @@ describe("ImportDialog", () => {
         },
       ],
       diagnostics: [
+        {
+          code: "har_other_entry_invalid",
+          severity: "error" as const,
+          message: "Another request cannot be imported.",
+          itemIds: ["entry:other"],
+        },
         {
           code: "har_response_unavailable",
           severity: "info" as const,
@@ -195,8 +204,8 @@ describe("ImportDialog", () => {
       wrapper
         .findAll(".import-diagnostics li")
         .map((note) => note.attributes("data-severity")),
-    ).toEqual(["warning", "info"]);
-    expect(wrapper.findAll(".import-diagnostics li")).toHaveLength(2);
+    ).toEqual(["error", "warning", "info"]);
+    expect(wrapper.findAll(".import-diagnostics li")).toHaveLength(3);
     expect(wrapper.get('[data-severity="warning"] strong').text()).toBe(
       "Warning",
     );
@@ -228,6 +237,7 @@ describe("ImportDialog", () => {
       body: "",
       preRequestScript: "",
       postResponseScript: "",
+      collectionKey: null,
       variables: [],
     }));
     const plan = {
@@ -238,6 +248,8 @@ describe("ImportDialog", () => {
       sourceFingerprint: "b".repeat(64),
       suggestedName: "Example API",
       pathPrefix: "https://api.example.test/v1",
+      variables: [],
+      collections: [],
       requests,
       diagnostics: [],
     };

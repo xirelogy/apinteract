@@ -7,6 +7,7 @@ import type {
 import type { VariableWrite } from "../variables/variable-profile-store.js";
 import {
   type ImportDiagnostic,
+  type ImportedCollection,
   type ImportedRequest,
   type ImportPlan,
   type ImportProbeResult,
@@ -41,14 +42,14 @@ const METHOD_NAMES = new Map(
 export class OpenApiJsonImportProvider implements ImportProvider {
   readonly manifest: ImportProviderManifest = {
     id: "openapi-json",
-    version: "1.0.0",
+    version: "1.2.0",
     label: "OpenAPI JSON",
     acceptedExtensions: [".json"],
     acceptedMediaTypes: ["application/json"],
     inputKinds: ["file"],
     capabilities: {
       multipleRequests: true,
-      hierarchy: false,
+      hierarchy: true,
       attachments: false,
       capturedResponses: false,
       responseExamples: true,
@@ -85,7 +86,7 @@ export class OpenApiJsonImportProvider implements ImportProvider {
     const suggestedName = (
       stringValue(info.title).trim() || sourceStem(source.name)
     ).slice(0, 200);
-    const server = resolveServerUrl(document, diagnostics);
+    const mappedRequests: MappedOpenApiRequest[] = [];
     const paths = isRecord(document.paths) ? document.paths : {};
     for (const [path, rawPathItem] of Object.entries(paths)) {
       const pathItem = resolveLocalReference(
@@ -103,15 +104,15 @@ export class OpenApiJsonImportProvider implements ImportProvider {
         );
         if (!isRecord(operation)) continue;
         const itemId = `operation:${method}:${path}`;
-        if (unknownArray(operation.servers).length > 0) {
-          diagnostics.push({
-            code: "openapi_operation_server_ignored",
-            severity: "warning",
-            message:
-              "An operation-level server override was not selected; the document server is used.",
-            itemId,
-          });
-        }
+        const sourceLocation = `#/paths/${escapePointer(path)}/${methodName}`;
+        const server = resolveEffectiveServer(
+          document,
+          pathItem,
+          operation,
+          itemId,
+          sourceLocation,
+          diagnostics,
+        );
         const parameters = mergeParameters(
           document,
           pathItem.parameters,
@@ -150,27 +151,39 @@ export class OpenApiJsonImportProvider implements ImportProvider {
             itemId,
           });
         }
-        requests.push({
-          itemId,
-          sourceLocation: `#/paths/${escapePointer(path)}/${methodName}`,
-          name: requestName(operation, method, path),
-          method,
-          targetMode: "composed",
-          targetUrl: mapped.targetUrl,
-          query: [...mapped.query, ...security.query],
-          headers: [...mapped.headers, ...security.headers],
-          requestBody: body.requestBody,
-          body: body.legacyBody,
-          preRequestScript: "",
-          postResponseScript: "",
-          variables: [
-            ...server.variables,
-            ...mapped.variables,
-            ...security.variables,
-          ],
+        mappedRequests.push({
+          server,
+          path,
+          tag: primaryOperationTag(operation, itemId, diagnostics),
+          request: {
+            itemId,
+            sourceLocation,
+            collectionKey: null,
+            name: requestName(operation, method, path),
+            method,
+            targetMode: "composed",
+            targetUrl: mapped.targetUrl,
+            query: [...mapped.query, ...security.query],
+            headers: [...mapped.headers, ...security.headers],
+            requestBody: body.requestBody,
+            body: body.legacyBody,
+            preRequestScript: "",
+            postResponseScript: "",
+            variables: [
+              ...server.variables,
+              ...mapped.variables,
+              ...security.variables,
+            ],
+          },
         });
       }
     }
+    const hierarchy = buildOpenApiHierarchy(
+      mappedRequests,
+      declaredTagOrder(document.tags),
+      diagnostics,
+    );
+    requests.push(...hierarchy.requests);
     if (requests.length === 0) {
       diagnostics.push({
         code: "openapi_no_operations",
@@ -186,49 +199,440 @@ export class OpenApiJsonImportProvider implements ImportProvider {
       providerVersion: this.manifest.version,
       sourceName: source.name,
       suggestedName,
-      pathPrefix: server.url,
+      pathPrefix: hierarchy.pathPrefix,
+      variables: hierarchy.variables,
+      collections: hierarchy.collections,
       requests,
       diagnostics,
     };
   }
 }
 
-/** Resolves the first OpenAPI server and substitutes declared server defaults. */
-function resolveServerUrl(
-  document: Record<string, unknown>,
+/** Represents one normalized effective server boundary used for composition. */
+interface ResolvedOpenApiServer {
+  readonly key: string;
+  readonly url: string;
+  readonly variables: readonly VariableWrite[];
+}
+
+/** Retains provider metadata needed to build the imported collection tree. */
+interface MappedOpenApiRequest {
+  readonly request: ImportedRequest;
+  readonly server: ResolvedOpenApiServer;
+  readonly path: string;
+  readonly tag: string | null;
+}
+
+/** Contains the root profile and routed requests produced from OpenAPI groups. */
+interface OpenApiHierarchy {
+  readonly pathPrefix: string;
+  readonly variables: readonly VariableWrite[];
+  readonly collections: readonly ImportedCollection[];
+  readonly requests: readonly ImportedRequest[];
+}
+
+/** Builds tag, optional server, and path collections without request overrides. */
+function buildOpenApiHierarchy(
+  mappedRequests: readonly MappedOpenApiRequest[],
+  tagOrder: readonly string[],
   diagnostics: ImportDiagnostic[],
-): { readonly url: string; readonly variables: VariableWrite[] } {
-  const server = unknownArray(document.servers)[0];
-  if (unknownArray(document.servers).length > 1) {
+): OpenApiHierarchy {
+  const serverGroups = new Map<string, ResolvedOpenApiServer>();
+  for (const mapped of mappedRequests) {
+    if (!serverGroups.has(mapped.server.key)) {
+      serverGroups.set(mapped.server.key, mapped.server);
+    }
+  }
+  const pathPrefix =
+    serverGroups.size === 1 ? [...serverGroups.values()][0]!.url : "";
+  const variables = collectRootVariables(mappedRequests, diagnostics);
+  const collections: ImportedCollection[] = [];
+  const requests: ImportedRequest[] = [];
+  const pathCollectionKeys = new Set<string>();
+  const usesTagCollections = mappedRequests.some(
+    (mapped) => mapped.tag !== null,
+  );
+
+  if (!usesTagCollections) {
+    if (serverGroups.size > 1) {
+      collections.push(
+        ...[...serverGroups.values()].map((server) => ({
+          collectionKey: server.key,
+          parentCollectionKey: null,
+          name: serverCollectionName(server),
+          pathPrefix: server.url,
+          variables: [],
+        })),
+      );
+    }
+    for (const mapped of mappedRequests) {
+      routeMappedRequest(
+        mapped,
+        serverGroups.size > 1 ? mapped.server.key : null,
+        collections,
+        requests,
+        pathCollectionKeys,
+      );
+    }
+    return { pathPrefix, variables, collections, requests };
+  }
+
+  const requestsByTag = new Map<string | null, MappedOpenApiRequest[]>();
+  for (const mapped of mappedRequests) {
+    const grouped = requestsByTag.get(mapped.tag) ?? [];
+    grouped.push(mapped);
+    requestsByTag.set(mapped.tag, grouped);
+  }
+  const orderedTags = [
+    ...tagOrder.filter((tag) => requestsByTag.has(tag)),
+    ...[...requestsByTag.keys()].filter(
+      (tag) => tag !== null && !tagOrder.includes(tag),
+    ),
+    ...(requestsByTag.has(null) ? [null] : []),
+  ];
+  for (const tag of orderedTags) {
+    const taggedRequests = requestsByTag.get(tag) ?? [];
+    const tagKey = openApiTagCollectionKey(tag);
+    const tagServers = new Map<string, ResolvedOpenApiServer>();
+    for (const mapped of taggedRequests) {
+      if (!tagServers.has(mapped.server.key)) {
+        tagServers.set(mapped.server.key, mapped.server);
+      }
+    }
+    const tagOwnsServerPrefix = serverGroups.size > 1 && tagServers.size === 1;
+    collections.push({
+      collectionKey: tagKey,
+      parentCollectionKey: null,
+      name: openApiTagCollectionName(tag),
+      pathPrefix: tagOwnsServerPrefix ? [...tagServers.values()][0]!.url : "",
+      variables: [],
+    });
+    const tagUsesServerCollections =
+      serverGroups.size > 1 && tagServers.size > 1;
+    const serverKeys = new Map<string, string>();
+    if (tagUsesServerCollections) {
+      for (const server of tagServers.values()) {
+        const collectionKey = openApiTaggedServerCollectionKey(
+          tagKey,
+          server.key,
+        );
+        serverKeys.set(server.key, collectionKey);
+        collections.push({
+          collectionKey,
+          parentCollectionKey: tagKey,
+          name: serverCollectionName(server),
+          pathPrefix: server.url,
+          variables: [],
+        });
+      }
+    }
+    for (const mapped of taggedRequests) {
+      routeMappedRequest(
+        mapped,
+        tagUsesServerCollections
+          ? (serverKeys.get(mapped.server.key) ?? tagKey)
+          : tagKey,
+        collections,
+        requests,
+        pathCollectionKeys,
+      );
+    }
+  }
+  return { pathPrefix, variables, collections, requests };
+}
+
+/** Adds one path collection once and routes an operation beneath it. */
+function routeMappedRequest(
+  mapped: MappedOpenApiRequest,
+  parentCollectionKey: string | null,
+  collections: ImportedCollection[],
+  requests: ImportedRequest[],
+  pathCollectionKeys: Set<string>,
+): void {
+  const pathKey = openApiPathCollectionKey(
+    parentCollectionKey,
+    mapped.server.key,
+    mapped.path,
+  );
+  if (!pathCollectionKeys.has(pathKey)) {
+    pathCollectionKeys.add(pathKey);
+    collections.push({
+      collectionKey: pathKey,
+      parentCollectionKey,
+      name: openApiPathCollectionName(mapped.path),
+      pathPrefix: mapped.request.targetUrl,
+      variables: [],
+    });
+  }
+  requests.push({
+    ...mapped.request,
+    collectionKey: pathKey,
+    targetUrl: "",
+    variables: [],
+  });
+}
+
+/** Chooses one deterministic root declaration and reports conflicting defaults. */
+function collectRootVariables(
+  mappedRequests: readonly MappedOpenApiRequest[],
+  diagnostics: ImportDiagnostic[],
+): VariableWrite[] {
+  const variables: VariableWrite[] = [];
+  const declarations = new Map<
+    string,
+    { readonly variable: VariableWrite; readonly itemId: string }
+  >();
+  for (const mapped of mappedRequests) {
+    for (const variable of mapped.request.variables) {
+      const existing = declarations.get(variable.name);
+      if (existing === undefined) {
+        declarations.set(variable.name, {
+          variable,
+          itemId: mapped.request.itemId,
+        });
+        variables.push(variable);
+      } else if (
+        openApiVariableSignature(existing.variable) !==
+        openApiVariableSignature(variable)
+      ) {
+        diagnostics.push({
+          code: "openapi_variable_default_conflict",
+          severity: "warning",
+          message: `Variable ${variable.name} has conflicting OpenAPI defaults; the first imported value was kept.`,
+          itemIds: [existing.itemId, mapped.request.itemId],
+        });
+      }
+    }
+  }
+  return variables;
+}
+
+/** Compares imported declarations without including their values in diagnostics. */
+function openApiVariableSignature(variable: VariableWrite): string {
+  if (variable.kind === "value")
+    return JSON.stringify(["value", variable.value]);
+  if (variable.kind === "alias")
+    return JSON.stringify(["alias", variable.target]);
+  if (variable.kind === "secret") {
+    return JSON.stringify(["secret", variable.value ?? null]);
+  }
+  return "unset";
+}
+
+/** Applies operation, path, and document server precedence for one operation. */
+function resolveEffectiveServer(
+  document: Record<string, unknown>,
+  pathItem: Record<string, unknown>,
+  operation: Record<string, unknown>,
+  itemId: string,
+  operationLocation: string,
+  diagnostics: ImportDiagnostic[],
+): ResolvedOpenApiServer {
+  const candidates = [
+    {
+      servers: unknownArray(operation.servers),
+      label: "operation",
+      location: `${operationLocation}/servers/0`,
+    },
+    {
+      servers: unknownArray(pathItem.servers),
+      label: "path",
+      location: `${operationLocation.slice(0, operationLocation.lastIndexOf("/"))}/servers/0`,
+    },
+    {
+      servers: unknownArray(document.servers),
+      label: "document",
+      location: "#/servers/0",
+    },
+  ];
+  const selected = candidates.find((candidate) => candidate.servers.length > 0);
+  if (selected === undefined) {
+    return { key: "server:none", url: "", variables: [] };
+  }
+  if (selected.servers.length > 1) {
     diagnostics.push({
       code: "openapi_server_selected",
       severity: "info",
-      message: "The first document server was selected for this import.",
-      sourceLocation: "#/servers/0",
+      message: `The first ${selected.label} server was selected; ${selected.servers.length - 1} alternative${selected.servers.length === 2 ? "" : "s"} were not imported.`,
+      itemId,
+      sourceLocation: selected.location,
     });
   }
-  if (!isRecord(server)) return { url: "", variables: [] };
-  let url = stringValue(server.url);
-  const requestVariables: VariableWrite[] = [];
-  const requestVariableNames = new Set<string>();
+  return resolveServerTemplate(
+    selected.servers[0],
+    selected.location,
+    itemId,
+    diagnostics,
+  );
+}
+
+/** Preserves a server template as APInteract interpolation and variable defaults. */
+function resolveServerTemplate(
+  rawServer: unknown,
+  sourceLocation: string,
+  itemId: string,
+  diagnostics: ImportDiagnostic[],
+): ResolvedOpenApiServer {
+  if (!isRecord(rawServer) || stringValue(rawServer.url).trim() === "") {
+    diagnostics.push({
+      code: "openapi_server_invalid",
+      severity: "error",
+      message: "The effective OpenAPI server does not contain a usable URL.",
+      itemId,
+      sourceLocation,
+    });
+    return { key: `server:invalid:${itemId}`, url: "", variables: [] };
+  }
+  let url = stringValue(rawServer.url).trim();
+  const serverVariables: VariableWrite[] = [];
+  const serverVariableNames = new Set<string>();
+  const server = rawServer;
   const variables = isRecord(server.variables) ? server.variables : {};
   url = url.replace(/\{([^{}]+)\}/g, (_match, name: string) => {
+    const variableName = uniqueVariableName(name, serverVariableNames);
+    serverVariableNames.add(variableName);
     const definition = variables[name];
-    if (isRecord(definition) && definition.default !== undefined) {
-      return editableValue(definition.default);
-    }
-    diagnostics.push({
-      code: "openapi_server_variable_unresolved",
-      severity: "warning",
-      message: `Server variable ${name} has no default and was converted to an APInteract variable.`,
-      sourceLocation: "#/servers/0",
+    const hasDefault = isRecord(definition) && definition.default !== undefined;
+    serverVariables.push({
+      name: variableName,
+      kind: "value",
+      value: hasDefault ? editableValue(definition.default) : "",
     });
-    const variableName = uniqueVariableName(name, requestVariableNames);
-    requestVariableNames.add(variableName);
-    requestVariables.push({ name: variableName, kind: "value", value: "" });
+    if (!hasDefault) {
+      diagnostics.push({
+        code: "openapi_server_variable_unresolved",
+        severity: "warning",
+        message: `Server variable ${name} has no default and requires a value.`,
+        itemId,
+        sourceLocation,
+      });
+    }
     return `<<${variableName}>>`;
   });
-  return { url, variables: requestVariables };
+  if (/[{}]/u.test(url) || hasUnsupportedServerScheme(url)) {
+    diagnostics.push({
+      code: "openapi_server_unsupported",
+      severity: "error",
+      message: `The effective OpenAPI server ${url} cannot be represented as a composed HTTP target.`,
+      itemId,
+      sourceLocation,
+    });
+  }
+  const normalizedUrl = normalizeServerBoundary(url);
+  return {
+    key: `server:${createHash("sha256").update(normalizedUrl).digest("hex").slice(0, 16)}`,
+    url: normalizedUrl,
+    variables: serverVariables,
+  };
+}
+
+/** Rejects explicit non-HTTP schemes while continuing to support relative servers. */
+function hasUnsupportedServerScheme(url: string): boolean {
+  const match = /^([A-Za-z][A-Za-z0-9+.-]*):/u.exec(url);
+  const scheme = match?.[1]?.toLowerCase();
+  return scheme !== undefined && scheme !== "http" && scheme !== "https";
+}
+
+/** Normalizes equivalent trailing slashes without inventing a common prefix. */
+function normalizeServerBoundary(url: string): string {
+  if (url === "/") return url;
+  return url.replace(/\/+$/u, "");
+}
+
+/** Derives a compact deterministic collection name for one server group. */
+function serverCollectionName(server: ResolvedOpenApiServer): string {
+  if (server.url === "") return "No server";
+  try {
+    const parsed = new URL(server.url.replace(/<<[^<>]+>>/gu, "variable"));
+    return `${parsed.host}${parsed.pathname === "/" ? "" : parsed.pathname}`.slice(
+      0,
+      200,
+    );
+  } catch {
+    return server.url.slice(0, 200);
+  }
+}
+
+/** Creates a stable provider-local key for one parent, server, and API path. */
+function openApiPathCollectionKey(
+  parentCollectionKey: string | null,
+  serverKey: string,
+  path: string,
+): string {
+  return `path:${createHash("sha256")
+    .update(parentCollectionKey ?? "root")
+    .update("\u0000")
+    .update(serverKey)
+    .update("\u0000")
+    .update(path)
+    .digest("hex")
+    .slice(0, 16)}`;
+}
+
+/** Chooses the first operation tag as the tree-compatible logical parent. */
+function primaryOperationTag(
+  operation: Record<string, unknown>,
+  itemId: string,
+  diagnostics: ImportDiagnostic[],
+): string | null {
+  const tags = [
+    ...new Set(
+      unknownArray(operation.tags)
+        .filter((tag): tag is string => typeof tag === "string")
+        .map((tag) => tag.trim())
+        .filter((tag) => tag !== ""),
+    ),
+  ];
+  const primary = tags[0] ?? null;
+  if (primary !== null && tags.length > 1) {
+    diagnostics.push({
+      code: "openapi_additional_tags_not_grouped",
+      severity: "info",
+      message: `Operation was grouped under tag ${primary}; additional tags were not represented: ${tags.slice(1).join(", ")}.`,
+      itemId,
+    });
+  }
+  return primary;
+}
+
+/** Reads the explicit top-level tag order used by OpenAPI tooling. */
+function declaredTagOrder(rawTags: unknown): string[] {
+  return [
+    ...new Set(
+      unknownArray(rawTags)
+        .flatMap((tag) => (isRecord(tag) ? [stringValue(tag.name).trim()] : []))
+        .filter((tag) => tag !== ""),
+    ),
+  ];
+}
+
+/** Creates a stable key for one declared or synthetic untagged group. */
+function openApiTagCollectionKey(tag: string | null): string {
+  if (tag === null) return "tag:untagged";
+  return `tag:${createHash("sha256").update(tag).digest("hex").slice(0, 16)}`;
+}
+
+/** Creates a server key scoped beneath a logical tag collection. */
+function openApiTaggedServerCollectionKey(
+  tagKey: string,
+  serverKey: string,
+): string {
+  return `tag-server:${createHash("sha256")
+    .update(tagKey)
+    .update("\u0000")
+    .update(serverKey)
+    .digest("hex")
+    .slice(0, 16)}`;
+}
+
+/** Bounds logical group names to collection constraints. */
+function openApiTagCollectionName(tag: string | null): string {
+  return (tag ?? "Untagged").slice(0, 200);
+}
+
+/** Uses the explicit OpenAPI path as the compact path-collection label. */
+function openApiPathCollectionName(path: string): string {
+  return (path.trim() || "/").slice(0, 200);
 }
 
 /** Resolves a local JSON Pointer reference while rejecting external retrieval. */

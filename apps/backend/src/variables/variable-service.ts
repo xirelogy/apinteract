@@ -236,18 +236,19 @@ export class VariableService {
     );
   }
 
-  /** Creates an imported request profile that may contain unset credential secrets. */
-  async createImportedRequestProfile(
+  /** Creates a trusted imported profile that may contain unset credential secrets. */
+  async createImportedProfile(
     transaction: Transaction<DatabaseSchema>,
     userId: EntityId,
-    requestId: EntityId,
+    scopeKind: EditableVariableScopeKind,
+    scopeId: EntityId,
     variables: readonly VariableWrite[],
   ): Promise<void> {
     await this.#updateInTransaction(
       transaction,
       userId,
-      "request",
-      requestId,
+      scopeKind,
+      scopeId,
       0,
       variables,
       { sessionId: null, allowUnconfiguredSecrets: true },
