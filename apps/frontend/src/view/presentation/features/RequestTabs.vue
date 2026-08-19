@@ -90,6 +90,32 @@ function closeTabLabel(tab: WorkbenchTab | null): string {
       });
 }
 
+/** Converts vertical wheel movement into horizontal movement for overflowing tabs. */
+function handleTabWheel(event: WheelEvent): void {
+  const list = event.currentTarget;
+  if (
+    !(list instanceof HTMLElement) ||
+    event.ctrlKey ||
+    Math.abs(event.deltaX) >= Math.abs(event.deltaY) ||
+    list.scrollWidth <= list.clientWidth
+  ) {
+    return;
+  }
+
+  const pixelDelta =
+    event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? event.deltaY * 16
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? event.deltaY * list.clientWidth
+        : event.deltaY;
+  const direction = getComputedStyle(list).direction === "rtl" ? -1 : 1;
+  const previousScrollPosition = list.scrollLeft;
+  list.scrollLeft += direction * pixelDelta;
+  if (list.scrollLeft !== previousScrollPosition) {
+    event.preventDefault();
+  }
+}
+
 /** Provides roving focus, activation, and deletion for request document tabs. */
 function handleTabKeydown(event: KeyboardEvent): void {
   const list = event.currentTarget;
@@ -143,6 +169,7 @@ function handleTabKeydown(event: KeyboardEvent): void {
       class="request-tab-list"
       role="tablist"
       :aria-label="t('workbench.openTabs')"
+      @wheel="handleTabWheel"
       @keydown="handleTabKeydown"
     >
       <div

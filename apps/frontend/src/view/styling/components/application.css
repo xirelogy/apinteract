@@ -453,8 +453,9 @@
 
 .request-tab {
   display: grid;
-  grid-template-columns: minmax(8rem, 13rem) var(--control-height-compact);
-  min-width: 0;
+  grid-template-columns: minmax(7rem, 10rem) var(--control-height-compact);
+  min-width: calc(7rem + var(--control-height-compact));
+  flex-shrink: 0;
   border-inline-end: 1px solid var(--border-subtle);
   border-bottom: 2px solid transparent;
   background: var(--surface-secondary);
@@ -481,8 +482,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 0;
-  padding-inline-start: var(--space-3);
+  padding-block: 0;
+  padding-inline: var(--space-3) var(--space-2);
   text-align: start;
 }
 
