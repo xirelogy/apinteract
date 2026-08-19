@@ -165,6 +165,13 @@ describe("CollectionPropertiesDialog", () => {
     const saveButton = wrapper.get('button[aria-label="Save"]');
     expect(saveButton.attributes("form")).toBe("collection-properties-form");
     expect(saveButton.classes()).toContain("primary-button");
+    const propertyTabs = wrapper.findAll('[role="tab"]');
+    expect(
+      propertyTabs.find((tab) => tab.text().includes("Common headers"))?.text(),
+    ).toContain("2");
+    expect(
+      propertyTabs.find((tab) => tab.text().includes("Variables"))?.text(),
+    ).toContain("0");
 
     await vi.advanceTimersByTimeAsync(150);
     expect(wrapper.emitted("preview")).toEqual([
@@ -514,9 +521,19 @@ describe("WorkspacePropertiesDialog", () => {
     });
 
     expect(wrapper.find(".resource-dialog-context").exists()).toBe(false);
+    const propertyTabs = wrapper.findAll('[role="tab"]');
+    const headersTab = propertyTabs.find((tab) =>
+      tab.text().includes("Common headers"),
+    );
+    const variablesTab = propertyTabs.find((tab) =>
+      tab.text().includes("Variables"),
+    );
+    expect(headersTab?.text()).toContain("0");
+    expect(variablesTab?.text()).toContain("0");
     const workspaceHeader = wrapper.get('input[aria-label="Header name 1"]');
     expect(workspaceHeader.attributes("placeholder")).toBe("Add common header");
     await workspaceHeader.setValue("X-Workspace");
+    expect(headersTab?.text()).toContain("1");
     await wrapper
       .get('input[aria-label="Header value 1"]')
       .setValue("platform");
@@ -532,6 +549,7 @@ describe("WorkspacePropertiesDialog", () => {
     );
     expect(workspaceVariable.attributes("placeholder")).toBe("Add variable");
     await workspaceVariable.setValue("team");
+    expect(variablesTab?.text()).toContain("1");
     await wrapper
       .get('input[aria-label="Variable value 1"]')
       .setValue("platform");

@@ -76,6 +76,12 @@ const headers = ref<RequestField[]>(
 );
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 const variables = ref<readonly VariableWrite[]>(props.draft?.variables ?? []);
+const headerCount = computed(
+  () => meaningfulRequestFields(headers.value).length,
+);
+const variableCount = ref(
+  props.draft?.variables.length ?? props.variableProfile.variables.length,
+);
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
 const referencedVariableNames = computed(() =>
   collectTemplateVariableNames([baseUrl.value]),
@@ -272,9 +278,11 @@ function save(): void {
           >
             <TabsTrigger class="tab-button" value="headers">
               {{ t("collection.commonHeaders") }}
+              <span class="tab-count">{{ headerCount }}</span>
             </TabsTrigger>
             <TabsTrigger class="tab-button" value="variables">
               {{ t("environment.variables") }}
+              <span class="tab-count">{{ variableCount }}</span>
             </TabsTrigger>
           </TabsList>
           <TabsPanel value="headers" class="collection-properties-section">
@@ -381,6 +389,7 @@ function save(): void {
               :inherited-variables="variableProfile.inheritedVariables"
               :can-edit="canEdit"
               :busy="busy"
+              @count-change="variableCount = $event"
               @change="updateVariables"
             />
           </TabsPanel>
