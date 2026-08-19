@@ -55,6 +55,7 @@ import FormValueTypeToggle, {
   type FormValueType,
 } from "@/view/presentation/controls/FormValueTypeToggle.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
+import InfoPopover from "@/view/presentation/controls/InfoPopover.vue";
 import HeaderMergeModeToggle from "@/view/presentation/controls/HeaderMergeModeToggle.vue";
 import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
@@ -1744,7 +1745,15 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 <span class="script-editor-title">
                   {{ t("scripting.preRequest") }}
                 </span>
-                <span>{{ t("scripting.preRequestDescription") }}</span>
+                <InfoPopover
+                  :label="
+                    t('common.actions.moreInformation', {
+                      topic: t('scripting.preRequest'),
+                    })
+                  "
+                >
+                  {{ t("scripting.preRequestDescription") }}
+                </InfoPopover>
               </div>
               <ScriptEditor
                 id="pre-request-script"
@@ -1767,7 +1776,15 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 <span class="script-editor-title">
                   {{ t("scripting.postResponse") }}
                 </span>
-                <span>{{ t("scripting.postResponseDescription") }}</span>
+                <InfoPopover
+                  :label="
+                    t('common.actions.moreInformation', {
+                      topic: t('scripting.postResponse'),
+                    })
+                  "
+                >
+                  {{ t("scripting.postResponseDescription") }}
+                </InfoPopover>
               </div>
               <ScriptEditor
                 id="post-response-script"

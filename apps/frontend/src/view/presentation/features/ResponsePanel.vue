@@ -8,6 +8,7 @@ import type {
   RequestExchangeSummary,
 } from "@/model/contracts/backend";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
+import InfoPopover from "@/view/presentation/controls/InfoPopover.vue";
 import SelectMenu, {
   type SelectMenuOption,
 } from "@/view/presentation/controls/SelectMenu.vue";
@@ -380,6 +381,15 @@ function formatScriptLocation(error: ScriptError): string {
           <div class="outgoing-request-line">
             <strong>{{ execution.outgoingRequest.method }}</strong>
             <code>{{ execution.outgoingRequest.url.value }}</code>
+            <InfoPopover
+              :label="
+                t('common.actions.moreInformation', {
+                  topic: t('response.request'),
+                })
+              "
+            >
+              {{ t("response.secretRedactionNote") }}
+            </InfoPopover>
           </div>
           <section>
             <h3>{{ t("response.requestHeaders") }}</h3>
@@ -422,9 +432,6 @@ function formatScriptLocation(error: ScriptError): string {
               execution.outgoingRequest.body.value || t("response.emptyBody")
             }}</pre>
           </section>
-          <small class="outgoing-request-note">
-            {{ t("response.secretRedactionNote") }}
-          </small>
         </div>
       </TabsPanel>
       <TabsPanel

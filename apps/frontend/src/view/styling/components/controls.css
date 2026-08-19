@@ -643,6 +643,37 @@
   background: var(--surface-danger-subtle);
 }
 
+.info-popover-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.info-popover-trigger {
+  color: var(--text-secondary);
+}
+
+.info-popover-popup {
+  position: fixed;
+  z-index: 20;
+  width: max-content;
+  max-width: min(22rem, calc(100vi - var(--space-4)));
+  padding: var(--space-3);
+  overflow-wrap: anywhere;
+  visibility: hidden;
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-body);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-primary);
+  box-shadow: var(--shadow-menu);
+}
+
+.info-popover-popup.is-positioned {
+  visibility: visible;
+}
+
 @media (width <= 47.5rem) {
   .select-menu-popup:not(.select-menu-popup-popover-mobile) {
     inset: 0;

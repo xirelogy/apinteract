@@ -277,13 +277,15 @@
   font-size: var(--font-size-sm);
 }
 
-.environment-includes {
-  display: grid;
+.resource-dialog-section-heading {
+  display: flex;
+  align-items: center;
   gap: var(--space-1);
 }
 
-.environment-includes-description {
-  margin: 0 0 var(--space-1);
+.environment-includes {
+  display: grid;
+  gap: var(--space-1);
 }
 
 .environment-include-row,
@@ -1520,21 +1522,14 @@
 
 .script-editor-heading {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
+  align-items: center;
+  gap: var(--space-1);
 }
 
 .script-editor-heading .script-editor-title {
   color: var(--text-primary);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
-}
-
-.script-editor-heading span {
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
 }
 
 .script-source-input {
@@ -1674,8 +1669,8 @@
 
 .outgoing-request-line {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
   gap: var(--space-3);
 }
 
@@ -1702,7 +1697,6 @@
 }
 
 .outgoing-request-content h3 small,
-.outgoing-request-note,
 .outgoing-request-empty {
   color: var(--text-secondary);
   font-weight: var(--font-weight-regular);

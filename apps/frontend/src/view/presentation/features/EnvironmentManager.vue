@@ -16,6 +16,7 @@ import ActionMenu, {
 } from "@/view/presentation/controls/ActionMenu.vue";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
+import InfoPopover from "@/view/presentation/controls/InfoPopover.vue";
 import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
@@ -367,15 +368,23 @@ function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
           class="environment-includes"
           aria-labelledby="environment-includes-title"
         >
-          <h3
-            id="environment-includes-title"
-            class="resource-dialog-section-title"
-          >
-            {{ t("environment.includedEnvironments") }}
-          </h3>
-          <p class="resource-dialog-context environment-includes-description">
-            {{ t("environment.includedEnvironmentsDescription") }}
-          </p>
+          <div class="resource-dialog-section-heading">
+            <h3
+              id="environment-includes-title"
+              class="resource-dialog-section-title"
+            >
+              {{ t("environment.includedEnvironments") }}
+            </h3>
+            <InfoPopover
+              :label="
+                t('common.actions.moreInformation', {
+                  topic: t('environment.includedEnvironments'),
+                })
+              "
+            >
+              {{ t("environment.includedEnvironmentsDescription") }}
+            </InfoPopover>
+          </div>
           <div
             v-for="(environmentId, index) in includedEnvironmentIds"
             :key="environmentId"
