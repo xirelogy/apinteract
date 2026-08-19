@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Layers3, Save, Trash2, X } from "@lucide/vue";
+import { Asterisk, Layers3, Save, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
@@ -52,7 +52,6 @@ const editingId = ref<string | null>(null);
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 const variableEditorKey = ref(0);
 const includedEnvironmentIds = ref<string[]>([]);
-const includeCandidateId = ref("");
 const deleteConfirmationOpen = ref(false);
 const deletionTarget = ref<{
   readonly environmentId: string;
@@ -114,7 +113,6 @@ watch(
     editingId.value = tab.environment?.environmentId ?? null;
     name.value = tab.draft.name;
     includedEnvironmentIds.value = [...tab.draft.includedEnvironmentIds];
-    includeCandidateId.value = "";
     variableEditorKey.value += 1;
   },
   { immediate: true },
@@ -145,14 +143,15 @@ function includedEnvironmentOptions(currentId: string) {
     }));
 }
 
-/** Adds the selected environment at the highest included precedence. */
-function addIncludedEnvironment(): void {
-  const candidate = includeCandidateId.value;
-  if (candidate === "" || includedEnvironmentIds.value.includes(candidate)) {
+/** Adds a selected environment immediately at the highest included precedence. */
+function addIncludedEnvironment(environmentId: string): void {
+  if (
+    environmentId === "" ||
+    includedEnvironmentIds.value.includes(environmentId)
+  ) {
     return;
   }
-  includedEnvironmentIds.value.push(candidate);
-  includeCandidateId.value = "";
+  includedEnvironmentIds.value.push(environmentId);
   publishDraft();
 }
 
@@ -393,17 +392,6 @@ function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
             @dragover.stop="includeReorder.updateDropTarget($event, index)"
             @drop.stop="includeReorder.finishDrop($event)"
           >
-            <RowReorderHandle
-              :label="
-                t('environment.reorderIncludedEnvironment', {
-                  index: index + 1,
-                })
-              "
-              :disabled="busy || !canEdit"
-              @drag-start="includeReorder.startDrag($event, index)"
-              @drag-end="includeReorder.cancelDrag"
-              @move="includeReorder.moveByKeyboard(index, $event)"
-            />
             <SelectMenu
               :model-value="environmentId"
               :options="includedEnvironmentOptions(environmentId)"
@@ -414,38 +402,49 @@ function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
               :disabled="busy || !canEdit"
               @update:model-value="replaceIncludedEnvironment(index, $event)"
             />
-            <IconButton
-              :label="
-                t('environment.removeIncludedEnvironment', {
-                  index: index + 1,
-                })
-              "
-              size="compact"
-              :disabled="busy || !canEdit"
-              @click="removeIncludedEnvironment(index)"
-            >
-              <X :size="15" aria-hidden="true" />
-            </IconButton>
+            <div class="row-actions">
+              <RowReorderHandle
+                :label="
+                  t('environment.reorderIncludedEnvironment', {
+                    index: index + 1,
+                  })
+                "
+                :disabled="busy || !canEdit"
+                @drag-start="includeReorder.startDrag($event, index)"
+                @drag-end="includeReorder.cancelDrag"
+                @move="includeReorder.moveByKeyboard(index, $event)"
+              />
+              <IconButton
+                :label="
+                  t('environment.removeIncludedEnvironment', {
+                    index: index + 1,
+                  })
+                "
+                size="compact"
+                :disabled="busy || !canEdit"
+                @click="removeIncludedEnvironment(index)"
+              >
+                <Trash2 :size="15" aria-hidden="true" />
+              </IconButton>
+            </div>
           </div>
-          <div
-            v-if="availableIncludeOptions.length > 0"
-            class="environment-include-picker"
-          >
+          <div class="environment-include-picker">
             <SelectMenu
-              v-model="includeCandidateId"
+              model-value=""
               :options="availableIncludeOptions"
               :label="t('environment.includeEnvironment')"
+              :placeholder="t('environment.includeEnvironment')"
               density="compact"
-              :disabled="busy || !canEdit"
+              :disabled="
+                busy || !canEdit || availableIncludeOptions.length === 0
+              "
+              @update:model-value="addIncludedEnvironment"
             />
-            <ButtonControl
-              type="button"
-              variant="secondary"
-              :disabled="busy || !canEdit || includeCandidateId === ''"
-              @click="addIncludedEnvironment"
-            >
-              {{ t("environment.includeAction") }}
-            </ButtonControl>
+            <div class="row-actions">
+              <span class="new-row-marker" aria-hidden="true">
+                <Asterisk :size="15" />
+              </span>
+            </div>
           </div>
         </section>
         <h3 class="resource-dialog-section-title">

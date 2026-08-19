@@ -291,15 +291,9 @@
 .environment-include-row,
 .environment-include-picker {
   display: grid;
-  grid-template-columns:
-    var(--row-reorder-handle-width) minmax(0, 1fr)
-    auto;
+  grid-template-columns: minmax(0, 1fr) var(--row-actions-width);
   align-items: center;
   gap: var(--space-1);
-}
-
-.environment-include-picker::before {
-  content: "";
 }
 
 .variable-field-heading,

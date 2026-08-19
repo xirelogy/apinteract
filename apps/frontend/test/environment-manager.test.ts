@@ -183,6 +183,72 @@ describe("EnvironmentManager", () => {
     wrapper.unmount();
   });
 
+  it("uses a trailing selector to include environments immediately", async () => {
+    const stagingId = "019fa8be-a510-76b9-b73b-69f4c7af7879";
+    const productionId = "019fa8be-a510-76b9-b73b-69f4c7af7880";
+    const saved = savedTab();
+    const tab: EnvironmentEditorTab = {
+      ...saved,
+      draft: {
+        ...saved.draft,
+        includedEnvironmentIds: [stagingId],
+      },
+      baseline: {
+        ...saved.draft,
+        includedEnvironmentIds: [stagingId],
+      },
+    };
+    const wrapper = mount(EnvironmentManager, {
+      attachTo: document.body,
+      props: {
+        environments: [
+          { environmentId, name: "Development", revision: 2 },
+          { environmentId: stagingId, name: "Staging", revision: 1 },
+          { environmentId: productionId, name: "Production", revision: 1 },
+        ],
+        selectedEnvironmentId: environmentId,
+        editorTab: tab,
+        showToolbar: false,
+        canEdit: true,
+        busy: false,
+      },
+      global: { plugins: [i18n()] },
+    });
+
+    const includedRow = wrapper.get(".environment-include-row");
+    expect(
+      [...includedRow.element.children].map((child) => child.className),
+    ).toEqual(["select-menu", "row-actions"]);
+    expect(includedRow.find(".row-reorder-handle").exists()).toBe(true);
+    expect(includedRow.find(".lucide-trash-2").exists()).toBe(true);
+
+    const picker = wrapper.get(".environment-include-picker");
+    expect(picker.find(".new-row-marker").exists()).toBe(true);
+    const pickerButton = picker.get<HTMLButtonElement>(
+      'button[aria-label="Environment to include"]',
+    );
+    expect(pickerButton.element.disabled).toBe(false);
+    await pickerButton.trigger("click");
+    await flushPromises();
+    const productionOption = [
+      ...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ].find((option) => option.textContent?.trim() === "Production");
+    expect(productionOption).toBeDefined();
+    productionOption?.click();
+    await flushPromises();
+
+    const change = wrapper.emitted("change")?.at(-1);
+    expect(change?.[1]).toMatchObject({
+      includedEnvironmentIds: [stagingId, productionId],
+    });
+    expect(
+      picker.get<HTMLButtonElement>(
+        'button[aria-label="Environment to include"]',
+      ).element.disabled,
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
   it("preserves stored secrets without rendering or resubmitting plaintext", () => {
     const tab = savedTab();
     const wrapper = mount(EnvironmentManager, {

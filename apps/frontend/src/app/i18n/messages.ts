@@ -147,7 +147,6 @@ export const enUsMessages = {
       value: "Value",
     },
     label: "Environment",
-    includeAction: "Include",
     includeEnvironment: "Environment to include",
     includedEnvironment: "Included environment {index}",
     includedEnvironments: "Included environments",
