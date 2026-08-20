@@ -110,15 +110,10 @@
   font-weight: var(--font-weight-bold);
 }
 
-.brand-mark {
-  display: grid;
-  width: 1.875rem;
-  height: 1.625rem;
-  place-items: center;
-  color: var(--surface-inverse);
-  font-size: var(--font-size-micro);
-  border-radius: var(--radius-small);
-  background: var(--brand-mark);
+.brand-logo {
+  width: 1.75rem;
+  height: 1.75rem;
+  object-fit: contain;
 }
 
 .brand-name {

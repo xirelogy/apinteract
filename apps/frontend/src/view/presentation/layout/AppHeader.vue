@@ -9,6 +9,7 @@ import AccountOptionsDialog from "@/view/presentation/features/AccountOptionsDia
 import LogoutConfirmationDialog from "@/view/presentation/features/LogoutConfirmationDialog.vue";
 
 const { t } = useI18n();
+const logoUrl = `${import.meta.env.BASE_URL}logo_square_360.png`;
 const optionsOpen = ref(false);
 const logoutConfirmationOpen = ref(false);
 const accountActions = computed(() => [
@@ -52,7 +53,7 @@ function selectAccountAction(action: string): void {
         <Menu v-else :size="19" aria-hidden="true" />
       </IconButton>
       <div class="brand-lockup">
-        <span class="brand-mark" aria-hidden="true">API</span>
+        <img class="brand-logo" :src="logoUrl" alt="" aria-hidden="true" />
         <span class="brand-name">APInteract</span>
       </div>
     </div>

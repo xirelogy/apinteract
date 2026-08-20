@@ -30,7 +30,6 @@
   --warning: light-dark(#9a6700, #f2c14e);
   --danger: light-dark(#b42318, #ff8a80);
   --focus: light-dark(#2563a6, #73aef0);
-  --brand-mark: light-dark(#7dd3c7, #5bc2b6);
   --overlay-backdrop: light-dark(rgb(23 33 36 / 42%), rgb(3 7 8 / 72%));
   --overlay-navigator: light-dark(rgb(23 33 36 / 36%), rgb(3 7 8 / 66%));
   --shadow-menu: 0 6px 18px light-dark(rgb(23 33 36 / 12%), rgb(0 0 0 / 38%));
