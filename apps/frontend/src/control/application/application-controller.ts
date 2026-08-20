@@ -745,7 +745,7 @@ export class ApplicationController {
         },
       );
       store.selectedVariableProfile = profile;
-      await this.#refreshOpenRequestContexts(workspaceId);
+      await this.#refreshOpenWorkspaceContexts(workspaceId);
       await this.#refreshVariablePreviews();
       return { workspace, profile };
     });
@@ -1226,7 +1226,7 @@ export class ApplicationController {
           result.targetParentCollectionId,
         );
       }
-      await this.#refreshOpenRequestContexts(workspaceId);
+      await this.#refreshOpenWorkspaceContexts(workspaceId);
     });
   }
 
@@ -1370,7 +1370,10 @@ export class ApplicationController {
         },
       );
       store.selectedVariableProfile = profile;
-      await this.#refreshOpenRequestContexts(collection.workspaceId);
+      await this.#refreshOpenWorkspaceContexts(
+        collection.workspaceId,
+        new Set([collectionId]),
+      );
       await this.#refreshVariablePreviews();
       return { collection, profile };
     });
@@ -2369,6 +2372,70 @@ export class ApplicationController {
       store.selectedCollection =
         collectionById.get(selectedCollectionId) ?? store.selectedCollection;
     }
+  }
+
+  /** Refreshes derived collection context while preserving tab-owned drafts. */
+  async #refreshOpenCollectionContexts(
+    workspaceId: string,
+    excludedCollectionIds: ReadonlySet<string>,
+  ): Promise<void> {
+    const store = useApplicationStore();
+    const collectionIds = [
+      ...new Set(
+        store.resourceTabs.flatMap((tab) =>
+          tab.kind === "collection" &&
+          tab.workspaceId === workspaceId &&
+          !excludedCollectionIds.has(tab.collection.collectionId)
+            ? [tab.collection.collectionId]
+            : [],
+        ),
+      ),
+    ];
+    const contexts = await Promise.all(
+      collectionIds.map(async (collectionId) => {
+        const [collection, variableProfile] = await Promise.all([
+          this.#webSocket.command<CollectionView>("collection.get", {
+            collectionId,
+          }),
+          this.#webSocket.command<VariableProfileView>("variable_profile.get", {
+            scopeKind: "collection",
+            scopeId: collectionId,
+          }),
+        ]);
+        return { collectionId, collection, variableProfile };
+      }),
+    );
+    const contextByCollectionId = new Map(
+      contexts.map((context) => [context.collectionId, context]),
+    );
+    store.resourceTabs = store.resourceTabs.map((tab) => {
+      if (tab.kind !== "collection" || tab.workspaceId !== workspaceId) {
+        return tab;
+      }
+      const context = contextByCollectionId.get(tab.collection.collectionId);
+      return context === undefined
+        ? tab
+        : {
+            ...tab,
+            collection: context.collection,
+            variableProfile: context.variableProfile,
+          };
+    });
+    if (store.selectedCollectionId !== null) {
+      const context = contextByCollectionId.get(store.selectedCollectionId);
+      if (context !== undefined) store.selectedCollection = context.collection;
+    }
+  }
+
+  /** Refreshes open request and collection inheritance after a mutation. */
+  async #refreshOpenWorkspaceContexts(
+    workspaceId: string,
+    excludedCollectionIds: ReadonlySet<string> = new Set(),
+  ): Promise<void> {
+    await Promise.all([
+      this.#refreshOpenRequestContexts(workspaceId),
+      this.#refreshOpenCollectionContexts(workspaceId, excludedCollectionIds),
+    ]);
   }
 
   /** Refreshes revision summaries without nesting request-tab busy state. */

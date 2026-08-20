@@ -10,7 +10,10 @@ import type {
 import type { SessionController } from "../src/control/session/session-controller";
 import { useApplicationStore } from "../src/control/state/application-store";
 import type { BackendWebSocketClient } from "../src/control/transport/websocket-client";
-import { isRequestTabDirty } from "../src/model/domain/application";
+import {
+  isRequestTabDirty,
+  isResourceEditorTabDirty,
+} from "../src/model/domain/application";
 
 class FakeRequestSessionStorage implements RequestSessionStorage {
   readonly saves: LocalRequestSessionSnapshot[] = [];
@@ -203,6 +206,157 @@ describe("ApplicationController workspaces", () => {
     );
     expect(store.activeWorkbenchTabId).toBe(store.resourceTabs[3]?.tabId);
     expect(store.activeRequestTabId).toBeNull();
+  });
+
+  it("refreshes an open child collection after its parent changes", async () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151cf1";
+    const parentCollectionId = "019facab-1eee-765f-bd9f-ac2449151cf2";
+    const childCollectionId = "019facab-1eee-765f-bd9f-ac2449151cf3";
+    const inheritedVariable = {
+      variable: {
+        variableId: "019facab-1eee-765f-bd9f-ac2449151cf4",
+        name: "parent_value",
+        kind: "value" as const,
+        value: "new",
+      },
+      source: {
+        scope: "collection" as const,
+        scopeId: parentCollectionId,
+        scopeName: "Parent",
+        revision: 2,
+      },
+    };
+    const parentCollection = {
+      collectionId: parentCollectionId,
+      workspaceId,
+      parentCollectionId: null,
+      name: "Parent",
+      pathPrefix: "/old",
+      inheritedTarget: "https://example.test",
+      effectivePath: "/old",
+      headers: [],
+      inheritedHeaders: [],
+      effectiveHeaders: [],
+      revision: 1,
+    };
+    const updatedParentCollection = {
+      ...parentCollection,
+      pathPrefix: "/new",
+      effectivePath: "/new",
+      revision: 2,
+    };
+    const childCollection = {
+      collectionId: childCollectionId,
+      workspaceId,
+      parentCollectionId,
+      name: "Child",
+      pathPrefix: "/child",
+      inheritedTarget: "https://example.test/old",
+      effectivePath: "/old/child",
+      headers: [],
+      inheritedHeaders: [],
+      effectiveHeaders: [],
+      revision: 1,
+    };
+    const refreshedChildCollection = {
+      ...childCollection,
+      inheritedTarget: "https://example.test/new",
+      effectivePath: "/new/child",
+      inheritedHeaders: [{ name: "X-Parent", value: "new", enabled: true }],
+      effectiveHeaders: [{ name: "X-Parent", value: "new", enabled: true }],
+    };
+    const profile = (scopeId: string) => ({
+      workspaceId,
+      scopeKind: "collection" as const,
+      scopeId,
+      scopeName: scopeId === parentCollectionId ? "Parent" : "Child",
+      revision: 1,
+      variables: [],
+      inheritedVariables: [],
+    });
+    let parentWasUpdated = false;
+    const command = vi.fn((type: string, payload: Record<string, unknown>) => {
+      if (type === "collection.get") {
+        if (payload.collectionId === parentCollectionId) {
+          return parentWasUpdated ? updatedParentCollection : parentCollection;
+        }
+        if (payload.collectionId === childCollectionId) {
+          return parentWasUpdated ? refreshedChildCollection : childCollection;
+        }
+      }
+      if (type === "variable_profile.get") {
+        const result = profile(String(payload.scopeId));
+        return payload.scopeId === childCollectionId && parentWasUpdated
+          ? { ...result, inheritedVariables: [inheritedVariable] }
+          : result;
+      }
+      if (type === "collection.update") {
+        parentWasUpdated = true;
+        return updatedParentCollection;
+      }
+      if (type === "variable_profile.update") {
+        return { ...profile(parentCollectionId), revision: 2 };
+      }
+      if (type === "tree.list") return { children: [] };
+      throw new Error(`Unexpected command ${type}`);
+    });
+    const controller = new ApplicationController(
+      {} as SessionController,
+      { command, onEvent: vi.fn() } as unknown as BackendWebSocketClient,
+    );
+    const store = useApplicationStore();
+    store.selectedWorkspaceId = workspaceId;
+
+    await controller.openCollectionPropertiesTab(childCollectionId);
+    const childTab = store.resourceTabs[0];
+    expect(childTab?.kind).toBe("collection");
+    if (childTab?.kind !== "collection") throw new Error("Missing child tab");
+    const childDraft = {
+      ...childTab.draft,
+      name: "Unsaved child name",
+    };
+    controller.updateCollectionPropertiesDraft(childTab.tabId, childDraft);
+
+    await controller.openCollectionPropertiesTab(parentCollectionId);
+    const parentTab = store.resourceTabs[1];
+    expect(parentTab?.kind).toBe("collection");
+    if (parentTab?.kind !== "collection") {
+      throw new Error("Missing parent tab");
+    }
+    controller.updateCollectionPropertiesDraft(parentTab.tabId, {
+      ...parentTab.draft,
+      pathPrefix: "/new",
+    });
+    await controller.saveCollectionPropertiesTab(parentTab.tabId);
+
+    const refreshedChildTab = store.resourceTabs.find(
+      (tab) =>
+        tab.kind === "collection" &&
+        tab.collection.collectionId === childCollectionId,
+    );
+    expect(refreshedChildTab?.kind).toBe("collection");
+    if (refreshedChildTab?.kind !== "collection") {
+      throw new Error("Missing refreshed child tab");
+    }
+    expect(refreshedChildTab.collection.inheritedTarget).toBe(
+      "https://example.test/new",
+    );
+    expect(refreshedChildTab.collection.effectivePath).toBe("/new/child");
+    expect(refreshedChildTab.collection.inheritedHeaders).toEqual([
+      { name: "X-Parent", value: "new", enabled: true },
+    ]);
+    expect(refreshedChildTab.variableProfile.inheritedVariables).toEqual([
+      inheritedVariable,
+    ]);
+    expect(refreshedChildTab.draft).toEqual(childDraft);
+    expect(refreshedChildTab.baseline).toEqual({
+      name: "Child",
+      pathPrefix: "/child",
+      headers: [],
+      variables: [],
+    });
+    expect(isResourceEditorTabDirty(refreshedChildTab)).toBe(true);
   });
 });
 
