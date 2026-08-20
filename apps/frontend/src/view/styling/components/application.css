@@ -541,10 +541,18 @@
   color: var(--text-primary);
 }
 
+.request-tab-actions,
 .request-tab-add {
   width: var(--request-tabs-height);
+  flex: 0 0 var(--request-tabs-height);
   min-height: var(--request-tabs-height);
   border-inline-start: 1px solid var(--border-subtle);
+}
+
+.request-tab-actions > .icon-button-control,
+.request-tab-add {
+  width: 100%;
+  min-height: var(--request-tabs-height);
   border-radius: 0;
 }
 
@@ -2440,6 +2448,29 @@
 .logout-confirmation-content .resource-dialog-actions,
 .resource-delete-content .resource-dialog-actions {
   margin-top: var(--space-4);
+}
+
+.close-tabs-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.close-tabs-dirty-list {
+  max-height: 10rem;
+  margin: 0;
+  overflow: auto;
+  padding-inline-start: var(--space-5);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.close-tabs-running-warning {
+  color: var(--warning);
+}
+
+.close-tabs-dialog-content .resource-dialog-actions {
+  margin-top: var(--space-2);
 }
 
 .resource-delete-content > p + p {

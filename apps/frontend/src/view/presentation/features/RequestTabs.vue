@@ -16,6 +16,9 @@ import {
   workbenchTabId,
   type WorkbenchTab,
 } from "@/model/domain/application";
+import ActionMenu, {
+  type ActionMenuItem,
+} from "@/view/presentation/controls/ActionMenu.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 
@@ -28,6 +31,8 @@ const { t } = useI18n();
 const emit = defineEmits<{
   activate: [tabId: string];
   close: [tabId: string];
+  closeOthers: [tabId: string];
+  closeAll: [];
   create: [];
 }>();
 
@@ -41,6 +46,23 @@ const mobileOptions = computed(() =>
     label: workbenchTabLabel(tab),
   })),
 );
+const tabActions = computed<readonly ActionMenuItem[]>(() => [
+  {
+    value: "close-current",
+    label: t("workbench.closeCurrent"),
+    disabled: activeTab.value === null,
+  },
+  {
+    value: "close-others",
+    label: t("workbench.closeOthers"),
+    disabled: activeTab.value === null || props.tabs.length <= 1,
+  },
+  {
+    value: "close-all",
+    label: t("workbench.closeAll"),
+    disabled: props.tabs.length === 0,
+  },
+]);
 
 /** Formats one request for the compact mobile tab switcher. */
 function workbenchTabLabel(tab: WorkbenchTab): string {
@@ -88,6 +110,18 @@ function closeTabLabel(tab: WorkbenchTab | null): string {
     : t("workbench.closeNamed", {
         name: workbenchTabName(tab),
       });
+}
+
+/** Routes strip-level close commands against the currently active visible tab. */
+function selectTabAction(action: string): void {
+  const tab = activeTab.value;
+  if (action === "close-current" && tab !== null) {
+    emit("close", workbenchTabId(tab));
+  } else if (action === "close-others" && tab !== null) {
+    emit("closeOthers", workbenchTabId(tab));
+  } else if (action === "close-all") {
+    emit("closeAll");
+  }
 }
 
 /** Converts vertical wheel movement into horizontal movement for overflowing tabs. */
@@ -333,6 +367,13 @@ function handleTabKeydown(event: KeyboardEvent): void {
         <X :size="16" aria-hidden="true" />
       </IconButton>
     </div>
+    <ActionMenu
+      class="request-tab-actions"
+      :label="t('workbench.tabActions')"
+      :items="tabActions"
+      :disabled="tabs.length === 0"
+      @select="selectTabAction"
+    />
     <IconButton
       class="request-tab-add"
       :label="t('request.newTemporary')"

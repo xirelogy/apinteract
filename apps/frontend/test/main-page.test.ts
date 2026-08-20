@@ -11,6 +11,7 @@ import { enUsMessages } from "../src/app/i18n/messages";
 import type { ApplicationController } from "../src/control/application/application-controller";
 import { useApplicationStore } from "../src/control/state/application-store";
 import EnvironmentManager from "../src/view/presentation/features/EnvironmentManager.vue";
+import CloseTabsDialog from "../src/view/presentation/features/CloseTabsDialog.vue";
 import RequestEditor from "../src/view/presentation/features/RequestEditor.vue";
 import RequestTabs from "../src/view/presentation/features/RequestTabs.vue";
 import MainPage from "../src/view/presentation/pages/MainPage.vue";
@@ -162,5 +163,92 @@ describe("MainPage", () => {
     expect(
       wrapper.getComponent(EnvironmentManager).attributes("revisions"),
     ).toBeUndefined();
+  });
+
+  it("confirms and closes all tabs only in the selected workspace", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useApplicationStore();
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151cf5";
+    const otherWorkspaceId = "019facab-1eee-765f-bd9f-ac2449151cf6";
+    const draft = {
+      name: "Temporary request",
+      method: "GET" as const,
+      targetMode: "absolute" as const,
+      targetUrl: "",
+      query: [],
+      headers: [],
+      requestBody: { kind: "none" as const },
+      body: "",
+      preRequestScript: "",
+      postResponseScript: "",
+    };
+    /** Creates one temporary request tab for workspace-scoping assertions. */
+    const requestTab = (tabId: string, tabWorkspaceId: string) => ({
+      tabId,
+      workspaceId: tabWorkspaceId,
+      request: null,
+      draft,
+      baseline: null,
+      variableProfile: null,
+      variableDraft: [],
+      variableBaseline: [],
+      pendingParentCollectionId: null,
+      inheritedTarget: "",
+      inheritedHeaders: [],
+      execution: null,
+      exchangeSummaries: [],
+      selectedExchangeId: null,
+      selectedExchange: null,
+      revisions: [],
+      viewingRevision: null,
+      busy: false,
+    });
+    store.$patch({
+      selectedWorkspaceId: workspaceId,
+      workspaces: [{ workspaceId, name: "Workspace", role: "owner" }],
+      requestTabs: [
+        requestTab("visible-tab", workspaceId),
+        requestTab("hidden-tab", otherWorkspaceId),
+      ],
+      activeRequestTabId: "visible-tab",
+      activeWorkbenchTabId: "visible-tab",
+      workbenchTabOrder: ["visible-tab", "hidden-tab"],
+    });
+    const closeWorkbenchTabs = vi.fn();
+    const controller = {
+      initializeWorkspace: vi.fn().mockResolvedValue(undefined),
+      closeWorkbenchTabs,
+      session: { logout: vi.fn() },
+    } as unknown as ApplicationController;
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/", component: { template: "<div />" } }],
+    });
+    const wrapper = shallowMount(MainPage, {
+      global: {
+        plugins: [pinia, i18n, router],
+        provide: { [applicationControllerKey as symbol]: controller },
+      },
+    });
+
+    wrapper.getComponent(RequestTabs).vm.$emit("closeAll");
+    await wrapper.vm.$nextTick();
+    const confirmation = wrapper.getComponent(CloseTabsDialog);
+    expect(confirmation.props()).toMatchObject({
+      tabCount: 1,
+      dirtyTabNames: ["Temporary request"],
+      runningCount: 0,
+    });
+    expect(closeWorkbenchTabs).not.toHaveBeenCalled();
+
+    confirmation.vm.$emit("confirm");
+    expect(closeWorkbenchTabs).toHaveBeenCalledOnce();
+    expect(closeWorkbenchTabs).toHaveBeenCalledWith(["visible-tab"]);
   });
 });

@@ -518,6 +518,127 @@ describe("ApplicationController local request recovery", () => {
     expect(storage.saves[0]?.activeRequestTabId).toBeNull();
     await controller.logout();
   });
+
+  it("closes mixed workbench tabs atomically and preserves other workspace tabs", async () => {
+    vi.useFakeTimers();
+    setActivePinia(createPinia());
+    const userId = "019facab-1eee-765f-bd9f-ac2449151de1";
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151de2";
+    const otherWorkspaceId = "019facab-1eee-765f-bd9f-ac2449151de3";
+    const keptTabId = "019facab-1eee-765f-bd9f-ac2449151de4";
+    const closingTabId = "019facab-1eee-765f-bd9f-ac2449151de5";
+    const resourceTabId = "019facab-1eee-765f-bd9f-ac2449151de6";
+    const hiddenTabId = "019facab-1eee-765f-bd9f-ac2449151de7";
+    const storage = new FakeRequestSessionStorage();
+    const controller = new ApplicationController(
+      {
+        logout: vi.fn().mockResolvedValue(undefined),
+      } as unknown as SessionController,
+      {
+        command: vi.fn().mockResolvedValue({ workspaces: [] }),
+        onEvent: vi.fn(),
+      } as unknown as BackendWebSocketClient,
+      storage,
+    );
+    const store = useApplicationStore();
+    store.session = {
+      sessionId: "019facab-1eee-765f-bd9f-ac2449151de8",
+      user: { userId, username: "alice", displayName: "Alice" },
+      createdAt: "2026-08-17T01:00:00.000Z",
+      absoluteExpiresAt: "2026-08-18T01:00:00.000Z",
+    };
+    await controller.initializeWorkspace();
+    const draft = {
+      name: "Request",
+      method: "GET" as const,
+      targetMode: "absolute" as const,
+      targetUrl: "https://example.test",
+      query: [],
+      headers: [],
+      requestBody: { kind: "none" as const },
+      body: "",
+      preRequestScript: "",
+      postResponseScript: "",
+    };
+    /** Creates one complete local request tab in the requested workspace. */
+    const requestTab = (tabId: string, tabWorkspaceId: string) => ({
+      tabId,
+      workspaceId: tabWorkspaceId,
+      request: null,
+      draft,
+      baseline: structuredClone(draft),
+      variableProfile: null,
+      variableDraft: [],
+      variableBaseline: [],
+      pendingParentCollectionId: null,
+      inheritedTarget: "",
+      inheritedHeaders: [],
+      execution: null,
+      exchangeSummaries: [],
+      selectedExchangeId: null,
+      selectedExchange: null,
+      revisions: [],
+      viewingRevision: null,
+      busy: false,
+    });
+    const environmentId = "019facab-1eee-765f-bd9f-ac2449151de9";
+    const environmentDraft = {
+      name: "Development",
+      variables: [],
+      includedEnvironmentIds: [],
+    };
+    store.$patch({
+      selectedWorkspaceId: workspaceId,
+      requestTabs: [
+        requestTab(keptTabId, workspaceId),
+        requestTab(closingTabId, workspaceId),
+        requestTab(hiddenTabId, otherWorkspaceId),
+      ],
+      resourceTabs: [
+        {
+          kind: "environment",
+          tabId: resourceTabId,
+          workspaceId,
+          environment: {
+            environmentId,
+            workspaceId,
+            name: "Development",
+            revision: 1,
+            includedEnvironments: [],
+            variables: [],
+            inheritedVariables: [],
+          },
+          draft: environmentDraft,
+          baseline: structuredClone(environmentDraft),
+          busy: false,
+        },
+      ],
+      activeRequestTabId: null,
+      activeWorkbenchTabId: resourceTabId,
+      workbenchTabOrder: [keptTabId, closingTabId, resourceTabId, hiddenTabId],
+    });
+    await vi.advanceTimersByTimeAsync(151);
+    storage.saves.length = 0;
+
+    controller.closeWorkbenchTabs([closingTabId, resourceTabId]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.requestTabs.map((tab) => tab.tabId)).toEqual([
+      keptTabId,
+      hiddenTabId,
+    ]);
+    expect(store.resourceTabs).toEqual([]);
+    expect(store.workbenchTabOrder).toEqual([keptTabId, hiddenTabId]);
+    expect(store.activeWorkbenchTabId).toBe(keptTabId);
+    expect(store.activeRequestTabId).toBe(keptTabId);
+    expect(storage.saves).toHaveLength(1);
+    expect(storage.saves[0]?.tabs.map((tab) => tab.tabId)).toEqual([
+      keptTabId,
+      hiddenTabId,
+    ]);
+    await controller.logout();
+  });
 });
 
 describe("ApplicationController requests", () => {

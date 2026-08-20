@@ -16,6 +16,7 @@ import type {
 import {
   isResourceEditorTabDirty,
   isRequestTabDirty,
+  isWorkbenchTabDirty,
   workbenchTabId,
   workbenchTabWorkspaceId,
   type ResourceEditorTab,
@@ -24,6 +25,7 @@ import {
   type WorkbenchTab,
 } from "@/model/domain/application";
 import AppHeader from "@/view/presentation/layout/AppHeader.vue";
+import CloseTabsDialog from "@/view/presentation/features/CloseTabsDialog.vue";
 import DiscardChangesDialog from "@/view/presentation/features/DiscardChangesDialog.vue";
 import CollectionPropertiesDialog from "@/view/presentation/features/CollectionPropertiesDialog.vue";
 import EnvironmentManager from "@/view/presentation/features/EnvironmentManager.vue";
@@ -44,6 +46,11 @@ const navigatorOpen = ref(false);
 const saveDialogTab = ref<RequestTab | null>(null);
 const discardDialogTab = ref<RequestTab | null>(null);
 const discardResourceTab = ref<ResourceEditorTab | null>(null);
+const pendingBulkTabClose = ref<{
+  readonly tabIds: readonly string[];
+  readonly dirtyTabNames: readonly string[];
+  readonly runningCount: number;
+} | null>(null);
 const importDialogOpen = ref(false);
 const requestDuplicateTarget = ref<{
   readonly requestId: string;
@@ -683,6 +690,60 @@ function workbenchTabClose(tabId: string): void {
   }
 }
 
+/** Returns a localized, non-empty label for aggregate tab-close feedback. */
+function workbenchTabDisplayName(tab: WorkbenchTab): string {
+  const name =
+    tab.kind === "request" ? tab.requestTab.draft.name : tab.draft.name;
+  if (name.trim() !== "") return name.trim();
+  if (tab.kind === "request") return t("request.untitled");
+  if (tab.kind === "workspace") return t("workspace.label");
+  if (tab.kind === "collection") return t("collection.label");
+  return t("environment.create");
+}
+
+/** Reports whether closing a request tab leaves an active execution running. */
+function hasActiveExecution(tab: WorkbenchTab): boolean {
+  return (
+    tab.kind === "request" &&
+    (tab.requestTab.execution?.state === "created" ||
+      tab.requestTab.execution?.state === "running")
+  );
+}
+
+/** Closes safe targets immediately or requests one aggregate confirmation. */
+function requestBulkTabClose(tabs: readonly WorkbenchTab[]): void {
+  if (tabs.length === 0) return;
+  const dirtyTabNames = tabs
+    .filter(isWorkbenchTabDirty)
+    .map(workbenchTabDisplayName);
+  const runningCount = tabs.filter(hasActiveExecution).length;
+  const tabIds = tabs.map(workbenchTabId);
+  if (dirtyTabNames.length === 0 && runningCount === 0) {
+    controller.closeWorkbenchTabs(tabIds);
+    return;
+  }
+  pendingBulkTabClose.value = { tabIds, dirtyTabNames, runningCount };
+}
+
+/** Requests closure of every visible tab except the active menu target. */
+function closeOtherWorkbenchTabs(tabId: string): void {
+  requestBulkTabClose(
+    visibleWorkbenchTabs.value.filter((tab) => workbenchTabId(tab) !== tabId),
+  );
+}
+
+/** Requests closure of every workbench tab visible in the current workspace. */
+function closeAllWorkbenchTabs(): void {
+  requestBulkTabClose(visibleWorkbenchTabs.value);
+}
+
+/** Confirms the pending aggregate close against its original tab identifiers. */
+function confirmBulkTabClose(): void {
+  const pending = pendingBulkTabClose.value;
+  if (pending !== null) controller.closeWorkbenchTabs(pending.tabIds);
+  pendingBulkTabClose.value = null;
+}
+
 /** Discards and closes the tab selected by the confirmation dialog. */
 function discardRequestTab(): void {
   const tab = discardDialogTab.value;
@@ -817,6 +878,8 @@ function discardActiveResourceTab(): void {
             :active-tab-id="activeWorkbenchTabId"
             @activate="controller.activateWorkbenchTab($event)"
             @close="workbenchTabClose"
+            @close-others="closeOtherWorkbenchTabs"
+            @close-all="closeAllWorkbenchTabs"
             @create="createTemporaryRequest()"
           />
           <WorkspacePropertiesDialog
@@ -973,6 +1036,14 @@ function discardActiveResourceTab(): void {
       "
       @close="discardResourceTab = null"
       @discard="discardActiveResourceTab"
+    />
+    <CloseTabsDialog
+      v-if="pendingBulkTabClose"
+      :tab-count="pendingBulkTabClose.tabIds.length"
+      :dirty-tab-names="pendingBulkTabClose.dirtyTabNames"
+      :running-count="pendingBulkTabClose.runningCount"
+      @close="pendingBulkTabClose = null"
+      @confirm="confirmBulkTabClose"
     />
     <RequestDuplicateDialog
       v-if="requestDuplicateTarget"

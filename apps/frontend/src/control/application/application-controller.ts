@@ -1705,34 +1705,48 @@ export class ApplicationController {
   /** Closes one request tab and activates its nearest remaining neighbor. */
   closeRequestTab(tabId: string): void {
     const store = useApplicationStore();
-    const index = store.requestTabs.findIndex((tab) => tab.tabId === tabId);
-    if (index < 0) {
-      return;
-    }
-    store.requestTabs.splice(index, 1);
-    store.workbenchTabOrder = store.workbenchTabOrder.filter(
-      (candidate) => candidate !== tabId,
-    );
-    if (store.activeRequestTabId === tabId) {
-      store.activeRequestTabId = null;
-    }
-    if (store.activeWorkbenchTabId === tabId) {
-      this.#activateNearestWorkbenchTab();
-    }
-    this.#flushLocalSessionPersistence();
+    if (!store.requestTabs.some((tab) => tab.tabId === tabId)) return;
+    this.closeWorkbenchTabs([tabId]);
   }
 
   /** Closes one resource editor and activates its nearest remaining neighbor. */
   closeResourceTab(tabId: string): void {
     const store = useApplicationStore();
     if (!store.resourceTabs.some((tab) => tab.tabId === tabId)) return;
+    this.closeWorkbenchTabs([tabId]);
+  }
+
+  /** Closes mixed workbench tabs atomically and persists the resulting session once. */
+  closeWorkbenchTabs(tabIds: readonly string[]): void {
+    const store = useApplicationStore();
+    const knownTabIds = new Set([
+      ...store.requestTabs.map((tab) => tab.tabId),
+      ...store.resourceTabs.map((tab) => tab.tabId),
+    ]);
+    const closingTabIds = new Set(
+      tabIds.filter((tabId) => knownTabIds.has(tabId)),
+    );
+    if (closingTabIds.size === 0) return;
+
+    store.requestTabs = store.requestTabs.filter(
+      (tab) => !closingTabIds.has(tab.tabId),
+    );
     store.resourceTabs = store.resourceTabs.filter(
-      (tab) => tab.tabId !== tabId,
+      (tab) => !closingTabIds.has(tab.tabId),
     );
     store.workbenchTabOrder = store.workbenchTabOrder.filter(
-      (candidate) => candidate !== tabId,
+      (tabId) => !closingTabIds.has(tabId),
     );
-    if (store.activeWorkbenchTabId === tabId) {
+    if (
+      store.activeRequestTabId !== null &&
+      closingTabIds.has(store.activeRequestTabId)
+    ) {
+      store.activeRequestTabId = null;
+    }
+    if (
+      store.activeWorkbenchTabId !== null &&
+      closingTabIds.has(store.activeWorkbenchTabId)
+    ) {
       this.#activateNearestWorkbenchTab();
     }
     this.#flushLocalSessionPersistence();

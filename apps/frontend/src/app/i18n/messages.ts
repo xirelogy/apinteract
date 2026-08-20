@@ -247,10 +247,29 @@ export const enUsMessages = {
     },
   },
   workbench: {
+    bulkClose: {
+      confirmMany: "Close tabs",
+      confirmOne: "Close tab",
+      keepOpen: "Keep tabs open",
+      runningMany:
+        "{count} requests are still in progress. Closing their tabs will not cancel them.",
+      runningOne:
+        "One request is still in progress. Closing its tab will not cancel it.",
+      summaryMany: "{count} tabs will be closed.",
+      summaryOne: "One tab will be closed.",
+      titleMany: "Close tabs?",
+      titleOne: "Close tab?",
+      unsavedMany: "{count} tabs have unsaved changes that will be discarded:",
+      unsavedOne: "One tab has unsaved changes that will be discarded:",
+    },
+    closeAll: "Close all tabs",
+    closeCurrent: "Close current tab",
     close: "Close tab",
     closeNamed: "Close {name}",
+    closeOthers: "Close other tabs",
     noOpenTabs: "No open tabs",
     openTabs: "Open tabs",
+    tabActions: "Tab actions",
   },
   request: {
     addHeader: "Add header",
