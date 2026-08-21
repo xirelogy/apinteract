@@ -14,6 +14,7 @@ import { useI18n } from "vue-i18n";
 import {
   isWorkbenchTabDirty,
   workbenchTabId,
+  workbenchTabName,
   type WorkbenchTab,
 } from "@/model/domain/application";
 import ActionMenu, {
@@ -66,21 +67,18 @@ const tabActions = computed<readonly ActionMenuItem[]>(() => [
 
 /** Formats one request for the compact mobile tab switcher. */
 function workbenchTabLabel(tab: WorkbenchTab): string {
-  const name = workbenchTabName(tab);
+  const name = displayWorkbenchTabName(tab);
   const prefix =
     tab.kind === "request" ? `${tab.requestTab.draft.method} ` : "";
   return `${prefix}${name}${isWorkbenchTabDirty(tab) ? " *" : ""}`;
 }
 
 /** Returns the user-authored or fallback name for any workbench document. */
-function workbenchTabName(tab: WorkbenchTab): string {
-  if (tab.kind === "request") {
-    return tab.requestTab.draft.name.trim() || t("request.untitled");
-  }
-  if (tab.kind === "environment") {
-    return tab.draft.name.trim() || t("environment.create");
-  }
-  return tab.draft.name.trim();
+function displayWorkbenchTabName(tab: WorkbenchTab): string {
+  return workbenchTabName(tab, {
+    untitledRequest: t("request.untitled"),
+    createEnvironment: t("environment.create"),
+  });
 }
 
 /** Finds one tab for rendering a typed icon inside mobile menu options. */
@@ -108,7 +106,7 @@ function closeTabLabel(tab: WorkbenchTab | null): string {
   return tab === null
     ? t("workbench.close")
     : t("workbench.closeNamed", {
-        name: workbenchTabName(tab),
+        name: displayWorkbenchTabName(tab),
       });
 }
 
@@ -257,7 +255,7 @@ function handleTabKeydown(event: KeyboardEvent): void {
               {{ tab.requestTab.draft.method }}
             </span>
             <span class="request-tab-name">
-              {{ workbenchTabName(tab) }}
+              {{ displayWorkbenchTabName(tab) }}
             </span>
           </span>
           <span
@@ -272,7 +270,7 @@ function handleTabKeydown(event: KeyboardEvent): void {
           size="compact"
           :label="
             t('workbench.closeNamed', {
-              name: workbenchTabName(tab),
+              name: displayWorkbenchTabName(tab),
             })
           "
           @click="emit('close', workbenchTabId(tab))"
@@ -346,7 +344,7 @@ function handleTabKeydown(event: KeyboardEvent): void {
               {{
                 activeTab === null
                   ? t("workbench.noOpenTabs")
-                  : workbenchTabName(activeTab)
+                  : displayWorkbenchTabName(activeTab)
               }}
             </span>
           </span>

@@ -237,12 +237,20 @@ describe("MainPage", () => {
       },
     });
 
+    expect(document.title).toBe("Temporary request · APInteract");
+    store.requestTabs[0] = {
+      ...store.requestTabs[0]!,
+      draft: { ...draft, name: "Renamed request" },
+    };
+    await wrapper.vm.$nextTick();
+    expect(document.title).toBe("Renamed request · APInteract");
+
     wrapper.getComponent(RequestTabs).vm.$emit("closeAll");
     await wrapper.vm.$nextTick();
     const confirmation = wrapper.getComponent(CloseTabsDialog);
     expect(confirmation.props()).toMatchObject({
       tabCount: 1,
-      dirtyTabNames: ["Temporary request"],
+      dirtyTabNames: ["Renamed request"],
       runningCount: 0,
     });
     expect(closeWorkbenchTabs).not.toHaveBeenCalled();
@@ -250,5 +258,7 @@ describe("MainPage", () => {
     confirmation.vm.$emit("confirm");
     expect(closeWorkbenchTabs).toHaveBeenCalledOnce();
     expect(closeWorkbenchTabs).toHaveBeenCalledWith(["visible-tab"]);
+    wrapper.unmount();
+    expect(document.title).toBe("APInteract");
   });
 });

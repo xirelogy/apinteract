@@ -130,6 +130,11 @@ export type WorkbenchTab =
   | { readonly kind: "request"; readonly requestTab: RequestTab }
   | ResourceEditorTab;
 
+export interface WorkbenchTabNameFallbacks {
+  readonly untitledRequest: string;
+  readonly createEnvironment: string;
+}
+
 /** Reports whether a resource editor differs from its last persisted baseline. */
 export function isResourceEditorTabDirty(tab: ResourceEditorTab): boolean {
   return (
@@ -146,6 +151,20 @@ export function workbenchTabId(tab: WorkbenchTab): string {
 /** Returns the workspace owning any workbench tab variant. */
 export function workbenchTabWorkspaceId(tab: WorkbenchTab): string {
   return tab.kind === "request" ? tab.requestTab.workspaceId : tab.workspaceId;
+}
+
+/** Returns the user-authored or supplied fallback name for any workbench tab. */
+export function workbenchTabName(
+  tab: WorkbenchTab,
+  fallbacks: WorkbenchTabNameFallbacks,
+): string {
+  if (tab.kind === "request") {
+    return tab.requestTab.draft.name.trim() || fallbacks.untitledRequest;
+  }
+  if (tab.kind === "environment") {
+    return tab.draft.name.trim() || fallbacks.createEnvironment;
+  }
+  return tab.draft.name.trim();
 }
 
 /** Reports whether any workbench tab contains unsaved editable content. */

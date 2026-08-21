@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -18,6 +18,7 @@ import {
   isRequestTabDirty,
   isWorkbenchTabDirty,
   workbenchTabId,
+  workbenchTabName,
   workbenchTabWorkspaceId,
   type ResourceEditorTab,
   type RequestDraftInput,
@@ -114,6 +115,28 @@ const workbenchTabs = computed<WorkbenchTab[]>(() => {
     ...ordered,
     ...[...byId.values()].filter((tab) => !orderedIds.has(workbenchTabId(tab))),
   ];
+});
+const activeWorkbenchTitle = computed(() => {
+  const tab = workbenchTabs.value.find(
+    (candidate) => workbenchTabId(candidate) === activeWorkbenchTabId.value,
+  );
+  return tab === undefined
+    ? null
+    : workbenchTabName(tab, {
+        untitledRequest: t("request.untitled"),
+        createEnvironment: t("environment.create"),
+      });
+});
+watch(
+  activeWorkbenchTitle,
+  (title) => {
+    document.title =
+      title === null || title === "" ? "APInteract" : `${title} · APInteract`;
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => {
+  document.title = "APInteract";
 });
 const activeResourceTab = computed(
   () =>

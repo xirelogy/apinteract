@@ -89,7 +89,10 @@ describe("AppHeader", () => {
     } satisfies TranslationService;
     const wrapper = mount(AppHeader, {
       attachTo: document.body,
-      props: { username: "admin", navigatorOpen: false },
+      props: {
+        username: "admin",
+        navigatorOpen: false,
+      },
       global: {
         plugins: [i18n],
         provide: {
