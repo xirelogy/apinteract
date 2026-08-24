@@ -171,7 +171,11 @@ export class HarImportProvider implements ImportProvider {
         collectionKey: null,
         name: harRequestName(method, mappedUrl.targetUrl, entry),
         description: harShortDescription(request.comment),
-        notes: harRequestNotes(entry.comment, request.comment),
+        notes: harRequestNotes(
+          entry.comment,
+          request.comment,
+          isRecord(request.postData) ? request.postData.comment : undefined,
+        ),
         method: method as HttpMethod,
         targetMode: "absolute",
         targetUrl: mappedUrl.targetUrl,
@@ -648,17 +652,9 @@ function harShortDescription(value: unknown): string {
   return /[\r\n]/u.test(comment) ? "" : comment;
 }
 
-/** Preserves distinct entry and request comments as Markdown notes. */
-function harRequestNotes(
-  entryComment: unknown,
-  requestComment: unknown,
-): string {
-  return [
-    ...new Set([
-      stringValue(entryComment).trim(),
-      stringValue(requestComment).trim(),
-    ]),
-  ]
+/** Preserves distinct HAR prose blocks as one Markdown notes document. */
+function harRequestNotes(...comments: readonly unknown[]): string {
+  return [...new Set(comments.map((comment) => stringValue(comment).trim()))]
     .filter((comment) => comment !== "")
     .join("\n\n");
 }

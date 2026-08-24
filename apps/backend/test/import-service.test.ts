@@ -227,17 +227,46 @@ describe("ImportService", () => {
         name: "secured-api.json",
         text: JSON.stringify({
           openapi: "3.1.0",
-          info: { title: "Secured API", version: "1" },
-          servers: [{ url: "https://primary.example.test" }],
+          info: {
+            title: "Secured API",
+            summary: "Secured operations",
+            description: "# Secured API notes",
+            version: "1",
+          },
+          servers: [
+            {
+              url: "https://primary.example.test",
+              description: "Primary production endpoint.",
+            },
+          ],
           components: {
             securitySchemes: {
-              bearerAuth: { type: "http", scheme: "bearer" },
+              bearerAuth: {
+                type: "http",
+                scheme: "bearer",
+                description: "Bearer access token",
+              },
             },
           },
           security: [{ bearerAuth: [] }],
           paths: {
             "/profile": {
-              get: { operationId: "getProfile", responses: {} },
+              summary: "Profile resource",
+              description: "Operations on the active profile.",
+              get: {
+                operationId: "getProfile",
+                summary: "Get profile",
+                description: "Returns the active profile.",
+                parameters: [
+                  {
+                    name: "expand",
+                    in: "query",
+                    description: "Related profile data to include",
+                    schema: { type: "string" },
+                  },
+                ],
+                responses: {},
+              },
             },
             "/admin": {
               get: {
@@ -264,6 +293,39 @@ describe("ImportService", () => {
         throw new Error("Expected an imported path collection");
       }
       expect(importedPathCollectionId).not.toBe(result.collectionId);
+      await expect(
+        requests.getCollection(userId, result.collectionId),
+      ).resolves.toMatchObject({
+        description: "Secured operations",
+        notes: "# Secured API notes",
+      });
+      const importedPathCollection = await requests.getCollection(
+        userId,
+        importedPathCollectionId,
+      );
+      expect(importedPathCollection).toMatchObject({
+        description: "Profile resource",
+        notes: "Operations on the active profile.",
+      });
+      if (importedPathCollection.parentCollectionId === null) {
+        throw new Error("Expected an imported server collection");
+      }
+      await expect(
+        requests.getCollection(
+          userId,
+          importedPathCollection.parentCollectionId,
+        ),
+      ).resolves.toMatchObject({ notes: "Primary production endpoint." });
+      expect(result.requests[0]).toMatchObject({
+        description: "Get profile",
+        notes: "Returns the active profile.",
+        query: [
+          expect.objectContaining({
+            name: "expand",
+            description: "Related profile data to include",
+          }),
+        ],
+      });
       const profile = await variables.get(
         userId,
         "collection",
@@ -273,6 +335,7 @@ describe("ImportService", () => {
         expect.objectContaining({
           name: "bearerAuth",
           kind: "secret",
+          description: "Bearer access token",
           hasValue: false,
           secretVersion: 1,
         }),

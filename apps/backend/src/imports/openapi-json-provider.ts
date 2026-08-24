@@ -100,6 +100,13 @@ export class OpenApiJsonImportProvider implements ImportProvider {
         diagnostics,
       );
       if (!isRecord(pathItem)) continue;
+      const pathLocation = `#/paths/${escapePointer(path)}`;
+      const pathDescription = importShortDescription(
+        pathItem.summary,
+        diagnostics,
+        `${pathLocation}/summary`,
+      );
+      const pathNotes = stringValue(pathItem.description);
       for (const [methodName, method] of METHOD_NAMES) {
         const rawOperation = pathItem[methodName];
         const operation = resolveLocalReference(
@@ -159,6 +166,8 @@ export class OpenApiJsonImportProvider implements ImportProvider {
         mappedRequests.push({
           server,
           path,
+          pathDescription,
+          pathNotes,
           tag: primaryOperationTag(operation, itemId, diagnostics),
           request: {
             itemId,
@@ -171,7 +180,7 @@ export class OpenApiJsonImportProvider implements ImportProvider {
               `${sourceLocation}/summary`,
               itemId,
             ),
-            notes: stringValue(operation.description),
+            notes: joinOpenApiNotes(operation.description, body.notes),
             method,
             targetMode: "composed",
             targetUrl: mapped.targetUrl,
@@ -213,7 +222,10 @@ export class OpenApiJsonImportProvider implements ImportProvider {
       sourceName: source.name,
       suggestedName,
       description: rootDescription,
-      notes: stringValue(info.description),
+      notes: joinOpenApiNotes(
+        info.description,
+        singleEffectiveServerNotes(mappedRequests),
+      ),
       pathPrefix: hierarchy.pathPrefix,
       variables: hierarchy.variables,
       collections: hierarchy.collections,
@@ -252,6 +264,7 @@ function importShortDescription(
 interface ResolvedOpenApiServer {
   readonly key: string;
   readonly url: string;
+  readonly notes: string;
   readonly variables: readonly VariableWrite[];
 }
 
@@ -260,6 +273,8 @@ interface MappedOpenApiRequest {
   readonly request: ImportedRequest;
   readonly server: ResolvedOpenApiServer;
   readonly path: string;
+  readonly pathDescription: string;
+  readonly pathNotes: string;
   readonly tag: string | null;
 }
 
@@ -269,6 +284,23 @@ interface OpenApiHierarchy {
   readonly variables: readonly VariableWrite[];
   readonly collections: readonly ImportedCollection[];
   readonly requests: readonly ImportedRequest[];
+}
+
+/** Combines distinct OpenAPI prose blocks into one Markdown notes document. */
+function joinOpenApiNotes(...values: readonly unknown[]): string {
+  return [...new Set(values.map((value) => stringValue(value).trim()))]
+    .filter((value) => value !== "")
+    .join("\n\n");
+}
+
+/** Returns server notes only when one effective server belongs at the root. */
+function singleEffectiveServerNotes(
+  mappedRequests: readonly MappedOpenApiRequest[],
+): string {
+  const servers = new Map(
+    mappedRequests.map((mapped) => [mapped.server.key, mapped.server]),
+  );
+  return servers.size === 1 ? ([...servers.values()][0]?.notes ?? "") : "";
 }
 
 /** Builds tag, optional server, and path collections without request overrides. */
@@ -302,7 +334,7 @@ function buildOpenApiHierarchy(
           parentCollectionKey: null,
           name: serverCollectionName(server),
           description: "",
-          notes: "",
+          notes: server.notes,
           pathPrefix: server.url,
           variables: [],
         })),
@@ -348,7 +380,10 @@ function buildOpenApiHierarchy(
       parentCollectionKey: null,
       name: openApiTagCollectionName(tag),
       description: "",
-      notes: tag === null ? "" : (tagNotes.get(tag) ?? ""),
+      notes: joinOpenApiNotes(
+        tag === null ? "" : (tagNotes.get(tag) ?? ""),
+        tagOwnsServerPrefix ? [...tagServers.values()][0]?.notes : "",
+      ),
       pathPrefix: tagOwnsServerPrefix ? [...tagServers.values()][0]!.url : "",
       variables: [],
     });
@@ -367,7 +402,7 @@ function buildOpenApiHierarchy(
           parentCollectionKey: tagKey,
           name: serverCollectionName(server),
           description: "",
-          notes: "",
+          notes: server.notes,
           pathPrefix: server.url,
           variables: [],
         });
@@ -407,8 +442,8 @@ function routeMappedRequest(
       collectionKey: pathKey,
       parentCollectionKey,
       name: openApiPathCollectionName(mapped.path),
-      description: "",
-      notes: "",
+      description: mapped.pathDescription,
+      notes: mapped.pathNotes,
       pathPrefix: mapped.request.targetUrl,
       variables: [],
     });
@@ -543,7 +578,7 @@ function resolveEffectiveServer(
   ];
   const selected = candidates.find((candidate) => candidate.servers.length > 0);
   if (selected === undefined) {
-    return { key: "server:none", url: "", variables: [] };
+    return { key: "server:none", url: "", notes: "", variables: [] };
   }
   if (selected.servers.length > 1) {
     diagnostics.push({
@@ -577,7 +612,12 @@ function resolveServerTemplate(
       itemId,
       sourceLocation,
     });
-    return { key: `server:invalid:${itemId}`, url: "", variables: [] };
+    return {
+      key: `server:invalid:${itemId}`,
+      url: "",
+      notes: "",
+      variables: [],
+    };
   }
   let url = stringValue(rawServer.url).trim();
   const serverVariables: VariableWrite[] = [];
@@ -622,6 +662,7 @@ function resolveServerTemplate(
   return {
     key: `server:${createHash("sha256").update(normalizedUrl).digest("hex").slice(0, 16)}`,
     url: normalizedUrl,
+    notes: stringValue(server.description),
     variables: serverVariables,
   };
 }
@@ -920,6 +961,7 @@ function mapRequestBody(
 ): {
   readonly requestBody: RequestBodyDefinition;
   readonly legacyBody: string;
+  readonly notes: string;
 } {
   const requestBody = resolveLocalReference(
     document,
@@ -927,8 +969,9 @@ function mapRequestBody(
     diagnostics,
   );
   if (!isRecord(requestBody) || !isRecord(requestBody.content)) {
-    return { requestBody: { kind: "none" }, legacyBody: "" };
+    return { requestBody: { kind: "none" }, legacyBody: "", notes: "" };
   }
+  const notes = stringValue(requestBody.description);
   const entries = Object.entries(requestBody.content).filter((entry) =>
     isRecord(entry[1]),
   ) as [string, Record<string, unknown>][];
@@ -936,7 +979,7 @@ function mapRequestBody(
     (left, right) => mediaTypePriority(left[0]) - mediaTypePriority(right[0]),
   )[0];
   if (selected === undefined) {
-    return { requestBody: { kind: "none" }, legacyBody: "" };
+    return { requestBody: { kind: "none" }, legacyBody: "", notes };
   }
   if (entries.length > 1) {
     diagnostics.push({
@@ -956,6 +999,7 @@ function mapRequestBody(
         fields: schemaFields(document, schema, diagnostics),
       },
       legacyBody: "",
+      notes,
     };
   }
   if (contentType === "multipart/form-data") {
@@ -975,6 +1019,7 @@ function mapRequestBody(
         fields,
       },
       legacyBody: "",
+      notes,
     };
   }
   const example = mediaExample(document, media, schema, diagnostics);
@@ -985,6 +1030,7 @@ function mapRequestBody(
   return {
     requestBody: { kind: "text", contentType, text },
     legacyBody: text,
+    notes,
   };
 }
 

@@ -20,7 +20,12 @@ describe("import providers", () => {
           description: "# Pet API notes",
           version: "1",
         },
-        servers: [{ url: "https://api.example.test/v1" }],
+        servers: [
+          {
+            url: "https://api.example.test/v1",
+            description: "Production endpoint",
+          },
+        ],
         components: {
           securitySchemes: {
             bearerAuth: { type: "http", scheme: "bearer" },
@@ -29,6 +34,8 @@ describe("import providers", () => {
         security: [{ bearerAuth: [] }],
         paths: {
           "/pets/{petId}": {
+            summary: "Pet resource",
+            description: "Operations on individual pets.",
             parameters: [
               {
                 name: "petId",
@@ -52,6 +59,7 @@ describe("import providers", () => {
             put: {
               operationId: "replacePet",
               requestBody: {
+                description: "Complete replacement payload.",
                 content: {
                   "application/json": {
                     schema: {
@@ -73,7 +81,7 @@ describe("import providers", () => {
     expect(plan.providerId).toBe("openapi-json");
     expect(plan.suggestedName).toBe("Pet API");
     expect(plan.description).toBe("Pet operations");
-    expect(plan.notes).toBe("# Pet API notes");
+    expect(plan.notes).toBe("# Pet API notes\n\nProduction endpoint");
     expect(plan.pathPrefix).toBe("https://api.example.test/v1");
     expect(plan.variables).toEqual([
       { name: "petId", kind: "value", value: "p-1" },
@@ -83,6 +91,8 @@ describe("import providers", () => {
       expect.objectContaining({
         parentCollectionKey: null,
         name: "/pets/{petId}",
+        description: "Pet resource",
+        notes: "Operations on individual pets.",
         pathPrefix: "/pets/<<petId>>",
         variables: [],
       }),
@@ -123,6 +133,7 @@ describe("import providers", () => {
       contentType: "application/json",
       text: '{\n  "name": "Mochi"\n}',
     });
+    expect(plan.requests[1]?.notes).toBe("Complete replacement payload.");
     expect(plan.diagnostics).toContainEqual(
       expect.objectContaining({ code: "openapi_body_media_type_selected" }),
     );
@@ -412,6 +423,7 @@ describe("import providers", () => {
                   },
                 ],
                 postData: {
+                  comment: "Submitted item fields",
                   mimeType: "application/x-www-form-urlencoded",
                   params: [
                     { name: "name", value: "Mochi", comment: "Item name" },
@@ -442,7 +454,8 @@ describe("import providers", () => {
     expect(plan.requests[0]).toMatchObject({
       method: "POST",
       description: "Creates one item",
-      notes: "Recorded create-item exchange\n\nCreates one item",
+      notes:
+        "Recorded create-item exchange\n\nCreates one item\n\nSubmitted item fields",
       targetUrl: "https://example.test/items",
       query: [{ name: "draft", value: "true", enabled: true }],
       headers: [
