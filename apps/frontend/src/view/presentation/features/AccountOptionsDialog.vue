@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Monitor, Moon, Sun, X } from "@lucide/vue";
+import { CalendarClock, Monitor, Moon, Sun, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import {
@@ -11,6 +11,12 @@ import {
   type DisplayStyle,
   useDisplayStylePreference,
 } from "@/app/preferences/display-style";
+import {
+  type DateTimeFormat,
+  formatDateTime,
+  isDateTimeFormat,
+  useDateTimeFormatPreference,
+} from "@/app/preferences/date-time-format";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import FormField from "@/view/presentation/controls/FormField.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
@@ -30,17 +36,40 @@ const props = defineProps<{
 const emit = defineEmits<{
   "update:open": [open: boolean];
 }>();
-const { t } = useI18n();
+const { locale, t } = useI18n();
 const headerPreferences = useHeaderPreferences();
 const displayStylePreference = useDisplayStylePreference();
+const dateTimeFormatPreference = useDateTimeFormatPreference();
 const activeSection = ref<"general" | "defaults">("general");
 const displayStyle = ref<DisplayStyle>("system");
+const dateTimeFormat = ref<DateTimeFormat>("locale");
 const appendingHeaders = ref("");
+const dateTimeExample = new Date();
 const displayStyleOptions = computed(() => [
   { value: "system", label: t("header.displayStyle.system") },
   { value: "light", label: t("header.displayStyle.light") },
   { value: "dark", label: t("header.displayStyle.dark") },
 ]);
+const dateTimeFormatOptions = computed(() =>
+  [
+    {
+      value: "locale" as const,
+      name: t("header.dateTimeFormat.localeDefault"),
+    },
+    { value: "ymd-24" as const, name: "YYYY-MM-DD HH:mm:ss" },
+    { value: "ymd-12" as const, name: "YYYY-MM-DD hh:mm:ss A" },
+    { value: "dmy-24" as const, name: "DD/MM/YYYY HH:mm:ss" },
+    { value: "mdy-12" as const, name: "MM/DD/YYYY hh:mm:ss A" },
+    { value: "iso8601" as const, name: "ISO 8601" },
+  ].map((option) => ({
+    value: option.value,
+    label: `${option.name} — ${formatDateTime(
+      dateTimeExample,
+      locale.value,
+      option.value,
+    )}`,
+  })),
+);
 const parsedAppendingHeaders = computed(() =>
   parseAppendingHeaderNames(appendingHeaders.value),
 );
@@ -56,6 +85,7 @@ watch(
     if (open) {
       activeSection.value = "general";
       displayStyle.value = displayStylePreference.displayStyle.value;
+      dateTimeFormat.value = dateTimeFormatPreference.dateTimeFormat.value;
       appendingHeaders.value =
         headerPreferences.appendingHeaderNames.value.join("\n");
     }
@@ -72,6 +102,7 @@ function close(): void {
 function save(): void {
   if (appendingHeadersError.value !== undefined) return;
   displayStylePreference.setDisplayStyle(displayStyle.value);
+  dateTimeFormatPreference.setDateTimeFormat(dateTimeFormat.value);
   headerPreferences.setAppendingHeaderNames(parsedAppendingHeaders.value.names);
   close();
 }
@@ -81,6 +112,11 @@ function selectDisplayStyle(value: string): void {
   if (value === "system" || value === "light" || value === "dark") {
     displayStyle.value = value;
   }
+}
+
+/** Accepts only date/time formats represented by the controlled option list. */
+function selectDateTimeFormat(value: string): void {
+  if (isDateTimeFormat(value)) dateTimeFormat.value = value;
 }
 </script>
 
@@ -145,6 +181,28 @@ function selectDisplayStyle(value: string): void {
                   <Moon v-else :size="17" aria-hidden="true" />
                   <span>
                     {{ option?.label ?? t("header.displayStyle.system") }}
+                  </span>
+                </template>
+              </SelectMenu>
+            </FormField>
+            <FormField
+              v-slot="{ controlId }"
+              :label="t('header.dateTimeFormat.label')"
+            >
+              <SelectMenu
+                :input-id="controlId"
+                :model-value="dateTimeFormat"
+                :options="dateTimeFormatOptions"
+                :label="t('header.dateTimeFormat.label')"
+                mobile-presentation="popover"
+                @update:model-value="selectDateTimeFormat"
+              >
+                <template #selected="{ option }">
+                  <CalendarClock :size="17" aria-hidden="true" />
+                  <span>
+                    {{
+                      option?.label ?? t("header.dateTimeFormat.localeDefault")
+                    }}
                   </span>
                 </template>
               </SelectMenu>

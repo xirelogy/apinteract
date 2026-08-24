@@ -3,6 +3,10 @@ import { computed, ref, watch } from "vue";
 import { Download, LoaderCircle } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
+import {
+  formatDateTime,
+  useDateTimeFormatPreference,
+} from "@/app/preferences/date-time-format";
 import type {
   ExecutionView,
   RequestExchangeSummary,
@@ -28,6 +32,7 @@ const emit = defineEmits<{
   selectExchange: [exchangeId: string];
 }>();
 const { locale, t } = useI18n();
+const dateTimeFormatPreference = useDateTimeFormatPreference();
 
 type ResponseDetailTab = "error" | "request" | "headers" | "raw" | "scripts";
 const selectedTab = ref<ResponseDetailTab>("raw");
@@ -168,21 +173,29 @@ const showsStandaloneError = computed(
   () => props.execution?.error !== undefined && !hasTabbedError.value,
 );
 
-/** Formats compact history options without obscuring kind or provenance. */
+/** Formats history options with unambiguous timestamps and useful provenance. */
 const exchangeOptions = computed<readonly SelectMenuOption[]>(() =>
   (props.exchangeSummaries ?? []).map((summary) => ({
     value: summary.exchangeId,
     label: [
       exchangeStatusLabel(summary),
       t(`response.exchange.kind.${summary.kind}`),
-      t(`response.exchange.source.${summary.source}`),
-      new Intl.DateTimeFormat(locale.value, {
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(new Date(summary.occurredAt)),
+      ...(summary.source === "apinteract"
+        ? []
+        : [t(`response.exchange.source.${summary.source}`)]),
+      formatExchangeDateTime(summary.occurredAt),
     ].join(" · "),
   })),
 );
+
+/** Formats one exchange instant as an exact locale-aware local date and time. */
+function formatExchangeDateTime(occurredAt: string): string {
+  return formatDateTime(
+    occurredAt,
+    locale.value,
+    dateTimeFormatPreference.dateTimeFormat.value,
+  );
+}
 
 /** Returns the response status or lifecycle label used by history options. */
 function exchangeStatusLabel(summary: RequestExchangeSummary): string {

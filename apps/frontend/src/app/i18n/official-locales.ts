@@ -69,6 +69,10 @@ const zhHansMessages = {
       light: "浅色",
       dark: "深色",
     },
+    dateTimeFormat: {
+      label: "日期和时间格式",
+      localeDefault: "语言区域默认格式",
+    },
     appendingHeaders: "默认追加的请求头",
     appendingHeadersInvalid:
       "请输入有效的 HTTP 请求头名称，并使用逗号或换行分隔。",
@@ -580,6 +584,10 @@ const zhHantMessages = {
       system: "跟隨系統",
       light: "淺色",
       dark: "深色",
+    },
+    dateTimeFormat: {
+      label: "日期和時間格式",
+      localeDefault: "語言區域預設格式",
     },
     appendingHeaders: "預設附加的標頭",
     appendingHeadersInvalid:

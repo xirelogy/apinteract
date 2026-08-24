@@ -66,12 +66,23 @@ describe("ResponsePanel body transfer", () => {
       },
     });
 
-    expect(wrapper.get(".response-exchange-select").text()).toContain(
-      "201 · Execution · APInteract",
-    );
-    wrapper
-      .getComponent(SelectMenu)
-      .vm.$emit("update:modelValue", exchanges[1]!.exchangeId);
+    const select = wrapper.getComponent(SelectMenu);
+    const options = select.props("options") as readonly {
+      readonly value: string;
+      readonly label: string;
+    }[];
+    const dateTime = new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(new Date(execution.createdAt));
+    expect(options[0]?.label).toBe(`201 · Execution · ${dateTime}`);
+    expect(options[0]?.label).not.toContain("APInteract");
+    expect(options[1]?.label).toContain("200 · Capture · HAR");
+    select.vm.$emit("update:modelValue", exchanges[1]!.exchangeId);
     await wrapper.vm.$nextTick();
     expect(wrapper.emitted("selectExchange")).toEqual([
       [exchanges[1]!.exchangeId],

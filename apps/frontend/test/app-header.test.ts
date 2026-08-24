@@ -134,7 +134,12 @@ describe("AppHeader", () => {
     ]);
     expect(optionTabs[0]?.attributes("aria-selected")).toBe("true");
     expect(optionsDialog.findAll("label").map((label) => label.text())).toEqual(
-      ["Language", "Display style", "Headers that append by default"],
+      [
+        "Language",
+        "Display style",
+        "Date and time format",
+        "Headers that append by default",
+      ],
     );
     expect(
       optionsDialog
@@ -161,6 +166,18 @@ describe("AppHeader", () => {
       .find((option) => option.text().includes("Dark"));
     await darkOption?.trigger("click");
     expect(displayStyle.find(".lucide-moon").exists()).toBe(true);
+    const dateTimeFormat = optionsDialog.get(
+      'button[aria-label="Date and time format"]',
+    );
+    expect(dateTimeFormat.text()).toContain("Locale default");
+    expect(dateTimeFormat.find(".lucide-calendar-clock").exists()).toBe(true);
+    await dateTimeFormat.trigger("click");
+    await flushPromises();
+    const sortableDateTimeOption = optionsDialog
+      .findAll('[role="option"]')
+      .find((option) => option.text().startsWith("YYYY-MM-DD HH:mm:ss"));
+    await sortableDateTimeOption?.trigger("click");
+    expect(dateTimeFormat.text()).toContain("YYYY-MM-DD HH:mm:ss");
     await optionTabs[1]?.trigger("click");
     expect(optionTabs[1]?.attributes("aria-selected")).toBe("true");
     const appendingHeaders = optionsDialog.get("textarea");
@@ -175,6 +192,9 @@ describe("AppHeader", () => {
       ),
     ).toEqual(["Cookie", "X-List"]);
     expect(window.localStorage.getItem("apinteract.displayStyle")).toBe("dark");
+    expect(window.localStorage.getItem("apinteract.dateTimeFormat")).toBe(
+      "ymd-24",
+    );
     expect(document.documentElement.dataset.theme).toBe("dark");
     await accountTrigger.trigger("click");
     await flushPromises();

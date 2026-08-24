@@ -23,6 +23,10 @@ import { useI18n } from "vue-i18n";
 import { v7 as uuidV7 } from "uuid";
 
 import { defaultHeaderMergeMode } from "@/app/preferences/header-preferences";
+import {
+  formatDateTime,
+  useDateTimeFormatPreference,
+} from "@/app/preferences/date-time-format";
 import type {
   ExecutionView,
   HttpMethod,
@@ -117,7 +121,8 @@ const props = withDefaults(
     uploadAttachment: null,
   },
 );
-const { t } = useI18n();
+const { locale, t } = useI18n();
+const dateTimeFormatPreference = useDateTimeFormatPreference();
 
 const emit = defineEmits<{
   save: [draft: RequestDraftInput];
@@ -1108,10 +1113,11 @@ function saveVersionName(): void {
 
 /** Formats one immutable revision timestamp in the current locale. */
 function revisionDate(revision: RequestRevisionSummary): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(revision.createdAt));
+  return formatDateTime(
+    revision.createdAt,
+    locale.value,
+    dateTimeFormatPreference.dateTimeFormat.value,
+  );
 }
 
 /** Returns a user name or the localized automatic revision reason. */

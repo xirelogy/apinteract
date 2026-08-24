@@ -66,6 +66,10 @@ export const enUsMessages = {
       light: "Light",
       dark: "Dark",
     },
+    dateTimeFormat: {
+      label: "Date and time format",
+      localeDefault: "Locale default",
+    },
     appendingHeaders: "Headers that append by default",
     appendingHeadersInvalid:
       "Enter valid HTTP header names separated by commas or lines.",
