@@ -139,6 +139,9 @@ describe("ImportService", () => {
       });
 
       expect(result.requests).toHaveLength(1);
+      expect(result.collections).toEqual([
+        { collectionId: result.collectionId, parentCollectionId: null },
+      ]);
       expect(
         await database.db
           .selectFrom("workspace_tree_nodes")
@@ -310,6 +313,21 @@ describe("ImportService", () => {
       if (importedPathCollection.parentCollectionId === null) {
         throw new Error("Expected an imported server collection");
       }
+      const importedCollectionParents = new Map(
+        result.collections.map((collection) => [
+          collection.collectionId,
+          collection.parentCollectionId,
+        ]),
+      );
+      expect(importedCollectionParents.get(result.collectionId)).toBeNull();
+      expect(importedCollectionParents.get(importedPathCollectionId)).toBe(
+        importedPathCollection.parentCollectionId,
+      );
+      expect(
+        importedCollectionParents.get(
+          importedPathCollection.parentCollectionId,
+        ),
+      ).toBe(result.collectionId);
       await expect(
         requests.getCollection(
           userId,

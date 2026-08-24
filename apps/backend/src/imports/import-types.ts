@@ -128,9 +128,16 @@ export interface ImportApplyInput {
   readonly expectedSourceFingerprint: string;
 }
 
+/** Identifies one collection and its parent in a persisted import hierarchy. */
+export interface ImportedCollectionResult {
+  readonly collectionId: string;
+  readonly parentCollectionId: string | null;
+}
+
 /** Identifies the entities created by one atomic persisted import. */
 export interface ImportApplyResult {
   readonly collectionId: string;
+  readonly collections: readonly ImportedCollectionResult[];
   readonly requests: readonly RequestView[];
 }
 

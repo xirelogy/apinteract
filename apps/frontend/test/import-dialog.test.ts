@@ -261,8 +261,12 @@ describe("ImportDialog", () => {
       requests,
       diagnostics: [],
     };
+    const importedCollectionId = "019facab-1eee-765f-bd9f-ac2449151de1";
     const applyImport = vi.fn().mockResolvedValue({
-      collectionId: "019facab-1eee-765f-bd9f-ac2449151de1",
+      collectionId: importedCollectionId,
+      collections: [
+        { collectionId: importedCollectionId, parentCollectionId: null },
+      ],
       requests: [],
     });
     const wrapper = mount(ImportDialog, {

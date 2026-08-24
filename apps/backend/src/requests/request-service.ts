@@ -200,9 +200,16 @@ export interface RequestCreationOptions {
   readonly notes?: string;
 }
 
+/** Identifies one collection and its parent created by a provider import. */
+export interface RequestImportCollectionResult {
+  readonly collectionId: EntityId;
+  readonly parentCollectionId: EntityId | null;
+}
+
 /** Identifies entities created by one atomic provider import. */
 export interface RequestImportResult {
   readonly collectionId: EntityId;
+  readonly collections: readonly RequestImportCollectionResult[];
   readonly requests: readonly RequestView[];
 }
 
@@ -1209,6 +1216,9 @@ export class RequestService {
       });
 
       const collectionIds = new Map<string, EntityId>();
+      const createdCollections: RequestImportCollectionResult[] = [
+        { collectionId, parentCollectionId },
+      ];
       const pendingCollections = [...normalizedCollections];
       while (pendingCollections.length > 0) {
         const creatableIndex = pendingCollections.findIndex(
@@ -1279,6 +1289,10 @@ export class RequestService {
           );
         }
         collectionIds.set(collection.collectionKey, importedCollectionId);
+        createdCollections.push({
+          collectionId: importedCollectionId,
+          parentCollectionId: importedParentId,
+        });
         await this.#audit.record(transaction, {
           type: "collection.created",
           actorUserId: userId,
@@ -1409,7 +1423,11 @@ export class RequestService {
           requestCount: created.length,
         },
       });
-      return { collectionId, requests: created };
+      return {
+        collectionId,
+        collections: createdCollections,
+        requests: created,
+      };
     });
   }
 

@@ -1941,12 +1941,30 @@
           }
         }
       },
+      "ImportedCollectionResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["collectionId", "parentCollectionId"],
+        "properties": {
+          "collectionId": { "$ref": "#/components/schemas/CollectionId" },
+          "parentCollectionId": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/CollectionId" },
+              { "type": "null" }
+            ]
+          }
+        }
+      },
       "ImportApplyResult": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["collectionId", "requests"],
+        "required": ["collectionId", "collections", "requests"],
         "properties": {
           "collectionId": { "$ref": "#/components/schemas/CollectionId" },
+          "collections": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ImportedCollectionResult" }
+          },
           "requests": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/RequestView" }

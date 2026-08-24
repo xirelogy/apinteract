@@ -764,8 +764,13 @@ export interface components {
       requests: components["schemas"]["ImportedRequest"][];
       diagnostics: components["schemas"]["ImportDiagnostic"][];
     };
+    ImportedCollectionResult: {
+      collectionId: components["schemas"]["CollectionId"];
+      parentCollectionId: components["schemas"]["CollectionId"] | null;
+    };
     ImportApplyResult: {
       collectionId: components["schemas"]["CollectionId"];
+      collections: components["schemas"]["ImportedCollectionResult"][];
       requests: components["schemas"]["RequestView"][];
     };
     ImportProvidersCommand: components["schemas"]["CommandEnvelope"] & {

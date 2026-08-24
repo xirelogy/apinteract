@@ -834,10 +834,14 @@ describe("ApplicationController local request recovery", () => {
 });
 
 describe("ApplicationController requests", () => {
-  it("opens every captured import response and keeps the first active", async () => {
+  it("reveals every imported branch and opens every captured response", async () => {
     setActivePinia(createPinia());
     const workspaceId = "019facab-1eee-765f-bd9f-ac2449151ae1";
+    const destinationCollectionId = "019facab-1eee-765f-bd9f-ac2449151ad9";
     const collectionId = "019facab-1eee-765f-bd9f-ac2449151ae2";
+    const groupCollectionId = "019facab-1eee-765f-bd9f-ac2449151ae6";
+    const requestCollectionId = "019facab-1eee-765f-bd9f-ac2449151ae7";
+    const siblingCollectionId = "019facab-1eee-765f-bd9f-ac2449151ae8";
     const importedRequests = [
       {
         requestId: "019facab-1eee-765f-bd9f-ac2449151ae3",
@@ -854,7 +858,8 @@ describe("ApplicationController requests", () => {
     ].map(({ requestId, captured }, index) => ({
       requestId,
       workspaceId,
-      parentCollectionId: collectionId,
+      parentCollectionId:
+        index === 2 ? siblingCollectionId : requestCollectionId,
       name: `Imported ${index + 1}`,
       description: "",
       notes: "",
@@ -892,9 +897,46 @@ describe("ApplicationController requests", () => {
     }));
     const command = vi.fn((type: string, payload?: Record<string, string>) => {
       if (type === "import.apply") {
-        return { collectionId, requests: importedRequests };
+        return {
+          collectionId,
+          collections: [
+            {
+              collectionId,
+              parentCollectionId: destinationCollectionId,
+            },
+            {
+              collectionId: groupCollectionId,
+              parentCollectionId: collectionId,
+            },
+            {
+              collectionId: requestCollectionId,
+              parentCollectionId: groupCollectionId,
+            },
+            {
+              collectionId: siblingCollectionId,
+              parentCollectionId: collectionId,
+            },
+          ],
+          requests: importedRequests,
+        };
       }
-      if (type === "tree.list") return { children: [] };
+      if (type === "tree.list") {
+        return {
+          children: importedRequests
+            .filter(
+              (request) =>
+                request.parentCollectionId === payload?.parentCollectionId,
+            )
+            .map((request, index) => ({
+              nodeId: request.requestId,
+              kind: "request" as const,
+              name: request.name,
+              method: request.method,
+              position: index,
+              orderRevision: 0,
+            })),
+        };
+      }
       if (type === "request.exchange.list") {
         const request = importedRequests.find(
           (candidate) => candidate.requestId === payload?.requestId,
@@ -986,9 +1028,31 @@ describe("ApplicationController requests", () => {
       },
       selectedItemIds: ["entry:0", "entry:1", "entry:2"],
       collectionName: "Capture",
-      parentCollectionId: null,
+      parentCollectionId: destinationCollectionId,
     });
 
+    expect(store.expandedCollectionIds).toEqual([
+      destinationCollectionId,
+      collectionId,
+      groupCollectionId,
+      requestCollectionId,
+      siblingCollectionId,
+    ]);
+    for (const parentCollectionId of [
+      destinationCollectionId,
+      collectionId,
+      groupCollectionId,
+      requestCollectionId,
+      siblingCollectionId,
+    ]) {
+      expect(command).toHaveBeenCalledWith("tree.list", {
+        workspaceId,
+        parentCollectionId,
+      });
+    }
+    expect(
+      store.collectionChildren[siblingCollectionId]?.map((node) => node.nodeId),
+    ).toEqual([importedRequests[2]?.requestId]);
     expect(store.requestTabs.map((tab) => tab.request?.requestId)).toEqual([
       importedRequests[0]?.requestId,
       importedRequests[2]?.requestId,

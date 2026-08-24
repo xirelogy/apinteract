@@ -1703,12 +1703,6 @@ export class ApplicationController {
           expectedSourceFingerprint: options.plan.sourceFingerprint,
         },
       );
-      await this.#reloadCollection(workspaceId, options.parentCollectionId);
-      await this.#reloadCollection(workspaceId, result.collectionId);
-      store.expandedCollectionIds = includeOnce(
-        store.expandedCollectionIds,
-        result.collectionId,
-      );
       const capturedRequests = result.requests.filter(
         (request) => request.capturedExchange !== undefined,
       );
@@ -1716,6 +1710,23 @@ export class ApplicationController {
         capturedRequests.length > 0
           ? capturedRequests
           : result.requests.slice(0, 1);
+      await this.#reloadCollection(workspaceId, options.parentCollectionId);
+      await Promise.all(
+        result.collections.map((collection) =>
+          this.#reloadCollection(workspaceId, collection.collectionId),
+        ),
+      );
+      for (const collectionId of [
+        ...(options.parentCollectionId === null
+          ? []
+          : [options.parentCollectionId]),
+        ...result.collections.map((collection) => collection.collectionId),
+      ]) {
+        store.expandedCollectionIds = includeOnce(
+          store.expandedCollectionIds,
+          collectionId,
+        );
+      }
       let firstOpenedTabId: string | null = null;
       for (const request of requestsToOpen) {
         const tabId = this.#openRequestTab(request);
