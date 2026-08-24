@@ -86,6 +86,11 @@ export class OpenApiJsonImportProvider implements ImportProvider {
     const suggestedName = (
       stringValue(info.title).trim() || sourceStem(source.name)
     ).slice(0, 200);
+    const rootDescription = importShortDescription(
+      info.summary,
+      diagnostics,
+      "#/info/summary",
+    );
     const mappedRequests: MappedOpenApiRequest[] = [];
     const paths = isRecord(document.paths) ? document.paths : {};
     for (const [path, rawPathItem] of Object.entries(paths)) {
@@ -160,6 +165,13 @@ export class OpenApiJsonImportProvider implements ImportProvider {
             sourceLocation,
             collectionKey: null,
             name: requestName(operation, method, path),
+            description: importShortDescription(
+              operation.summary,
+              diagnostics,
+              `${sourceLocation}/summary`,
+              itemId,
+            ),
+            notes: stringValue(operation.description),
             method,
             targetMode: "composed",
             targetUrl: mapped.targetUrl,
@@ -181,6 +193,7 @@ export class OpenApiJsonImportProvider implements ImportProvider {
     const hierarchy = buildOpenApiHierarchy(
       mappedRequests,
       declaredTagOrder(document.tags),
+      declaredTagNotes(document.tags),
       diagnostics,
     );
     requests.push(...hierarchy.requests);
@@ -199,6 +212,8 @@ export class OpenApiJsonImportProvider implements ImportProvider {
       providerVersion: this.manifest.version,
       sourceName: source.name,
       suggestedName,
+      description: rootDescription,
+      notes: stringValue(info.description),
       pathPrefix: hierarchy.pathPrefix,
       variables: hierarchy.variables,
       collections: hierarchy.collections,
@@ -206,6 +221,31 @@ export class OpenApiJsonImportProvider implements ImportProvider {
       diagnostics,
     };
   }
+}
+
+/** Maps a bounded single-line summary without silently truncating source text. */
+function importShortDescription(
+  value: unknown,
+  diagnostics: ImportDiagnostic[],
+  sourceLocation: string,
+  itemId?: string,
+): string {
+  const description = stringValue(value).trim();
+  if (
+    !/[\r\n]/u.test(description) &&
+    Buffer.byteLength(description, "utf8") <= 2 * 1024
+  ) {
+    return description;
+  }
+  diagnostics.push({
+    code: "openapi_summary_not_imported",
+    severity: "warning",
+    message:
+      "A summary was not imported as a description because it is not a bounded single-line value.",
+    ...(itemId === undefined ? {} : { itemId }),
+    sourceLocation,
+  });
+  return "";
 }
 
 /** Represents one normalized effective server boundary used for composition. */
@@ -235,6 +275,7 @@ interface OpenApiHierarchy {
 function buildOpenApiHierarchy(
   mappedRequests: readonly MappedOpenApiRequest[],
   tagOrder: readonly string[],
+  tagNotes: ReadonlyMap<string, string>,
   diagnostics: ImportDiagnostic[],
 ): OpenApiHierarchy {
   const serverGroups = new Map<string, ResolvedOpenApiServer>();
@@ -260,6 +301,8 @@ function buildOpenApiHierarchy(
           collectionKey: server.key,
           parentCollectionKey: null,
           name: serverCollectionName(server),
+          description: "",
+          notes: "",
           pathPrefix: server.url,
           variables: [],
         })),
@@ -304,6 +347,8 @@ function buildOpenApiHierarchy(
       collectionKey: tagKey,
       parentCollectionKey: null,
       name: openApiTagCollectionName(tag),
+      description: "",
+      notes: tag === null ? "" : (tagNotes.get(tag) ?? ""),
       pathPrefix: tagOwnsServerPrefix ? [...tagServers.values()][0]!.url : "",
       variables: [],
     });
@@ -321,6 +366,8 @@ function buildOpenApiHierarchy(
           collectionKey,
           parentCollectionKey: tagKey,
           name: serverCollectionName(server),
+          description: "",
+          notes: "",
           pathPrefix: server.url,
           variables: [],
         });
@@ -360,6 +407,8 @@ function routeMappedRequest(
       collectionKey: pathKey,
       parentCollectionKey,
       name: openApiPathCollectionName(mapped.path),
+      description: "",
+      notes: "",
       pathPrefix: mapped.request.targetUrl,
       variables: [],
     });
@@ -380,8 +429,15 @@ function collectRootVariables(
   const variables: VariableWrite[] = [];
   const declarations = new Map<
     string,
-    { readonly variable: VariableWrite; readonly itemId: string }
+    {
+      readonly variable: VariableWrite;
+      readonly itemId: string;
+      readonly descriptionItemId: string | undefined;
+      readonly outputIndex: number;
+    }
   >();
+  const descriptionConflictItems = new Set<string>();
+  const descriptionConflictNames = new Set<string>();
   for (const mapped of mappedRequests) {
     for (const variable of mapped.request.variables) {
       const existing = declarations.get(variable.name);
@@ -389,20 +445,60 @@ function collectRootVariables(
         declarations.set(variable.name, {
           variable,
           itemId: mapped.request.itemId,
+          descriptionItemId:
+            (variable.description ?? "") === ""
+              ? undefined
+              : mapped.request.itemId,
+          outputIndex: variables.length,
         });
         variables.push(variable);
-      } else if (
-        openApiVariableSignature(existing.variable) !==
-        openApiVariableSignature(variable)
-      ) {
-        diagnostics.push({
-          code: "openapi_variable_default_conflict",
-          severity: "warning",
-          message: `Variable ${variable.name} has conflicting OpenAPI defaults; the first imported value was kept.`,
-          itemIds: [existing.itemId, mapped.request.itemId],
-        });
+      } else {
+        if (
+          openApiVariableSignature(existing.variable) !==
+          openApiVariableSignature(variable)
+        ) {
+          diagnostics.push({
+            code: "openapi_variable_default_conflict",
+            severity: "warning",
+            message: `Variable ${variable.name} has conflicting OpenAPI defaults; the first imported value was kept.`,
+            itemIds: [existing.itemId, mapped.request.itemId],
+          });
+        }
+        if (
+          (existing.variable.description ?? "") !== "" &&
+          (variable.description ?? "") !== "" &&
+          existing.variable.description !== variable.description
+        ) {
+          descriptionConflictNames.add(variable.name);
+          descriptionConflictItems.add(
+            existing.descriptionItemId ?? existing.itemId,
+          );
+          descriptionConflictItems.add(mapped.request.itemId);
+        } else if (
+          (existing.variable.description ?? "") === "" &&
+          (variable.description ?? "") !== ""
+        ) {
+          const documented = {
+            ...existing.variable,
+            description: variable.description,
+          } as VariableWrite;
+          variables[existing.outputIndex] = documented;
+          declarations.set(variable.name, {
+            ...existing,
+            variable: documented,
+            descriptionItemId: mapped.request.itemId,
+          });
+        }
       }
     }
+  }
+  if (descriptionConflictNames.size > 0) {
+    diagnostics.push({
+      code: "openapi_variable_description_conflict",
+      severity: "warning",
+      message: `Conflicting descriptions for imported variables were ignored after their first declaration: ${[...descriptionConflictNames].join(", ")}.`,
+      itemIds: [...descriptionConflictItems],
+    });
   }
   return variables;
 }
@@ -493,10 +589,14 @@ function resolveServerTemplate(
     serverVariableNames.add(variableName);
     const definition = variables[name];
     const hasDefault = isRecord(definition) && definition.default !== undefined;
+    const description = isRecord(definition)
+      ? stringValue(definition.description)
+      : "";
     serverVariables.push({
       name: variableName,
       kind: "value",
       value: hasDefault ? editableValue(definition.default) : "",
+      ...(description === "" ? {} : { description }),
     });
     if (!hasDefault) {
       diagnostics.push({
@@ -604,6 +704,19 @@ function declaredTagOrder(rawTags: unknown): string[] {
         .filter((tag) => tag !== ""),
     ),
   ];
+}
+
+/** Maps declared tag descriptions to their logical collection names. */
+function declaredTagNotes(rawTags: unknown): ReadonlyMap<string, string> {
+  const notes = new Map<string, string>();
+  for (const rawTag of unknownArray(rawTags)) {
+    if (!isRecord(rawTag)) continue;
+    const name = stringValue(rawTag.name).trim();
+    if (name !== "" && !notes.has(name)) {
+      notes.set(name, stringValue(rawTag.description));
+    }
+  }
+  return notes;
 }
 
 /** Creates a stable key for one declared or synthetic untagged group. */
@@ -759,21 +872,39 @@ function mapParameters(
       parameter.example ?? schema.example ?? schema.default ?? undefined;
     const value = editableValue(example);
     const enabled = parameter.required === true || example !== undefined;
+    const description = stringValue(parameter.description);
     if (location === "path") {
       const variableName = uniqueVariableName(name, variableNames);
       variableNames.add(variableName);
       targetUrl = targetUrl.replaceAll(`{${name}}`, `<<${variableName}>>`);
-      variables.push({ name: variableName, kind: "value", value });
+      variables.push({
+        name: variableName,
+        kind: "value",
+        value,
+        ...(description === "" ? {} : { description }),
+      });
     } else if (location === "query") {
-      query.push({ name, value, enabled });
+      query.push({
+        name,
+        value,
+        enabled,
+        ...(description === "" ? {} : { description }),
+      });
     } else if (location === "header") {
-      headers.push({ name, value, enabled, mode: "override" });
+      headers.push({
+        name,
+        value,
+        enabled,
+        mode: "override",
+        ...(description === "" ? {} : { description }),
+      });
     } else if (location === "cookie") {
       headers.push({
         name: "Cookie",
         value: `${name}=${value}`,
         enabled,
         mode: "append",
+        ...(description === "" ? {} : { description }),
       });
     }
   }
@@ -891,10 +1022,12 @@ function schemaFields(
       onBinary?.(name);
       continue;
     }
+    const description = stringValue(property.description);
     fields.push({
       name,
       value: editableValue(property.example ?? property.default),
       enabled: required.has(name),
+      ...(description === "" ? {} : { description }),
     });
   }
   return fields;
@@ -991,7 +1124,12 @@ function mapSecurity(
     }
     const variableName = uniqueVariableName(schemeName, variableNames);
     variableNames.add(variableName);
-    variables.push({ name: variableName, kind: "secret" });
+    const description = stringValue(scheme.description);
+    variables.push({
+      name: variableName,
+      kind: "secret",
+      ...(description === "" ? {} : { description }),
+    });
     if (scheme.type === "apiKey") {
       const name = stringValue(scheme.name, schemeName);
       if (scheme.in === "query")

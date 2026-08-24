@@ -10,9 +10,11 @@ export function createBlankHeaderField(): RequestField {
   return { name: "", value: "", enabled: true, mode: "override" };
 }
 
-/** Reports whether a structured field contains no user-authored wire content. */
+/** Reports whether a structured field contains no wire or documentation content. */
 export function isBlankRequestField(field: RequestField): boolean {
-  return field.name === "" && field.value === "";
+  return (
+    field.name === "" && field.value === "" && (field.description ?? "") === ""
+  );
 }
 
 /** Copies fields and appends one editable trailing row when none exists. */

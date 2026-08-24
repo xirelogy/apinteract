@@ -689,6 +689,8 @@ export class ApplicationController {
       tab.workspace.workspaceId,
       tab.workspace.revision,
       tab.draft.name,
+      tab.draft.description,
+      tab.draft.notes,
       tab.draft.baseUrl,
       tab.draft.headers,
       tab.variableProfile.revision,
@@ -714,6 +716,8 @@ export class ApplicationController {
     workspaceId: string,
     expectedRevision: number,
     name: string,
+    description: string,
+    notes: string,
     baseUrl: string,
     headers: readonly RequestField[],
     expectedVariableRevision: number,
@@ -722,7 +726,15 @@ export class ApplicationController {
     return this.#run(async () => {
       const workspace = await this.#webSocket.command<WorkspaceView>(
         "workspace.update",
-        { workspaceId, expectedRevision, name, baseUrl, headers },
+        {
+          workspaceId,
+          expectedRevision,
+          name,
+          description,
+          notes,
+          baseUrl,
+          headers,
+        },
       );
       const store = useApplicationStore();
       store.selectedWorkspace = workspace;
@@ -980,7 +992,13 @@ export class ApplicationController {
         tabId: uuidV7(),
         workspaceId,
         environment: null,
-        draft: { name: "", variables: [], includedEnvironmentIds: [] },
+        draft: {
+          name: "",
+          description: "",
+          notes: "",
+          variables: [],
+          includedEnvironmentIds: [],
+        },
         baseline: null,
         busy: false,
       };
@@ -1022,6 +1040,8 @@ export class ApplicationController {
       tab.environment === null
         ? await this.createEnvironment(
             tab.draft.name,
+            tab.draft.description,
+            tab.draft.notes,
             tab.draft.variables,
             tab.draft.includedEnvironmentIds,
           )
@@ -1029,6 +1049,8 @@ export class ApplicationController {
             tab.environment.environmentId,
             tab.environment.revision,
             tab.draft.name,
+            tab.draft.description,
+            tab.draft.notes,
             tab.draft.variables,
             tab.draft.includedEnvironmentIds,
           );
@@ -1061,6 +1083,8 @@ export class ApplicationController {
   /** Creates an environment and reloads session-aware summaries. */
   async createEnvironment(
     name: string,
+    description: string,
+    notes: string,
     variables: readonly EnvironmentVariableWrite[],
     includedEnvironmentIds: readonly string[],
   ): Promise<EnvironmentView> {
@@ -1069,7 +1093,14 @@ export class ApplicationController {
     return this.#run(async () => {
       const environment = await this.#webSocket.command<EnvironmentView>(
         "environment.create",
-        { workspaceId, name, variables, includedEnvironmentIds },
+        {
+          workspaceId,
+          name,
+          description,
+          notes,
+          variables,
+          includedEnvironmentIds,
+        },
       );
       await this.#reloadEnvironments(workspaceId);
       store.selectedEnvironment = environment;
@@ -1083,6 +1114,8 @@ export class ApplicationController {
     environmentId: string,
     expectedRevision: number,
     name: string,
+    description: string,
+    notes: string,
     variables: readonly EnvironmentVariableWrite[],
     includedEnvironmentIds: readonly string[],
   ): Promise<EnvironmentView> {
@@ -1095,6 +1128,8 @@ export class ApplicationController {
           environmentId,
           expectedRevision,
           name,
+          description,
+          notes,
           variables,
           includedEnvironmentIds,
         },
@@ -1317,6 +1352,8 @@ export class ApplicationController {
       tab.collection.collectionId,
       tab.collection.revision,
       tab.draft.name,
+      tab.draft.description,
+      tab.draft.notes,
       tab.draft.pathPrefix,
       tab.draft.headers,
       tab.variableProfile.revision,
@@ -1342,6 +1379,8 @@ export class ApplicationController {
     collectionId: string,
     expectedRevision: number,
     name: string,
+    description: string,
+    notes: string,
     pathPrefix: string,
     headers: readonly RequestField[],
     expectedVariableRevision: number,
@@ -1350,7 +1389,15 @@ export class ApplicationController {
     return this.#run(async () => {
       const collection = await this.#webSocket.command<CollectionView>(
         "collection.update",
-        { collectionId, expectedRevision, name, pathPrefix, headers },
+        {
+          collectionId,
+          expectedRevision,
+          name,
+          description,
+          notes,
+          pathPrefix,
+          headers,
+        },
       );
       const store = useApplicationStore();
       if (store.selectedCollectionId === collectionId) {
@@ -1606,6 +1653,8 @@ export class ApplicationController {
       ...tab,
       draft: {
         name: imported.name,
+        description: imported.description,
+        notes: imported.notes,
         method: imported.method,
         targetMode,
         targetUrl,
@@ -1893,6 +1942,8 @@ export class ApplicationController {
           requestId: tab.request?.requestId,
           expectedDraftRevision: tab.request?.draftRevision,
           name: draft.name,
+          description: draft.description ?? "",
+          notes: draft.notes ?? "",
           ...executableDraft(draft),
           ...(variableUpdate === null
             ? {}
@@ -1947,6 +1998,8 @@ export class ApplicationController {
           workspaceId: tab.workspaceId,
           parentCollectionId,
           name,
+          description: tab.draft.description ?? "",
+          notes: tab.draft.notes ?? "",
           ...executableDraft(tab.draft),
           variables: tab.variableDraft ?? [],
         },
@@ -2750,6 +2803,8 @@ function emptyDraft(
 ): RequestDraftInput {
   return {
     name: "",
+    description: "",
+    notes: "",
     method: "GET",
     targetMode,
     targetUrl: "",
@@ -2771,6 +2826,8 @@ function requestToDraft(request: RequestView): RequestDraftInput {
       : { kind: "text" as const, contentType: null, text: request.body });
   return {
     name: request.name,
+    description: request.description,
+    notes: request.notes,
     method: request.method,
     targetMode: request.targetMode,
     targetUrl: request.targetUrl,
@@ -2821,7 +2878,11 @@ function variableViewsToWrites(
   variables: VariableProfileView["variables"],
 ): VariableWrite[] {
   return variables.map((variable) => {
-    const common = { variableId: variable.variableId, name: variable.name };
+    const common = {
+      variableId: variable.variableId,
+      name: variable.name,
+      description: variable.description,
+    };
     switch (variable.kind) {
       case "value":
         return { ...common, kind: "value", value: variable.value };
@@ -2849,6 +2910,8 @@ function workspacePropertiesDraft(
 ): WorkspacePropertiesDraft {
   return {
     name: workspace.name,
+    description: workspace.description,
+    notes: workspace.notes,
     baseUrl: workspace.baseUrl,
     headers: workspace.headers.map((header) => ({ ...header })),
     variables: variableViewsToWrites(profile.variables),
@@ -2873,6 +2936,8 @@ function collectionPropertiesDraft(
 ): CollectionPropertiesDraft {
   return {
     name: collection.name,
+    description: collection.description,
+    notes: collection.notes,
     pathPrefix: collection.pathPrefix,
     headers: collection.headers.map((header) => ({ ...header })),
     variables: variableViewsToWrites(profile.variables),
@@ -2894,8 +2959,14 @@ function cloneCollectionPropertiesDraft(
 function environmentDraft(environment: EnvironmentView): EnvironmentDraft {
   return {
     name: environment.name,
+    description: environment.description,
+    notes: environment.notes,
     variables: environment.variables.map((variable) => {
-      const common = { variableId: variable.variableId, name: variable.name };
+      const common = {
+        variableId: variable.variableId,
+        name: variable.name,
+        description: variable.description,
+      };
       switch (variable.kind) {
         case "value":
           return { ...common, kind: "value" as const, value: variable.value };
@@ -2917,6 +2988,8 @@ function environmentDraft(environment: EnvironmentView): EnvironmentDraft {
 function cloneEnvironmentDraft(draft: EnvironmentDraft): EnvironmentDraft {
   return {
     name: draft.name,
+    description: draft.description,
+    notes: draft.notes,
     variables: draft.variables.map((variable) => ({ ...variable })),
     includedEnvironmentIds: [...draft.includedEnvironmentIds],
   };

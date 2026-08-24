@@ -28,6 +28,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "Content indicators",
+          description: "Documented request",
+          notes: "",
           method: "POST",
           targetMode: "absolute",
           targetUrl: "https://example.test",
@@ -51,7 +53,7 @@ describe("RequestEditor", () => {
       global: { plugins: [i18n] },
     });
 
-    for (const tab of ["body", "preRequest", "postResponse"]) {
+    for (const tab of ["body", "preRequest", "postResponse", "documentation"]) {
       expect(
         wrapper
           .get(`[id$="-trigger-${tab}"]`)
@@ -78,6 +80,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "Recovered request",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "absolute",
           targetUrl: "https://example.test",
@@ -125,6 +129,8 @@ describe("RequestEditor", () => {
       workspaceId: "019facab-1eee-765f-bd9f-ac2449151bf2",
       parentCollectionId: null,
       name: "Current",
+      description: "",
+      notes: "",
       method: "GET" as const,
       targetMode: "absolute" as const,
       targetUrl: "https://example.test/current",
@@ -152,6 +158,8 @@ describe("RequestEditor", () => {
         request,
         draft: {
           name: request.name,
+          description: "",
+          notes: "",
           method: request.method,
           targetMode: request.targetMode,
           targetUrl: request.targetUrl,
@@ -172,6 +180,8 @@ describe("RequestEditor", () => {
           request: {
             ...request,
             name: "Historical",
+            description: "",
+            notes: "",
             method: "POST",
             targetUrl: "https://example.test/historical",
             body: "historical",
@@ -215,6 +225,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "Resizable request",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "absolute",
           targetUrl: "https://example.test",
@@ -295,6 +307,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "JSON request",
+          description: "",
+          notes: "",
           method: "POST",
           targetMode: "absolute",
           targetUrl: "https://example.test/json",
@@ -400,6 +414,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "Binary request",
+          description: "",
+          notes: "",
           method: "POST",
           targetMode: "absolute",
           targetUrl: "https://example.test/binary",
@@ -501,6 +517,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "Form request",
+          description: "",
+          notes: "",
           method: "POST",
           targetMode: "absolute",
           targetUrl: "https://example.test/forms",
@@ -713,6 +731,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "Trailing rows",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "absolute",
           targetUrl: "https://example.test",
@@ -796,6 +816,81 @@ describe("RequestEditor", () => {
     });
   });
 
+  it("keeps an inline field description open across draft cloning and reordering", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const draft: RequestDraftInput = {
+      name: "Documented fields",
+      description: "",
+      notes: "",
+      method: "GET",
+      targetMode: "absolute",
+      targetUrl: "https://example.test",
+      query: [
+        { name: "first", value: "one", enabled: true },
+        { name: "second", value: "two", enabled: true },
+      ],
+      headers: [],
+      requestBody: { kind: "none" },
+      body: "",
+      preRequestScript: "",
+      postResponseScript: "",
+    };
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft,
+        execution: null,
+        tabId: "documented-fields-tab",
+        temporary: true,
+        inheritedHeaders: [],
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .findAll('button[aria-label="Add or edit field description"]')[0]
+      ?.trigger("click");
+    const description = wrapper.get('input[aria-label="Field description"]');
+    await description.setValue("Primary identifier");
+    const changedDraft = wrapper.emitted("change")?.at(-1)?.[0];
+    expect(changedDraft).toMatchObject({
+      query: [
+        expect.objectContaining({
+          name: "first",
+          description: "Primary identifier",
+        }),
+        { name: "second", value: "two", enabled: true },
+      ],
+    });
+
+    await wrapper.setProps({ draft: changedDraft as RequestDraftInput });
+    expect(
+      wrapper.get('input[aria-label="Field description"]').element,
+    ).toHaveProperty("value", "Primary identifier");
+
+    await wrapper.findAll(".row-reorder-handle")[0]?.trigger("keydown", {
+      key: "ArrowDown",
+      altKey: true,
+    });
+    expect(
+      wrapper.findAll('input[aria-label="Field description"]'),
+    ).toHaveLength(1);
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      query: [
+        { name: "second", value: "two", enabled: true },
+        expect.objectContaining({
+          name: "first",
+          description: "Primary identifier",
+        }),
+      ],
+    });
+  });
+
   it("allows a target URL containing an environment placeholder", async () => {
     vi.useFakeTimers();
     const i18n = createI18n({
@@ -808,6 +903,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "Templated request",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "absolute",
           targetUrl: "<<base_url>>/resource",
@@ -861,6 +958,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "Composed request",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "composed",
           targetUrl: "/42",
@@ -944,6 +1043,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "Missing base",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "composed",
           targetUrl: "/users",
@@ -980,6 +1081,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "absolute",
           targetUrl: "https://example.test/temporary",
@@ -1007,6 +1110,8 @@ describe("RequestEditor", () => {
       [
         {
           name: "",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "absolute",
           targetUrl: "https://example.test/temporary",
@@ -1032,6 +1137,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "Example",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "absolute",
           targetUrl: "https://example.test",
@@ -1138,6 +1245,8 @@ describe("RequestEditor", () => {
           workspaceId,
           parentCollectionId: null,
           name: "Saved request",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "absolute",
           targetUrl: "https://example.test",
@@ -1153,6 +1262,8 @@ describe("RequestEditor", () => {
         },
         draft: {
           name: "Saved request",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "absolute",
           targetUrl: "https://example.test",
@@ -1231,6 +1342,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "absolute",
           targetUrl: "https://example.test/<<source>>",
@@ -1269,6 +1382,7 @@ describe("RequestEditor", () => {
             variable: {
               variableId: "019facab-1eee-765f-bd9f-ac2449151bf8",
               name: "workspace_value",
+              description: "",
               kind: "value",
               value: "inherited",
             },
@@ -1305,6 +1419,8 @@ describe("RequestEditor", () => {
         request: null,
         draft: {
           name: "Scripted request",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "absolute",
           targetUrl: "https://example.test",

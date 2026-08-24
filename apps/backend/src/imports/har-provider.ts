@@ -170,6 +170,8 @@ export class HarImportProvider implements ImportProvider {
         sourceLocation: `#/log/entries/${index}`,
         collectionKey: null,
         name: harRequestName(method, mappedUrl.targetUrl, entry),
+        description: harShortDescription(request.comment),
+        notes: harRequestNotes(entry.comment, request.comment),
         method: method as HttpMethod,
         targetMode: "absolute",
         targetUrl: mappedUrl.targetUrl,
@@ -198,6 +200,8 @@ export class HarImportProvider implements ImportProvider {
       providerVersion: this.manifest.version,
       sourceName: source.name,
       suggestedName: sourceStem(source.name),
+      description: "",
+      notes: stringValue(log.comment),
       pathPrefix: "",
       variables: [],
       collections: [],
@@ -269,8 +273,16 @@ function mapHarQueryFields(
     if (!isRecord(rawField)) return [];
     const name = stringValue(rawField.name);
     const value = stringValue(rawField.value);
+    const description = stringValue(rawField.comment);
     if (!/(^|[-_])(api[-_]?key|token|secret)([-_]|$)/i.test(name)) {
-      return [{ name, value, enabled: true }];
+      return [
+        {
+          name,
+          value,
+          enabled: true,
+          ...(description === "" ? {} : { description }),
+        },
+      ];
     }
     const variableName = nextSecretVariableName(name, variables);
     variables.push({ name: variableName, kind: "secret", value });
@@ -280,7 +292,14 @@ function mapHarQueryFields(
       message: `Sensitive query parameter ${name} was converted to a secret request variable.`,
       itemId,
     });
-    return [{ name, value: `<<${variableName}>>`, enabled: true }];
+    return [
+      {
+        name,
+        value: `<<${variableName}>>`,
+        enabled: true,
+        ...(description === "" ? {} : { description }),
+      },
+    ];
   });
 }
 
@@ -298,6 +317,7 @@ function mapHarRequestHeaders(
     if (!isRecord(rawHeader)) continue;
     const name = stringValue(rawHeader.name);
     const value = stringValue(rawHeader.value);
+    const description = stringValue(rawHeader.comment);
     const normalizedName = name.toLowerCase();
     if (isHttpPseudoHeader(normalizedName)) {
       recordHeaderOmission(omissions.requestPseudoHeaders, name, itemId);
@@ -315,6 +335,7 @@ function mapHarRequestHeaders(
         value: `<<${variableName}>>`,
         enabled: true,
         mode: "override",
+        ...(description === "" ? {} : { description }),
       });
       diagnostics.push({
         code: "har_sensitive_header_secretized",
@@ -324,7 +345,13 @@ function mapHarRequestHeaders(
       });
       continue;
     }
-    headers.push({ name, value, enabled: true, mode: "override" });
+    headers.push({
+      name,
+      value,
+      enabled: true,
+      mode: "override",
+      ...(description === "" ? {} : { description }),
+    });
   }
   return headers;
 }
@@ -345,11 +372,13 @@ function mapHarCookies(
     if (name === "") continue;
     const variableName = nextSecretVariableName(`cookie_${name}`, variables);
     variables.push({ name: variableName, kind: "secret", value });
+    const description = stringValue(rawCookie.comment);
     fields.push({
       name: "Cookie",
       value: `${name}=<<${variableName}>>`,
       enabled: true,
       mode: "append",
+      ...(description === "" ? {} : { description }),
     });
   }
   if (fields.length > 0) {
@@ -407,10 +436,12 @@ function mapHarRequestBody(
         });
         continue;
       }
+      const description = stringValue(rawParameter.comment);
       fields.push({
         name,
         value: stringValue(rawParameter.value),
         enabled: true,
+        ...(description === "" ? {} : { description }),
       });
     }
     return {
@@ -580,13 +611,17 @@ function mapNameValueFields(value: unknown): RequestField[] {
   return Array.isArray(value)
     ? value.flatMap((item) =>
         isRecord(item)
-          ? [
-              {
-                name: stringValue(item.name),
-                value: stringValue(item.value),
-                enabled: true,
-              },
-            ]
+          ? (() => {
+              const description = stringValue(item.comment);
+              return [
+                {
+                  name: stringValue(item.name),
+                  value: stringValue(item.value),
+                  enabled: true,
+                  ...(description === "" ? {} : { description }),
+                },
+              ];
+            })()
           : [],
       )
     : [];
@@ -605,6 +640,27 @@ function harRequestName(
   } catch {
     return `${method} ${targetUrl}`.slice(0, 200);
   }
+}
+
+/** Keeps a HAR request comment as a short description when it is single-line. */
+function harShortDescription(value: unknown): string {
+  const comment = stringValue(value).trim();
+  return /[\r\n]/u.test(comment) ? "" : comment;
+}
+
+/** Preserves distinct entry and request comments as Markdown notes. */
+function harRequestNotes(
+  entryComment: unknown,
+  requestComment: unknown,
+): string {
+  return [
+    ...new Set([
+      stringValue(entryComment).trim(),
+      stringValue(requestComment).trim(),
+    ]),
+  ]
+    .filter((comment) => comment !== "")
+    .join("\n\n");
 }
 
 /** Reports whether a request header commonly carries reusable credentials. */

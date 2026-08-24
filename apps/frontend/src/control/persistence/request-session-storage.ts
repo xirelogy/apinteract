@@ -339,6 +339,9 @@ export function redactSecretVariableWrites(
         ? {}
         : { variableId: variable.variableId }),
       name: variable.name,
+      ...(variable.description === undefined
+        ? {}
+        : { description: variable.description }),
       kind: "secret",
       ...(variable.clearValue === undefined
         ? {}
@@ -541,7 +544,9 @@ function parseTabRecord(
   }
   try {
     const parsed: unknown = JSON.parse(record.payload);
-    return isLocalRequestTabSnapshot(parsed, manifestTab) ? parsed : null;
+    return isLocalRequestTabSnapshot(parsed, manifestTab)
+      ? { ...parsed, draft: normalizeRequestDraft(parsed.draft) }
+      : null;
   } catch {
     return null;
   }
@@ -563,10 +568,82 @@ function parseResourceTabRecord(
   }
   try {
     const parsed: unknown = JSON.parse(record.payload);
-    return isLocalResourceTabSnapshot(parsed, manifestTab) ? parsed : null;
+    if (!isLocalResourceTabSnapshot(parsed, manifestTab)) return null;
+    if (parsed.kind === "workspace") {
+      return {
+        ...parsed,
+        draft: normalizeWorkspacePropertiesDraft(parsed.draft),
+      };
+    }
+    if (parsed.kind === "collection") {
+      return {
+        ...parsed,
+        draft: normalizeCollectionPropertiesDraft(parsed.draft),
+      };
+    }
+    return {
+      ...parsed,
+      draft: normalizeEnvironmentDraft(parsed.draft),
+    };
   } catch {
     return null;
   }
+}
+
+/** Adds documentation defaults when restoring a request saved by an older UI. */
+function normalizeRequestDraft(draft: RequestDraftInput): RequestDraftInput {
+  const compatible = draft as RequestDraftInput & {
+    readonly description?: string;
+    readonly notes?: string;
+  };
+  return {
+    ...draft,
+    description: compatible.description ?? "",
+    notes: compatible.notes ?? "",
+  };
+}
+
+/** Adds documentation defaults to an older workspace editor snapshot. */
+function normalizeWorkspacePropertiesDraft(
+  draft: WorkspacePropertiesDraft,
+): WorkspacePropertiesDraft {
+  const compatible = draft as WorkspacePropertiesDraft & {
+    readonly description?: string;
+    readonly notes?: string;
+  };
+  return {
+    ...draft,
+    description: compatible.description ?? "",
+    notes: compatible.notes ?? "",
+  };
+}
+
+/** Adds documentation defaults to an older collection editor snapshot. */
+function normalizeCollectionPropertiesDraft(
+  draft: CollectionPropertiesDraft,
+): CollectionPropertiesDraft {
+  const compatible = draft as CollectionPropertiesDraft & {
+    readonly description?: string;
+    readonly notes?: string;
+  };
+  return {
+    ...draft,
+    description: compatible.description ?? "",
+    notes: compatible.notes ?? "",
+  };
+}
+
+/** Adds documentation defaults to an older environment editor snapshot. */
+function normalizeEnvironmentDraft(draft: EnvironmentDraft): EnvironmentDraft {
+  const compatible = draft as EnvironmentDraft & {
+    readonly description?: string;
+    readonly notes?: string;
+  };
+  return {
+    ...draft,
+    description: compatible.description ?? "",
+    notes: compatible.notes ?? "",
+  };
 }
 
 /** Validates the localStorage trust boundary for one user's manifest. */
@@ -710,6 +787,9 @@ function isWorkspacePropertiesDraft(
   return (
     isRecord(value) &&
     typeof value.name === "string" &&
+    (value.description === undefined ||
+      typeof value.description === "string") &&
+    (value.notes === undefined || typeof value.notes === "string") &&
     typeof value.baseUrl === "string" &&
     isFieldArray(value.headers) &&
     isVariableWriteArray(value.variables)
@@ -723,6 +803,9 @@ function isCollectionPropertiesDraft(
   return (
     isRecord(value) &&
     typeof value.name === "string" &&
+    (value.description === undefined ||
+      typeof value.description === "string") &&
+    (value.notes === undefined || typeof value.notes === "string") &&
     typeof value.pathPrefix === "string" &&
     isFieldArray(value.headers) &&
     isVariableWriteArray(value.variables)
@@ -734,6 +817,9 @@ function isEnvironmentDraft(value: unknown): value is EnvironmentDraft {
   return (
     isRecord(value) &&
     typeof value.name === "string" &&
+    (value.description === undefined ||
+      typeof value.description === "string") &&
+    (value.notes === undefined || typeof value.notes === "string") &&
     isVariableWriteArray(value.variables) &&
     Array.isArray(value.includedEnvironmentIds) &&
     value.includedEnvironmentIds.every((id) => typeof id === "string")
@@ -755,6 +841,9 @@ function isRequestDraft(value: unknown): value is RequestDraftInput {
   return (
     isRecord(value) &&
     typeof value.name === "string" &&
+    (value.description === undefined ||
+      typeof value.description === "string") &&
+    (value.notes === undefined || typeof value.notes === "string") &&
     typeof value.method === "string" &&
     HTTP_METHODS.has(value.method as HttpMethod) &&
     (value.targetMode === "absolute" || value.targetMode === "composed") &&
@@ -802,6 +891,8 @@ function isRequestBody(value: unknown): value is RequestBodyDefinition {
               field.kind === "file" &&
               typeof field.name === "string" &&
               typeof field.enabled === "boolean" &&
+              (field.description === undefined ||
+                typeof field.description === "string") &&
               isAttachment(field.attachment)),
         )
       );
@@ -830,6 +921,8 @@ function isRequestField(value: unknown): value is RequestField {
     typeof value.name === "string" &&
     typeof value.value === "string" &&
     typeof value.enabled === "boolean" &&
+    (value.description === undefined ||
+      typeof value.description === "string") &&
     (value.mode === undefined ||
       value.mode === "override" ||
       value.mode === "append")
@@ -841,6 +934,8 @@ function isVariableWrite(value: unknown): value is VariableWrite {
   if (
     !isRecord(value) ||
     typeof value.name !== "string" ||
+    (value.description !== undefined &&
+      typeof value.description !== "string") ||
     (value.variableId !== undefined && typeof value.variableId !== "string")
   ) {
     return false;

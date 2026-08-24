@@ -5,6 +5,12 @@ import type { RawData } from "ws";
 import type { Application } from "../bootstrap/application.js";
 import type { BackendConfiguration } from "../config.js";
 import {
+  DocumentationValidationError,
+  validateFieldDescription,
+  validateResourceDescription,
+  validateResourceNotes,
+} from "../documentation/documentation.js";
+import {
   EnvironmentCompositionCycleError,
   EnvironmentCompositionInvalidError,
   EnvironmentConflictError,
@@ -180,6 +186,8 @@ async function dispatch(
       return application.workspaces.create(
         userId,
         requireString(command.payload.name, "name"),
+        requireResourceDescription(command.payload.description),
+        requireResourceNotes(command.payload.notes),
       );
     case "workspace.get":
       return application.workspaces.get(
@@ -194,6 +202,8 @@ async function dispatch(
         requireString(command.payload.name, "name"),
         requireRequestFields(command.payload.headers, "headers"),
         requireOptionalString(command.payload.baseUrl, "baseUrl"),
+        requireResourceDescription(command.payload.description),
+        requireResourceNotes(command.payload.notes),
       );
     case "workspace.delete":
       return application.workspaces.delete(
@@ -238,6 +248,8 @@ async function dispatch(
         requireString(command.payload.workspaceId, "workspaceId"),
         optionalString(command.payload.parentCollectionId),
         requireString(command.payload.name, "name"),
+        requireResourceDescription(command.payload.description),
+        requireResourceNotes(command.payload.notes),
       );
     case "collection.get":
       return application.requests.getCollection(
@@ -252,6 +264,8 @@ async function dispatch(
         requireString(command.payload.name, "name"),
         requireRequestFields(command.payload.headers, "headers"),
         requireOptionalString(command.payload.pathPrefix, "pathPrefix"),
+        requireResourceDescription(command.payload.description),
+        requireResourceNotes(command.payload.notes),
       );
     case "collection.headers.update":
       return application.requests.updateCollectionHeaders(
@@ -282,6 +296,8 @@ async function dispatch(
           command.payload.includedEnvironmentIds,
           "includedEnvironmentIds",
         ),
+        requireResourceDescription(command.payload.description),
+        requireResourceNotes(command.payload.notes),
       );
     case "environment.get":
       return application.environments.get(
@@ -299,6 +315,8 @@ async function dispatch(
           command.payload.includedEnvironmentIds,
           "includedEnvironmentIds",
         ),
+        requireResourceDescription(command.payload.description),
+        requireResourceNotes(command.payload.notes),
       );
     case "environment.delete":
       return application.environments.delete(
@@ -425,6 +443,8 @@ async function dispatch(
             command.payload.variables === undefined
               ? []
               : requireEnvironmentVariables(command.payload.variables),
+          description: requireResourceDescription(command.payload.description),
+          notes: requireResourceNotes(command.payload.notes),
         },
       );
     case "request.get":
@@ -504,6 +524,8 @@ async function dispatch(
         requireTargetMode(command.payload.targetMode),
         optionalRequestVariableProfileUpdate(command.payload.variableProfile),
         optionalRequestBody(command.payload.requestBody),
+        requireResourceDescription(command.payload.description),
+        requireResourceNotes(command.payload.notes),
       );
     case "request.delete":
       return application.requests.delete(
@@ -604,6 +626,9 @@ function mapCommandError(cause: unknown): CommandError {
   }
   if (cause instanceof ImportSourceError) {
     return new CommandError(cause.code, cause.message);
+  }
+  if (cause instanceof DocumentationValidationError) {
+    return new CommandError("validation_failed", cause.message);
   }
   return new CommandError(
     "invalid_command",
@@ -815,6 +840,20 @@ function requireOptionalString(value: unknown, name: string): string {
   return value === undefined ? "" : requireStringAllowEmpty(value, name);
 }
 
+/** Validates an optional short resource description with compatibility blank. */
+function requireResourceDescription(value: unknown): string {
+  return validateResourceDescription(
+    value === undefined ? "" : requireStringAllowEmpty(value, "description"),
+  );
+}
+
+/** Validates optional CommonMark notes with a compatibility blank. */
+function requireResourceNotes(value: unknown): string {
+  return validateResourceNotes(
+    value === undefined ? "" : requireStringAllowEmpty(value, "notes"),
+  );
+}
+
 /** Requires a string field whose empty value has domain meaning. */
 function requireStringAllowEmpty(value: unknown, name: string): string {
   if (typeof value !== "string") {
@@ -835,14 +874,18 @@ function requireRequestFields(value: unknown, name: string): RequestField[] {
       Array.isArray(field) ||
       typeof (field as Record<string, unknown>).name !== "string" ||
       typeof (field as Record<string, unknown>).value !== "string" ||
-      typeof (field as Record<string, unknown>).enabled !== "boolean"
+      typeof (field as Record<string, unknown>).enabled !== "boolean" ||
+      ((field as Record<string, unknown>).description !== undefined &&
+        typeof (field as Record<string, unknown>).description !== "string")
     ) {
       throw new CommandError(
         "validation_failed",
         `${name} contains an invalid field.`,
       );
     }
-    return field as unknown as RequestField;
+    const requestField = field as unknown as RequestField;
+    const description = validateFieldDescription(requestField.description);
+    return description === "" ? requestField : { ...requestField, description };
   });
 }
 
@@ -861,11 +904,17 @@ function requireEnvironmentVariables(
       );
     }
     const variable = item as Record<string, unknown>;
+    const description = validateFieldDescription(
+      variable.description === undefined
+        ? undefined
+        : requireStringAllowEmpty(variable.description, "variable description"),
+    );
     const common = {
       ...(variable.variableId === undefined
         ? {}
         : { variableId: requireString(variable.variableId, "variableId") }),
       name: requireString(variable.name, "variable name"),
+      ...(description === "" ? {} : { description }),
     };
     switch (variable.kind) {
       case "value":
@@ -1140,16 +1189,22 @@ function requireMultipartFields(value: unknown): RequestMultipartField[] {
     if (item.kind !== "file") {
       return requireRequestFields([field], "requestBody.fields")[0]!;
     }
-    if (typeof item.name !== "string" || typeof item.enabled !== "boolean") {
+    if (
+      typeof item.name !== "string" ||
+      typeof item.enabled !== "boolean" ||
+      (item.description !== undefined && typeof item.description !== "string")
+    ) {
       throw new CommandError(
         "validation_failed",
         "requestBody.fields contains an invalid file field.",
       );
     }
+    const description = validateFieldDescription(item.description);
     return {
       kind: "file",
       name: item.name,
       enabled: item.enabled,
+      ...(description === "" ? {} : { description }),
       attachment: requireRequestAttachment(item.attachment),
     };
   });

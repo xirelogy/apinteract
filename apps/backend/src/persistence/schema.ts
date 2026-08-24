@@ -48,6 +48,8 @@ export interface RefreshTokenTable {
 export interface WorkspaceTable {
   id: BinaryId;
   name: string;
+  description_text: string;
+  notes_markdown: string;
   revision: number;
   headers_json: string;
   base_url_template: Generated<string>;
@@ -78,6 +80,8 @@ export interface WorkspaceTreeNodeTable {
 export interface CollectionProfileTable {
   collection_id: BinaryId;
   revision: number;
+  description_text: string;
+  notes_markdown: string;
   headers_json: string;
   path_prefix: Generated<string>;
   updated_by: BinaryId;
@@ -89,6 +93,8 @@ export interface EnvironmentTable {
   workspace_id: BinaryId;
   name: string;
   name_key: string;
+  description_text: string;
+  notes_markdown: string;
   revision: number;
   created_by: BinaryId;
   created_at: number;
@@ -119,6 +125,7 @@ export interface VariableTable {
   profile_id: BinaryId;
   position: number;
   name: string;
+  description_text: string;
   kind: "value" | "secret" | "alias" | "unset";
   value_text: string | null;
   alias_target: string | null;
@@ -141,6 +148,8 @@ export interface SessionWorkspaceEnvironmentTable {
 export interface RequestDraftTable {
   request_id: BinaryId;
   draft_revision: number;
+  description_text: string;
+  notes_markdown: string;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   target_mode: "absolute" | "composed";
   target_url: string;

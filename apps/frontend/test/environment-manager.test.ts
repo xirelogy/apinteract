@@ -76,12 +76,15 @@ function savedTab(): EnvironmentEditorTab {
     environmentId,
     workspaceId,
     name: "Development",
+    description: "Development services",
+    notes: "# Local environment",
     revision: 2,
     includedEnvironments: [],
     variables: [
       {
         variableId: "019fa8be-a510-76b9-b73b-69f4c7af7877",
         name: "token",
+        description: "",
         kind: "secret" as const,
         hasValue: true,
         secretVersion: 4,
@@ -91,10 +94,13 @@ function savedTab(): EnvironmentEditorTab {
   };
   const draft = {
     name: environment.name,
+    description: environment.description,
+    notes: environment.notes,
     variables: [
       {
         variableId: "019fa8be-a510-76b9-b73b-69f4c7af7877",
         name: "token",
+        description: "",
         kind: "secret" as const,
       },
     ],
@@ -170,6 +176,23 @@ describe("EnvironmentManager", () => {
     expect(wrapper.find(".resource-editor-title .lucide-layers").exists()).toBe(
       true,
     );
+    const editorTabs = wrapper.findAll('[role="tab"]');
+    expect(editorTabs.map((item) => item.text())).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Variables"),
+        expect.stringContaining("Inclusions"),
+        expect.stringContaining("Documentation"),
+      ]),
+    );
+    expect(
+      editorTabs.find((item) => item.text().includes("Variables"))?.text(),
+    ).toContain("1");
+    await editorTabs
+      .find((item) => item.text().includes("Documentation"))
+      ?.trigger("click");
+    await wrapper
+      .get<HTMLInputElement>('input[aria-label="Description"]')
+      .setValue("Updated development services");
     const saveButton = wrapper.get('button[aria-label="Save"]');
     expect(saveButton.attributes("form")).toBe("environment-editor-form");
     expect(saveButton.classes()).toContain("primary-button");
@@ -179,7 +202,11 @@ describe("EnvironmentManager", () => {
     expect(wrapper.find(".environment-dialog").exists()).toBe(true);
     const change = wrapper.emitted("change")?.at(-1);
     expect(change?.[0]).toBe(tab.tabId);
-    expect(change?.[1]).toMatchObject({ name: "Local development" });
+    expect(change?.[1]).toMatchObject({
+      name: "Local development",
+      description: "Updated development services",
+      notes: "# Local environment",
+    });
     wrapper.unmount();
   });
 
@@ -214,6 +241,11 @@ describe("EnvironmentManager", () => {
       },
       global: { plugins: [i18n()] },
     });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((item) => item.text().includes("Inclusions"))
+      ?.trigger("click");
 
     const includedRow = wrapper.get(".environment-include-row");
     expect(

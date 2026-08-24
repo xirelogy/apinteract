@@ -22,6 +22,7 @@ const ENVIRONMENT_COMPOSITION_MIGRATION = "0012_environment_composition";
 const REQUEST_BODY_DEFINITION_MIGRATION = "0013_request_body_definition";
 const REQUEST_ATTACHMENTS_MIGRATION = "0014_request_attachments";
 const CAPTURED_EXCHANGES_MIGRATION = "0015_captured_exchanges";
+const RESOURCE_DOCUMENTATION_MIGRATION = "0016_resource_documentation";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -418,6 +419,20 @@ export class SqliteDatabase {
     ) {
       this.#migrateCapturedExchanges();
     }
+
+    const resourceDocumentationApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(RESOURCE_DOCUMENTATION_MIGRATION);
+    if (
+      resourceDocumentationApplied === undefined ||
+      !this.#columnExists("workspaces", "description_text") ||
+      !this.#columnExists("collection_profiles", "description_text") ||
+      !this.#columnExists("environments", "description_text") ||
+      !this.#columnExists("request_drafts", "description_text") ||
+      !this.#columnExists("variables", "description_text")
+    ) {
+      this.#migrateResourceDocumentation();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -461,10 +476,16 @@ export class SqliteDatabase {
         REQUEST_BODY_DEFINITION_MIGRATION,
         REQUEST_ATTACHMENTS_MIGRATION,
         CAPTURED_EXCHANGES_MIGRATION,
+        RESOURCE_DOCUMENTATION_MIGRATION,
       ].some((identifier) => !identifiers.has(identifier)) ||
       !this.#columnExists("request_drafts", "body_json") ||
       !this.#tableExists("request_attachments") ||
-      !this.#tableExists("captured_exchanges")
+      !this.#tableExists("captured_exchanges") ||
+      !this.#columnExists("workspaces", "description_text") ||
+      !this.#columnExists("collection_profiles", "description_text") ||
+      !this.#columnExists("environments", "description_text") ||
+      !this.#columnExists("request_drafts", "description_text") ||
+      !this.#columnExists("variables", "description_text")
     );
   }
 
@@ -1027,6 +1048,36 @@ export class SqliteDatabase {
         .get(CAPTURED_EXCHANGES_MIGRATION);
       if (applied === undefined) {
         this.#recordMigration(CAPTURED_EXCHANGES_MIGRATION);
+      }
+    })();
+  }
+
+  /** Adds resource notes and declaration-level descriptions with safe defaults. */
+  #migrateResourceDocumentation(): void {
+    this.#driver.transaction(() => {
+      const additions = [
+        ["workspaces", "description_text", "TEXT NOT NULL DEFAULT ''"],
+        ["workspaces", "notes_markdown", "TEXT NOT NULL DEFAULT ''"],
+        ["collection_profiles", "description_text", "TEXT NOT NULL DEFAULT ''"],
+        ["collection_profiles", "notes_markdown", "TEXT NOT NULL DEFAULT ''"],
+        ["environments", "description_text", "TEXT NOT NULL DEFAULT ''"],
+        ["environments", "notes_markdown", "TEXT NOT NULL DEFAULT ''"],
+        ["request_drafts", "description_text", "TEXT NOT NULL DEFAULT ''"],
+        ["request_drafts", "notes_markdown", "TEXT NOT NULL DEFAULT ''"],
+        ["variables", "description_text", "TEXT NOT NULL DEFAULT ''"],
+      ] as const;
+      for (const [table, column, definition] of additions) {
+        if (!this.#columnExists(table, column)) {
+          this.#driver.exec(
+            `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`,
+          );
+        }
+      }
+      const applied = this.#driver
+        .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+        .get(RESOURCE_DOCUMENTATION_MIGRATION);
+      if (applied === undefined) {
+        this.#recordMigration(RESOURCE_DOCUMENTATION_MIGRATION);
       }
     })();
   }

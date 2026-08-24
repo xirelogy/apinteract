@@ -95,6 +95,8 @@ export class ImportService {
       {
         providerId: plan.providerId,
         collectionName: input.collectionName,
+        description: plan.description,
+        notes: plan.notes,
         pathPrefix: plan.pathPrefix,
         variables: selectedPlan.variables,
         collections: selectedPlan.collections,

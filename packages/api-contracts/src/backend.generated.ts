@@ -311,6 +311,8 @@ export interface components {
       type?: "workspace.create";
       payload?: {
         name: string;
+        description?: string;
+        notes?: string;
       };
     } & {
       /**
@@ -342,6 +344,8 @@ export interface components {
         /** @description Absolute HTTP URL template used as the root of composed request targets; blank disables composition until configured. */
         baseUrl: string;
         headers: components["schemas"]["RequestField"][];
+        description?: string;
+        notes?: string;
       };
     } & {
       /**
@@ -420,6 +424,8 @@ export interface components {
         workspaceId: components["schemas"]["WorkspaceId"];
         parentCollectionId: components["schemas"]["CollectionId"] | null;
         name: string;
+        description?: string;
+        notes?: string;
       };
     } & {
       /**
@@ -451,6 +457,8 @@ export interface components {
         /** @description An absolute HTTP(S) URL template when this collection is the first non-empty target component, or a path template appended to an earlier component. */
         pathPrefix: string;
         headers: components["schemas"]["RequestField"][];
+        description?: string;
+        notes?: string;
       };
     } & {
       /**
@@ -508,6 +516,8 @@ export interface components {
       payload?: {
         workspaceId: components["schemas"]["WorkspaceId"];
         name: string;
+        description?: components["schemas"]["ResourceDescription"];
+        notes?: components["schemas"]["ResourceNotes"];
         variables: components["schemas"]["EnvironmentVariableWrite"][];
         /** @description Ordered included environments from lowest to highest precedence. Omission creates an environment with no includes. */
         includedEnvironmentIds?: components["schemas"]["EnvironmentId"][];
@@ -539,6 +549,8 @@ export interface components {
         environmentId: components["schemas"]["EnvironmentId"];
         expectedRevision: number;
         name: string;
+        description?: components["schemas"]["ResourceDescription"];
+        notes?: components["schemas"]["ResourceNotes"];
         variables: components["schemas"]["EnvironmentVariableWrite"][];
         /** @description Complete ordered replacement from lowest to highest precedence. Omission preserves the current composition. */
         includedEnvironmentIds?: components["schemas"]["EnvironmentId"][];
@@ -710,6 +722,8 @@ export interface components {
       collectionKey: string;
       parentCollectionKey: string | null;
       name: string;
+      description: components["schemas"]["ResourceDescription"];
+      notes: components["schemas"]["ResourceNotes"];
       pathPrefix: string;
       variables: components["schemas"]["VariableWrite"][];
     };
@@ -718,6 +732,8 @@ export interface components {
       sourceLocation: string;
       collectionKey: string | null;
       name: string;
+      description: components["schemas"]["ResourceDescription"];
+      notes: components["schemas"]["ResourceNotes"];
       method: components["schemas"]["HttpMethod"];
       /** @enum {string} */
       targetMode: "absolute" | "composed";
@@ -740,6 +756,8 @@ export interface components {
       sourceName: string;
       sourceFingerprint: string;
       suggestedName: string;
+      description: components["schemas"]["ResourceDescription"];
+      notes: components["schemas"]["ResourceNotes"];
       pathPrefix: string;
       variables: components["schemas"]["VariableWrite"][];
       collections: components["schemas"]["ImportedCollection"][];
@@ -815,6 +833,8 @@ export interface components {
         preRequestScript?: string;
         postResponseScript?: string;
         variables?: components["schemas"]["VariableWrite"][];
+        description?: string;
+        notes?: string;
       };
     } & {
       /**
@@ -958,6 +978,8 @@ export interface components {
         preRequestScript?: string;
         postResponseScript?: string;
         variableProfile?: components["schemas"]["RequestVariableProfileUpdate"];
+        description?: string;
+        notes?: string;
       };
     } & {
       /**
@@ -1077,6 +1099,8 @@ export interface components {
       name: string;
       /** @enum {string} */
       role: "owner" | "editor" | "viewer";
+      description: components["schemas"]["ResourceDescription"];
+      notes: components["schemas"]["ResourceNotes"];
       baseUrl: string;
       headers: components["schemas"]["RequestField"][];
       revision: number;
@@ -1160,6 +1184,7 @@ export interface components {
     EnvironmentValueVariableView: {
       variableId: components["schemas"]["EnvironmentVariableId"];
       name: components["schemas"]["VariableName"];
+      description: components["schemas"]["FieldDescription"];
       /** @constant */
       kind: "value";
       value: string;
@@ -1167,6 +1192,7 @@ export interface components {
     EnvironmentSecretVariableView: {
       variableId: components["schemas"]["EnvironmentVariableId"];
       name: components["schemas"]["VariableName"];
+      description: components["schemas"]["FieldDescription"];
       /** @constant */
       kind: "secret";
       hasValue: boolean;
@@ -1175,6 +1201,7 @@ export interface components {
     EnvironmentAliasVariableView: {
       variableId: components["schemas"]["EnvironmentVariableId"];
       name: components["schemas"]["VariableName"];
+      description: components["schemas"]["FieldDescription"];
       /** @constant */
       kind: "alias";
       target: components["schemas"]["VariableName"];
@@ -1182,6 +1209,7 @@ export interface components {
     EnvironmentUnsetVariableView: {
       variableId: components["schemas"]["EnvironmentVariableId"];
       name: components["schemas"]["VariableName"];
+      description: components["schemas"]["FieldDescription"];
       /** @constant */
       kind: "unset";
     };
@@ -1194,6 +1222,7 @@ export interface components {
     EnvironmentValueVariableWrite: {
       variableId?: components["schemas"]["EnvironmentVariableId"];
       name: components["schemas"]["VariableName"];
+      description?: components["schemas"]["FieldDescription"];
       /** @constant */
       kind: "value";
       value: string;
@@ -1201,6 +1230,7 @@ export interface components {
     EnvironmentSecretVariableWrite: {
       variableId?: components["schemas"]["EnvironmentVariableId"];
       name: components["schemas"]["VariableName"];
+      description?: components["schemas"]["FieldDescription"];
       /** @constant */
       kind: "secret";
       value?: string;
@@ -1209,6 +1239,7 @@ export interface components {
     EnvironmentAliasVariableWrite: {
       variableId?: components["schemas"]["EnvironmentVariableId"];
       name: components["schemas"]["VariableName"];
+      description?: components["schemas"]["FieldDescription"];
       /** @constant */
       kind: "alias";
       target: components["schemas"]["VariableName"];
@@ -1216,14 +1247,20 @@ export interface components {
     EnvironmentUnsetVariableWrite: {
       variableId?: components["schemas"]["EnvironmentVariableId"];
       name: components["schemas"]["VariableName"];
+      description?: components["schemas"]["FieldDescription"];
       /** @constant */
       kind: "unset";
     };
     VariableName: string;
+    FieldDescription: string;
+    ResourceDescription: string;
+    ResourceNotes: string;
     EnvironmentView: {
       environmentId: components["schemas"]["EnvironmentId"];
       workspaceId: components["schemas"]["WorkspaceId"];
       name: string;
+      description: components["schemas"]["ResourceDescription"];
+      notes: components["schemas"]["ResourceNotes"];
       revision: number;
       /** @description Directly included environments in low-to-high precedence order. */
       includedEnvironments: components["schemas"]["EnvironmentSummary"][];
@@ -1236,6 +1273,8 @@ export interface components {
       workspaceId: components["schemas"]["WorkspaceId"];
       parentCollectionId: components["schemas"]["CollectionId"] | null;
       name: string;
+      description: components["schemas"]["ResourceDescription"];
+      notes: components["schemas"]["ResourceNotes"];
       /** @description An absolute HTTP(S) URL template when this collection is the first non-empty target component, or a path template appended to an earlier component. */
       pathPrefix: string;
       /** @description Current composed workspace and ancestor-collection target prefix before this collection's local component. */
@@ -1309,6 +1348,7 @@ export interface components {
       kind: "file";
       name: string;
       enabled: boolean;
+      description?: string;
       attachment: components["schemas"]["RequestAttachment"];
     };
     RequestView: {
@@ -1316,6 +1356,8 @@ export interface components {
       workspaceId: components["schemas"]["WorkspaceId"];
       parentCollectionId: components["schemas"]["CollectionId"] | null;
       name: string;
+      description: components["schemas"]["ResourceDescription"];
+      notes: components["schemas"]["ResourceNotes"];
       method: components["schemas"]["HttpMethod"];
       /** @enum {string} */
       targetMode: "absolute" | "composed";
@@ -1489,6 +1531,7 @@ export interface components {
       name: string;
       value: string;
       enabled: boolean;
+      description?: components["schemas"]["FieldDescription"];
       /**
        * @description Whether this header-value pair replaces same-name values from older scopes or appends to them.
        * @enum {string}

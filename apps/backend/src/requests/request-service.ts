@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 
 import type { AuditService } from "../audit/audit-service.js";
+import {
+  validateFieldDescription,
+  validateResourceDescription,
+  validateResourceNotes,
+} from "../documentation/documentation.js";
 import type {
   CapturedExchangeView,
   ImportedCollection,
@@ -71,6 +76,7 @@ export interface RequestField {
   readonly enabled: boolean;
   /** Controls whether this header retains or replaces same-name ancestor values. */
   readonly mode?: "override" | "append";
+  readonly description?: string;
 }
 
 /** One immutable uploaded file positioned among multipart text fields. */
@@ -78,6 +84,7 @@ export interface RequestMultipartFileField {
   readonly kind: "file";
   readonly name: string;
   readonly enabled: boolean;
+  readonly description?: string;
   readonly attachment: RequestAttachmentView;
 }
 
@@ -113,6 +120,8 @@ export interface CollectionView {
   readonly workspaceId: EntityId;
   readonly parentCollectionId: EntityId | null;
   readonly name: string;
+  readonly description: string;
+  readonly notes: string;
   readonly pathPrefix: string;
   readonly inheritedTarget: string;
   readonly effectivePath: string;
@@ -129,6 +138,8 @@ export interface RequestView {
   readonly workspaceId: EntityId;
   readonly parentCollectionId: EntityId | null;
   readonly name: string;
+  readonly description: string;
+  readonly notes: string;
   readonly method: HttpMethod;
   readonly targetMode: "absolute" | "composed";
   readonly targetUrl: string;
@@ -185,6 +196,8 @@ export interface RequestVariableProfileUpdate {
 /** Carries additive request-creation data without extending positional inputs. */
 export interface RequestCreationOptions {
   readonly variables?: readonly VariableWrite[];
+  readonly description?: string;
+  readonly notes?: string;
 }
 
 /** Identifies entities created by one atomic provider import. */
@@ -197,6 +210,8 @@ export interface RequestImportResult {
 export interface RequestImportOptions {
   readonly providerId: ImportProviderId;
   readonly collectionName: string;
+  readonly description: string;
+  readonly notes: string;
   readonly pathPrefix: string;
   readonly variables: readonly VariableWrite[];
   readonly collections: readonly ImportedCollection[];
@@ -235,6 +250,8 @@ interface RequestRow {
   readonly workspace_id: Uint8Array;
   readonly parent_collection_id: Uint8Array | null;
   readonly name: string;
+  readonly description_text: string;
+  readonly notes_markdown: string;
   readonly method: HttpMethod;
   readonly target_mode: "absolute" | "composed";
   readonly target_url: string;
@@ -252,6 +269,8 @@ interface RequestRow {
 /** Stores restorable request-owned content alongside execution-effective headers. */
 interface RevisionContent {
   readonly name?: string;
+  readonly description?: string;
+  readonly notes?: string;
   readonly method: HttpMethod;
   readonly targetMode: "absolute" | "composed";
   readonly targetUrl: string;
@@ -273,6 +292,8 @@ interface CollectionRow {
   readonly workspace_id: Uint8Array;
   readonly parent_collection_id: Uint8Array | null;
   readonly name: string;
+  readonly description_text: string | null;
+  readonly notes_markdown: string | null;
   readonly profile_revision: number | null;
   readonly headers_json: string | null;
   readonly path_prefix: string | null;
@@ -616,7 +637,11 @@ export class RequestService {
     workspaceId: EntityId,
     parentCollectionId: EntityId | null,
     name: string,
+    description = "",
+    notes = "",
   ): Promise<TreeNodeView> {
+    const normalizedDescription = validateResourceDescription(description);
+    const normalizedNotes = validateResourceNotes(notes);
     return this.#database.transaction().execute(async (transaction) => {
       await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
       await this.#validateParent(transaction, workspaceId, parentCollectionId);
@@ -645,6 +670,21 @@ export class RequestService {
           created_at: Date.now(),
         })
         .execute();
+      if (normalizedDescription !== "" || normalizedNotes !== "") {
+        await transaction
+          .insertInto("collection_profiles")
+          .values({
+            collection_id: idToBytes(nodeId),
+            revision: 1,
+            description_text: normalizedDescription,
+            notes_markdown: normalizedNotes,
+            headers_json: "[]",
+            path_prefix: "",
+            updated_by: idToBytes(userId),
+            updated_at: Date.now(),
+          })
+          .execute();
+      }
       await this.#audit.record(transaction, {
         type: "collection.created",
         actorUserId: userId,
@@ -683,10 +723,14 @@ export class RequestService {
     name: string,
     headers: readonly RequestField[],
     pathPrefix = "",
+    description = "",
+    notes = "",
   ): Promise<CollectionView> {
     const normalizedName = normalizeName(name);
     const normalizedHeaders = validateHeaders(headers);
     const normalizedPathPrefix = validateCollectionTargetTemplate(pathPrefix);
+    const normalizedDescription = validateResourceDescription(description);
+    const normalizedNotes = validateResourceNotes(notes);
     const headersJson = JSON.stringify(normalizedHeaders);
     return this.#database.transaction().execute(async (transaction) => {
       const row = await this.#collectionRow(transaction, collectionId);
@@ -701,7 +745,16 @@ export class RequestService {
       const nameChanged = row.name !== normalizedName;
       const headersChanged = (row.headers_json ?? "[]") !== headersJson;
       const pathChanged = (row.path_prefix ?? "") !== normalizedPathPrefix;
-      if (!nameChanged && !headersChanged && !pathChanged) {
+      const descriptionChanged =
+        (row.description_text ?? "") !== normalizedDescription;
+      const notesChanged = (row.notes_markdown ?? "") !== normalizedNotes;
+      if (
+        !nameChanged &&
+        !headersChanged &&
+        !pathChanged &&
+        !descriptionChanged &&
+        !notesChanged
+      ) {
         return this.#collectionView(transaction, row);
       }
       const revision = currentRevision + 1;
@@ -712,6 +765,8 @@ export class RequestService {
           .values({
             collection_id: idToBytes(collectionId),
             revision,
+            description_text: normalizedDescription,
+            notes_markdown: normalizedNotes,
             headers_json: headersJson,
             path_prefix: normalizedPathPrefix,
             updated_by: idToBytes(userId),
@@ -731,6 +786,8 @@ export class RequestService {
           .updateTable("collection_profiles")
           .set({
             revision,
+            description_text: normalizedDescription,
+            notes_markdown: normalizedNotes,
             headers_json: headersJson,
             path_prefix: normalizedPathPrefix,
             updated_by: idToBytes(userId),
@@ -763,6 +820,8 @@ export class RequestService {
           nameChanged,
           headersChanged,
           pathChanged,
+          descriptionChanged,
+          notesChanged,
         },
       });
       const inheritedHeaders = await this.#resolveHeaders(
@@ -774,6 +833,8 @@ export class RequestService {
       return {
         ...mapCollection(row),
         name: normalizedName,
+        description: normalizedDescription,
+        notes: normalizedNotes,
         pathPrefix: normalizedPathPrefix,
         inheritedTarget: await this.#resolveInheritedTarget(
           transaction,
@@ -882,6 +943,8 @@ export class RequestService {
       row.name,
       headers,
       row.path_prefix ?? "",
+      row.description_text ?? "",
+      row.notes_markdown ?? "",
     );
   }
 
@@ -914,6 +977,10 @@ export class RequestService {
       postResponseScript,
     });
     const normalizedName = normalizeName(name);
+    const normalizedDescription = validateResourceDescription(
+      options.description ?? "",
+    );
+    const normalizedNotes = validateResourceNotes(options.notes ?? "");
     return this.#database.transaction().execute(async (transaction) => {
       await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
       await this.#validateParent(transaction, workspaceId, parentCollectionId);
@@ -948,6 +1015,8 @@ export class RequestService {
         .values({
           request_id: idToBytes(requestId),
           draft_revision: 0,
+          description_text: normalizedDescription,
+          notes_markdown: normalizedNotes,
           method: content.method,
           target_mode: content.targetMode,
           target_url: content.targetUrl,
@@ -995,6 +1064,8 @@ export class RequestService {
         workspaceId,
         parentCollectionId,
         name: normalizedName,
+        description: normalizedDescription,
+        notes: normalizedNotes,
         method: content.method,
         targetMode: content.targetMode,
         targetUrl: content.targetUrl,
@@ -1037,6 +1108,8 @@ export class RequestService {
     const {
       providerId,
       collectionName,
+      description,
+      notes,
       pathPrefix,
       variables,
       collections,
@@ -1046,15 +1119,21 @@ export class RequestService {
       throw new Error("An import must contain between 1 and 200 requests");
     }
     const normalizedCollectionName = normalizeName(collectionName);
+    const normalizedDescription = validateResourceDescription(description);
+    const normalizedNotes = validateResourceNotes(notes);
     const normalizedPathPrefix = validateCollectionTargetTemplate(pathPrefix);
     const normalizedCollections = collections.map((collection) => ({
       ...collection,
       name: normalizeName(collection.name),
+      description: validateResourceDescription(collection.description),
+      notes: validateResourceNotes(collection.notes),
       pathPrefix: validateCollectionTargetTemplate(collection.pathPrefix),
     }));
     const normalizedRequests = requests.map((request) => ({
       request,
       name: normalizeName(request.name),
+      description: validateResourceDescription(request.description),
+      notes: validateResourceNotes(request.notes),
       content: normalizeExecutionInput(request),
       capture:
         request.capturedExchange === undefined
@@ -1090,12 +1169,18 @@ export class RequestService {
           created_at: now,
         })
         .execute();
-      if (normalizedPathPrefix !== "") {
+      if (
+        normalizedPathPrefix !== "" ||
+        normalizedDescription !== "" ||
+        normalizedNotes !== ""
+      ) {
         await transaction
           .insertInto("collection_profiles")
           .values({
             collection_id: idToBytes(collectionId),
             revision: 1,
+            description_text: normalizedDescription,
+            notes_markdown: normalizedNotes,
             headers_json: "[]",
             path_prefix: normalizedPathPrefix,
             updated_by: idToBytes(userId),
@@ -1165,12 +1250,18 @@ export class RequestService {
             created_at: now,
           })
           .execute();
-        if (collection.pathPrefix !== "") {
+        if (
+          collection.pathPrefix !== "" ||
+          collection.description !== "" ||
+          collection.notes !== ""
+        ) {
           await transaction
             .insertInto("collection_profiles")
             .values({
               collection_id: idToBytes(importedCollectionId),
               revision: 1,
+              description_text: collection.description,
+              notes_markdown: collection.notes,
               headers_json: "[]",
               path_prefix: collection.pathPrefix,
               updated_by: idToBytes(userId),
@@ -1236,6 +1327,8 @@ export class RequestService {
           .values({
             request_id: idToBytes(requestId),
             draft_revision: 0,
+            description_text: imported.description,
+            notes_markdown: imported.notes,
             method: imported.content.method,
             target_mode: imported.content.targetMode,
             target_url: imported.content.targetUrl,
@@ -1503,6 +1596,8 @@ export class RequestService {
       content.targetMode,
       null,
       content.requestBody,
+      content.description ?? current.description,
+      content.notes ?? current.notes,
     );
   }
 
@@ -1570,6 +1665,8 @@ export class RequestService {
         .values({
           request_id: idToBytes(duplicateId),
           draft_revision: 0,
+          description_text: source.description_text,
+          notes_markdown: source.notes_markdown,
           method: source.method,
           target_mode: source.target_mode,
           target_url: source.target_url,
@@ -1634,8 +1731,12 @@ export class RequestService {
     targetMode: "absolute" | "composed" = "absolute",
     variableProfileUpdate: RequestVariableProfileUpdate | null = null,
     requestBody?: RequestBodyDefinition,
+    description = "",
+    notes = "",
   ): Promise<RequestView> {
     const normalizedName = normalizeName(name);
+    const normalizedDescription = validateResourceDescription(description);
+    const normalizedNotes = validateResourceNotes(notes);
     const content = normalizeExecutionInput({
       method,
       targetMode,
@@ -1669,6 +1770,8 @@ export class RequestService {
       }
       if (
         row.name === normalizedName &&
+        row.description_text === normalizedDescription &&
+        row.notes_markdown === normalizedNotes &&
         row.method === content.method &&
         row.target_mode === content.targetMode &&
         row.target_url === content.targetUrl &&
@@ -1689,6 +1792,8 @@ export class RequestService {
       await transaction
         .updateTable("request_drafts")
         .set({
+          description_text: normalizedDescription,
+          notes_markdown: normalizedNotes,
           method: content.method,
           target_mode: content.targetMode,
           target_url: content.targetUrl,
@@ -1713,6 +1818,8 @@ export class RequestService {
       const updatedView = {
         ...(await this.#requestView(transaction, row)),
         name: normalizedName,
+        description: normalizedDescription,
+        notes: normalizedNotes,
         method: content.method,
         targetMode: content.targetMode,
         targetUrl: content.targetUrl,
@@ -1743,6 +1850,8 @@ export class RequestService {
         {
           ...row,
           name: normalizedName,
+          description_text: normalizedDescription,
+          notes_markdown: normalizedNotes,
           method: content.method,
           target_mode: content.targetMode,
           target_url: content.targetUrl,
@@ -1836,15 +1945,25 @@ export class RequestService {
         request.targetMode,
         request.targetUrl,
       );
-      const executionRequest: ExecutionRequestSnapshot = {
-        ...request,
-        headers: withRequestBodyContentType(
-          resolvedHeaders,
-          request.requestBody,
-        ),
+      const effectiveHeaders = withRequestBodyContentType(
+        resolvedHeaders,
+        request.requestBody,
+      );
+      const executionRequest = stripExecutionDocumentation({
+        workspaceId: request.workspaceId,
+        requestId: request.requestId,
+        method: request.method,
+        targetMode: request.targetMode,
+        targetUrl: request.targetUrl,
+        query: request.query,
+        headers: effectiveHeaders,
+        requestBody: request.requestBody,
+        body: request.body,
         targetComponents,
         bodyPresent: request.requestBody.kind !== "none",
-      };
+        preRequestScript: request.preRequestScript,
+        postResponseScript: request.postResponseScript,
+      });
       const composed =
         (request.preRequestScript === "" &&
           request.postResponseScript === "") ||
@@ -1869,7 +1988,7 @@ export class RequestService {
         row,
         userId,
         "execution",
-        executionRequest.headers,
+        effectiveHeaders,
         targetComponents,
       );
       const executionId = createEntityId();
@@ -1947,7 +2066,7 @@ export class RequestService {
       );
       const content = parseRevisionContent(revision.content_json);
       const effectiveHeaders = content.headers;
-      const request: ExecutionRequestSnapshot = {
+      const request = stripExecutionDocumentation({
         workspaceId,
         requestId,
         method: content.method,
@@ -1969,7 +2088,7 @@ export class RequestService {
             .kind !== "none",
         preRequestScript: content.preRequestScript,
         postResponseScript: content.postResponseScript,
-      };
+      });
       const variableProfile = await this.#variables.effectiveProfile(
         transaction,
         sessionId,
@@ -2093,7 +2212,7 @@ export class RequestService {
               parentCollectionId,
               temporaryVariables,
             );
-      const executionRequest: ExecutionRequestSnapshot = {
+      const executionRequest = stripExecutionDocumentation({
         ...localRequest,
         headers: withRequestBodyContentType(
           resolvedHeaders,
@@ -2101,7 +2220,7 @@ export class RequestService {
         ),
         targetComponents,
         bodyPresent: localRequest.requestBody.kind !== "none",
-      };
+      });
       const composed =
         (localRequest.preRequestScript === "" &&
           localRequest.postResponseScript === "") ||
@@ -2313,6 +2432,8 @@ export class RequestService {
       .select([
         "draft.request_id",
         "draft.draft_revision",
+        "draft.description_text",
+        "draft.notes_markdown",
         "draft.method",
         "draft.target_mode",
         "draft.target_url",
@@ -2354,6 +2475,8 @@ export class RequestService {
         "node.parent_collection_id",
         "node.name",
         "profile.revision as profile_revision",
+        "profile.description_text",
+        "profile.notes_markdown",
         "profile.headers_json",
         "profile.path_prefix",
         "node.order_revision",
@@ -3207,7 +3330,16 @@ function validateQuery(fields: readonly RequestField[]): RequestField[] {
     ) {
       throw new Error("Query fields are invalid");
     }
-    return { name: field.name, value: field.value, enabled: field.enabled };
+    const description = validateFieldDescription(field.description);
+    if (description !== "" && field.name.trim() === "") {
+      throw new Error("A documented query field requires a name");
+    }
+    return {
+      name: field.name,
+      value: field.value,
+      enabled: field.enabled,
+      ...(description === "" ? {} : { description }),
+    };
   });
 }
 
@@ -3245,11 +3377,16 @@ function validateHeaders(fields: readonly RequestField[]): RequestField[] {
     ) {
       throw new Error(`Header ${field.name || "(empty)"} is not allowed`);
     }
+    const description = validateFieldDescription(field.description);
+    if (description !== "" && field.name.trim() === "") {
+      throw new Error("A documented header field requires a name");
+    }
     return {
       name: field.name,
       value: field.value,
       enabled: field.enabled,
       mode: field.mode ?? "override",
+      ...(description === "" ? {} : { description }),
     };
   });
 }
@@ -3473,10 +3610,14 @@ function validateMultipartFields(fields: unknown): RequestMultipartField[] {
       throw new Error("Multipart file field is invalid");
     }
     validateMultipartFieldName(item.name);
+    const description = validateFieldDescription(
+      typeof item.description === "string" ? item.description : undefined,
+    );
     return {
       kind: "file",
       name: item.name,
       enabled: item.enabled,
+      ...(description === "" ? {} : { description }),
       attachment: validateRequestAttachment(
         item.attachment,
         "Multipart file field is invalid",
@@ -3567,6 +3708,47 @@ function normalizeExecutionInput(input: RequestExecutionInput): Omit<
     preRequestScript: validateScript(input.preRequestScript ?? ""),
     postResponseScript: validateScript(input.postResponseScript ?? ""),
   };
+}
+
+/** Removes documentation metadata before scripts, snapshots, and proxy execution. */
+function stripExecutionDocumentation(
+  request: ExecutionRequestSnapshot,
+): ExecutionRequestSnapshot {
+  return {
+    ...request,
+    query: request.query.map(stripFieldDescription),
+    headers: request.headers.map(stripFieldDescription),
+    ...(request.requestBody === undefined
+      ? {}
+      : { requestBody: stripRequestBodyDescriptions(request.requestBody) }),
+  };
+}
+
+/** Removes a declaration description from one executable field. */
+function stripFieldDescription(field: RequestField): RequestField {
+  const { description, ...executionField } = field;
+  void description;
+  return executionField;
+}
+
+/** Removes text and file field descriptions from one executable body. */
+function stripRequestBodyDescriptions(
+  body: RequestBodyDefinition,
+): RequestBodyDefinition {
+  if (body.kind === "urlencoded") {
+    return { ...body, fields: body.fields.map(stripFieldDescription) };
+  }
+  if (body.kind === "multipart") {
+    return {
+      ...body,
+      fields: body.fields.map((field) => {
+        const { description, ...executionField } = field;
+        void description;
+        return executionField;
+      }),
+    };
+  }
+  return body;
 }
 
 /** Materializes variable-bearing request fields and builds a secret-safe view. */
@@ -3753,6 +3935,8 @@ function mapRequest(row: {
   readonly workspace_id: Uint8Array;
   readonly parent_collection_id: Uint8Array | null;
   readonly name: string;
+  readonly description_text: string;
+  readonly notes_markdown: string;
   readonly method: HttpMethod;
   readonly target_mode: "absolute" | "composed";
   readonly target_url: string;
@@ -3773,6 +3957,8 @@ function mapRequest(row: {
         ? null
         : bytesToId(row.parent_collection_id),
     name: row.name,
+    description: row.description_text,
+    notes: row.notes_markdown,
     method: row.method,
     targetMode: row.target_mode,
     targetUrl: row.target_url,
@@ -3797,6 +3983,8 @@ function revisionContent(
   const request = mapRequest(row);
   return {
     name: request.name,
+    description: request.description,
+    notes: request.notes,
     method: request.method,
     targetMode: request.targetMode,
     targetUrl: request.targetUrl,
@@ -3831,6 +4019,8 @@ function parseRevisionContent(value: string): RevisionContent {
   });
   return {
     ...(parsed.name === undefined ? {} : { name: normalizeName(parsed.name) }),
+    description: validateResourceDescription(parsed.description ?? ""),
+    notes: validateResourceNotes(parsed.notes ?? ""),
     method: normalized.method,
     targetMode: normalized.targetMode,
     targetUrl: normalized.targetUrl,
@@ -3872,6 +4062,8 @@ function revisionRequestView(
   return {
     ...current,
     name: content.name ?? current.name,
+    description: content.description ?? "",
+    notes: content.notes ?? "",
     method: content.method,
     targetMode: content.targetMode,
     targetUrl: content.targetUrl,
@@ -3905,6 +4097,8 @@ function mapCollection(row: {
   readonly parent_collection_id: Uint8Array | null;
   readonly name: string;
   readonly profile_revision: number | null;
+  readonly description_text: string | null;
+  readonly notes_markdown: string | null;
   readonly headers_json: string | null;
   readonly path_prefix: string | null;
 }): Omit<
@@ -3919,6 +4113,8 @@ function mapCollection(row: {
         ? null
         : bytesToId(row.parent_collection_id),
     name: row.name,
+    description: row.description_text ?? "",
+    notes: row.notes_markdown ?? "",
     pathPrefix: row.path_prefix ?? "",
     headers: JSON.parse(row.headers_json ?? "[]") as RequestField[],
     revision: row.profile_revision ?? 0,

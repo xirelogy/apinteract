@@ -34,6 +34,8 @@ export interface ApplicationError {
 
 export interface RequestDraftInput {
   readonly name: string;
+  readonly description?: string;
+  readonly notes?: string;
   readonly method: HttpMethod;
   readonly targetMode: "absolute" | "composed";
   readonly targetUrl: string;
@@ -73,6 +75,8 @@ export interface RequestTab {
 
 export interface WorkspacePropertiesDraft {
   readonly name: string;
+  readonly description: string;
+  readonly notes: string;
   readonly baseUrl: string;
   readonly headers: readonly RequestField[];
   readonly variables: readonly VariableWrite[];
@@ -80,6 +84,8 @@ export interface WorkspacePropertiesDraft {
 
 export interface CollectionPropertiesDraft {
   readonly name: string;
+  readonly description: string;
+  readonly notes: string;
   readonly pathPrefix: string;
   readonly headers: readonly RequestField[];
   readonly variables: readonly VariableWrite[];
@@ -87,6 +93,8 @@ export interface CollectionPropertiesDraft {
 
 export interface EnvironmentDraft {
   readonly name: string;
+  readonly description: string;
+  readonly notes: string;
   readonly variables: readonly EnvironmentVariableWrite[];
   readonly includedEnvironmentIds: readonly string[];
 }

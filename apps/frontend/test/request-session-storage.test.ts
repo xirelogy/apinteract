@@ -36,6 +36,8 @@ describe("BrowserRequestSessionStorage", () => {
           pendingParentCollectionId: null,
           draft: {
             name: "Saved request",
+            description: "",
+            notes: "",
             method: "GET" as const,
             targetMode: "absolute" as const,
             targetUrl: "https://example.test",
@@ -107,6 +109,8 @@ describe("BrowserRequestSessionStorage", () => {
           pendingParentCollectionId: null,
           draft: {
             name: "Temporary request",
+            description: "",
+            notes: "",
             method: "GET" as const,
             targetMode: "absolute" as const,
             targetUrl: "",
@@ -173,13 +177,22 @@ describe("redactSecretVariableWrites", () => {
   it("removes only plaintext secret values while retaining safe mutations", () => {
     expect(
       redactSecretVariableWrites([
-        { name: "token", kind: "secret", value: "do-not-store" },
+        {
+          name: "token",
+          description: "Authentication token",
+          kind: "secret",
+          value: "do-not-store",
+        },
         { name: "old-token", kind: "secret", clearValue: true },
         { name: "host", kind: "value", value: "example.test" },
       ]),
     ).toEqual({
       variables: [
-        { name: "token", kind: "secret" },
+        {
+          name: "token",
+          description: "Authentication token",
+          kind: "secret",
+        },
         { name: "old-token", kind: "secret", clearValue: true },
         { name: "host", kind: "value", value: "example.test" },
       ],

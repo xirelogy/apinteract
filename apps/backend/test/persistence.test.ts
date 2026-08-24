@@ -201,4 +201,65 @@ describe("SqliteDatabase migrations", () => {
       await rm(rootPath, { recursive: true, force: true });
     }
   });
+
+  it("adds empty documentation fields when upgrading the prior schema", async () => {
+    const rootPath = await mkdtemp(
+      join(tmpdir(), "apinteract-documentation-migration-"),
+    );
+    const databasePath = join(rootPath, "apinteract.sqlite3");
+    const backupDirectory = join(rootPath, "backups");
+
+    try {
+      const current = await SqliteDatabase.open(databasePath, backupDirectory);
+      await current.close();
+      const driver = new BetterSqlite3(databasePath);
+      driver.exec(`
+        ALTER TABLE workspaces DROP COLUMN description_text;
+        ALTER TABLE workspaces DROP COLUMN notes_markdown;
+        ALTER TABLE collection_profiles DROP COLUMN description_text;
+        ALTER TABLE collection_profiles DROP COLUMN notes_markdown;
+        ALTER TABLE environments DROP COLUMN description_text;
+        ALTER TABLE environments DROP COLUMN notes_markdown;
+        ALTER TABLE request_drafts DROP COLUMN description_text;
+        ALTER TABLE request_drafts DROP COLUMN notes_markdown;
+        ALTER TABLE variables DROP COLUMN description_text;
+        DELETE FROM schema_migrations WHERE id = '0016_resource_documentation';
+      `);
+      driver.close();
+
+      const migrated = await SqliteDatabase.open(databasePath, backupDirectory);
+      const tables = [
+        ["workspaces", "description_text"],
+        ["workspaces", "notes_markdown"],
+        ["collection_profiles", "description_text"],
+        ["collection_profiles", "notes_markdown"],
+        ["environments", "description_text"],
+        ["environments", "notes_markdown"],
+        ["request_drafts", "description_text"],
+        ["request_drafts", "notes_markdown"],
+        ["variables", "description_text"],
+      ] as const;
+      const migratedDriver = new BetterSqlite3(databasePath, {
+        readonly: true,
+      });
+      for (const [table, column] of tables) {
+        const columns = migratedDriver.pragma(`table_info(${table})`) as {
+          readonly name: string;
+          readonly notnull: number;
+          readonly dflt_value: string | null;
+        }[];
+        expect(columns).toContainEqual(
+          expect.objectContaining({
+            name: column,
+            notnull: 1,
+            dflt_value: "''",
+          }),
+        );
+      }
+      migratedDriver.close();
+      await migrated.close();
+    } finally {
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
 });

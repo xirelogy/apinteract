@@ -56,6 +56,8 @@ export interface ImportedCollection {
   readonly collectionKey: string;
   readonly parentCollectionKey: string | null;
   readonly name: string;
+  readonly description: string;
+  readonly notes: string;
   readonly pathPrefix: string;
   readonly variables: readonly VariableWrite[];
 }
@@ -85,6 +87,8 @@ export interface ImportedRequest {
   readonly sourceLocation: string;
   readonly collectionKey: string | null;
   readonly name: string;
+  readonly description: string;
+  readonly notes: string;
   readonly method: HttpMethod;
   readonly targetMode: "absolute" | "composed";
   readonly targetUrl: string;
@@ -106,6 +110,8 @@ export interface ImportPlan {
   readonly sourceName: string;
   readonly sourceFingerprint: string;
   readonly suggestedName: string;
+  readonly description: string;
+  readonly notes: string;
   readonly pathPrefix: string;
   readonly variables: readonly VariableWrite[];
   readonly collections: readonly ImportedCollection[];

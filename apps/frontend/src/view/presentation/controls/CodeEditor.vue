@@ -8,6 +8,7 @@ import {
 } from "@codemirror/commands";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
+import { markdown } from "@codemirror/lang-markdown";
 import {
   bracketMatching,
   HighlightStyle,
@@ -24,7 +25,7 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 
-export type CodeEditorLanguage = "plain" | "json" | "javascript";
+export type CodeEditorLanguage = "plain" | "json" | "javascript" | "markdown";
 
 /** Provides an accessible text editor with switchable syntax support. */
 const props = withDefaults(
@@ -137,6 +138,7 @@ const editorTheme = EditorView.theme({
 function languageExtension(language: CodeEditorLanguage): Extension {
   if (language === "javascript") return javascript();
   if (language === "json") return json();
+  if (language === "markdown") return markdown();
   return [];
 }
 

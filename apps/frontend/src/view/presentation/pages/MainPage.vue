@@ -587,12 +587,16 @@ async function downloadExecutionBody(executionId: string): Promise<void> {
 async function saveCollectionProperties(
   tabId: string,
   name: string,
+  description: string,
+  notes: string,
   pathPrefix: string,
   headers: readonly RequestField[],
   variables: readonly VariableWrite[],
 ): Promise<void> {
   controller.updateCollectionPropertiesDraft(tabId, {
     name,
+    description,
+    notes,
     pathPrefix,
     headers,
     variables,
@@ -604,12 +608,16 @@ async function saveCollectionProperties(
 async function saveWorkspaceProperties(
   tabId: string,
   name: string,
+  description: string,
+  notes: string,
   baseUrl: string,
   headers: readonly RequestField[],
   variables: readonly VariableWrite[],
 ): Promise<void> {
   controller.updateWorkspacePropertiesDraft(tabId, {
     name,
+    description,
+    notes,
     baseUrl,
     headers,
     variables,
@@ -620,19 +628,31 @@ async function saveWorkspaceProperties(
 /** Saves the active workspace editor without relying on template narrowing. */
 function saveActiveWorkspaceProperties(
   name: string,
+  description: string,
+  notes: string,
   baseUrl: string,
   headers: readonly RequestField[],
   variables: readonly VariableWrite[],
 ): void {
   const tab = activeResourceTab.value;
   if (tab?.kind === "workspace") {
-    void saveWorkspaceProperties(tab.tabId, name, baseUrl, headers, variables);
+    void saveWorkspaceProperties(
+      tab.tabId,
+      name,
+      description,
+      notes,
+      baseUrl,
+      headers,
+      variables,
+    );
   }
 }
 
 /** Saves the active collection editor without relying on template narrowing. */
 function saveActiveCollectionProperties(
   name: string,
+  description: string,
+  notes: string,
   pathPrefix: string,
   headers: readonly RequestField[],
   variables: readonly VariableWrite[],
@@ -642,6 +662,8 @@ function saveActiveCollectionProperties(
     void saveCollectionProperties(
       tab.tabId,
       name,
+      description,
+      notes,
       pathPrefix,
       headers,
       variables,

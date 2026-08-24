@@ -53,11 +53,15 @@ describe("ApplicationController workspaces", () => {
       {
         workspaceId: "019facab-1eee-765f-bd9f-ac2449151cd1",
         name: "First workspace",
+        description: "",
+        notes: "",
         role: "owner" as const,
       },
       {
         workspaceId: "019facab-1eee-765f-bd9f-ac2449151cd2",
         name: "Second workspace",
+        description: "",
+        notes: "",
         role: "viewer" as const,
       },
     ];
@@ -99,6 +103,8 @@ describe("ApplicationController workspaces", () => {
       selectedWorkspace: {
         workspaceId,
         name: "Workspace",
+        description: "",
+        notes: "",
         role: "owner",
         baseUrl: "https://example.test",
         headers: [],
@@ -137,6 +143,8 @@ describe("ApplicationController workspaces", () => {
         return {
           workspaceId,
           name: "Workspace",
+          description: "",
+          notes: "",
           role: "owner",
           baseUrl: "https://example.test",
           headers: [],
@@ -149,6 +157,8 @@ describe("ApplicationController workspaces", () => {
           workspaceId,
           parentCollectionId: null,
           name: "Collection",
+          description: "",
+          notes: "",
           pathPrefix: "/v1",
           inheritedTarget: "https://example.test",
           effectivePath: "https://example.test/v1",
@@ -163,6 +173,8 @@ describe("ApplicationController workspaces", () => {
           environmentId,
           workspaceId,
           name: "Development",
+          description: "",
+          notes: "",
           revision: 1,
           includedEnvironments: [],
           variables: [],
@@ -217,6 +229,7 @@ describe("ApplicationController workspaces", () => {
       variable: {
         variableId: "019facab-1eee-765f-bd9f-ac2449151cf4",
         name: "parent_value",
+        description: "",
         kind: "value" as const,
         value: "new",
       },
@@ -232,6 +245,8 @@ describe("ApplicationController workspaces", () => {
       workspaceId,
       parentCollectionId: null,
       name: "Parent",
+      description: "",
+      notes: "",
       pathPrefix: "/old",
       inheritedTarget: "https://example.test",
       effectivePath: "/old",
@@ -251,6 +266,8 @@ describe("ApplicationController workspaces", () => {
       workspaceId,
       parentCollectionId,
       name: "Child",
+      description: "",
+      notes: "",
       pathPrefix: "/child",
       inheritedTarget: "https://example.test/old",
       effectivePath: "/old/child",
@@ -266,6 +283,7 @@ describe("ApplicationController workspaces", () => {
       inheritedHeaders: [{ name: "X-Parent", value: "new", enabled: true }],
       effectiveHeaders: [{ name: "X-Parent", value: "new", enabled: true }],
     };
+    /** Creates the empty collection variable profile returned by this fixture. */
     const profile = (scopeId: string) => ({
       workspaceId,
       scopeKind: "collection" as const,
@@ -352,6 +370,8 @@ describe("ApplicationController workspaces", () => {
     expect(refreshedChildTab.draft).toEqual(childDraft);
     expect(refreshedChildTab.baseline).toEqual({
       name: "Child",
+      description: "",
+      notes: "",
       pathPrefix: "/child",
       headers: [],
       variables: [],
@@ -373,6 +393,8 @@ describe("ApplicationController local request recovery", () => {
       workspaceId,
       parentCollectionId: null,
       name: "Backend request",
+      description: "",
+      notes: "",
       method: "GET" as const,
       targetMode: "absolute" as const,
       targetUrl: "https://example.test/backend",
@@ -389,6 +411,8 @@ describe("ApplicationController local request recovery", () => {
     };
     const recoveredDraft = {
       name: "Recovered request",
+      description: "",
+      notes: "",
       method: "POST" as const,
       targetMode: "absolute" as const,
       targetUrl: "https://example.test/recovered",
@@ -464,6 +488,8 @@ describe("ApplicationController local request recovery", () => {
         return {
           workspaceId,
           name: "Workspace",
+          description: "",
+          notes: "",
           role: "owner",
           baseUrl: "https://example.test",
           headers: [],
@@ -541,6 +567,8 @@ describe("ApplicationController local request recovery", () => {
           request: null,
           draft: {
             name: "Secret request",
+            description: "",
+            notes: "",
             method: "GET",
             targetMode: "absolute",
             targetUrl: "https://example.test",
@@ -574,6 +602,8 @@ describe("ApplicationController local request recovery", () => {
           environment: null,
           draft: {
             name: "Local",
+            description: "",
+            notes: "",
             variables: [
               { name: "api-key", kind: "secret", value: "do-not-store" },
             ],
@@ -636,6 +666,8 @@ describe("ApplicationController local request recovery", () => {
           request: null,
           draft: {
             name: "Temporary request",
+            description: "",
+            notes: "",
             method: "GET",
             targetMode: "absolute",
             targetUrl: "",
@@ -704,6 +736,8 @@ describe("ApplicationController local request recovery", () => {
     await controller.initializeWorkspace();
     const draft = {
       name: "Request",
+      description: "",
+      notes: "",
       method: "GET" as const,
       targetMode: "absolute" as const,
       targetUrl: "https://example.test",
@@ -738,6 +772,8 @@ describe("ApplicationController local request recovery", () => {
     const environmentId = "019facab-1eee-765f-bd9f-ac2449151de9";
     const environmentDraft = {
       name: "Development",
+      description: "",
+      notes: "",
       variables: [],
       includedEnvironmentIds: [],
     };
@@ -757,6 +793,8 @@ describe("ApplicationController local request recovery", () => {
             environmentId,
             workspaceId,
             name: "Development",
+            description: "",
+            notes: "",
             revision: 1,
             includedEnvironments: [],
             variables: [],
@@ -818,6 +856,8 @@ describe("ApplicationController requests", () => {
       workspaceId,
       parentCollectionId: collectionId,
       name: `Imported ${index + 1}`,
+      description: "",
+      notes: "",
       method: "GET" as const,
       targetMode: "absolute" as const,
       targetUrl: `https://example.test/${index + 1}`,
@@ -936,6 +976,8 @@ describe("ApplicationController requests", () => {
         sourceName: "capture.har",
         sourceFingerprint: "a".repeat(64),
         suggestedName: "Capture",
+        description: "",
+        notes: "",
         pathPrefix: "",
         variables: [],
         collections: [],
@@ -1003,6 +1045,8 @@ describe("ApplicationController requests", () => {
     store.selectedWorkspace = {
       workspaceId,
       name: "Workspace",
+      description: "",
+      notes: "",
       role: "owner",
       baseUrl: "",
       headers: [],
@@ -1013,6 +1057,8 @@ describe("ApplicationController requests", () => {
       sourceLocation: "#/paths/~1items/get",
       collectionKey: "server:one",
       name: "List items",
+      description: "",
+      notes: "",
       method: "GET" as const,
       targetMode: "composed" as const,
       targetUrl: "/items/<<item>>",
@@ -1031,6 +1077,8 @@ describe("ApplicationController requests", () => {
       sourceName: "api.json",
       sourceFingerprint: "c".repeat(64),
       suggestedName: "API",
+      description: "",
+      notes: "",
       pathPrefix: "https://api.example.test/<<version>>",
       variables: [{ name: "version", kind: "value" as const, value: "v1" }],
       collections: [
@@ -1038,6 +1086,8 @@ describe("ApplicationController requests", () => {
           collectionKey: "server:one",
           parentCollectionKey: null,
           name: "Server",
+          description: "",
+          notes: "",
           pathPrefix: "/<<region>>",
           variables: [
             { name: "region", kind: "value" as const, value: "eu" },
@@ -1075,6 +1125,8 @@ describe("ApplicationController requests", () => {
       workspaceId,
       parentCollectionId: null,
       name: "History",
+      description: "",
+      notes: "",
       method: "GET" as const,
       targetMode: "absolute" as const,
       targetUrl: "https://example.test/history",
@@ -1195,6 +1247,8 @@ describe("ApplicationController requests", () => {
       workspaceId,
       parentCollectionId: null,
       name: "Multipart request",
+      description: "",
+      notes: "",
       method: "POST" as const,
       targetMode: "absolute" as const,
       targetUrl: "https://example.test/forms",
@@ -1304,6 +1358,8 @@ describe("ApplicationController requests", () => {
       workspaceId,
       parentCollectionId: null,
       name: "Saved request",
+      description: "",
+      notes: "",
       method: "GET" as const,
       targetMode: "absolute" as const,
       targetUrl: "https://example.test",
@@ -1319,6 +1375,8 @@ describe("ApplicationController requests", () => {
     };
     const draft = {
       name: request.name,
+      description: "",
+      notes: "",
       method: request.method,
       targetMode: request.targetMode,
       targetUrl: request.targetUrl,
@@ -1335,7 +1393,13 @@ describe("ApplicationController requests", () => {
       scopeName: request.name,
       revision: 2,
       variables: [
-        { variableId, name: "source", kind: "value" as const, value: "before" },
+        {
+          variableId,
+          name: "source",
+          description: "",
+          kind: "value" as const,
+          value: "before",
+        },
       ],
       inheritedVariables: [],
     };
@@ -1444,6 +1508,8 @@ describe("ApplicationController requests", () => {
           workspaceId,
           parentCollectionId: collectionId,
           name: "Draft request",
+          description: "",
+          notes: "",
           method: "GET",
           targetMode: "absolute",
           targetUrl: "https://example.test/<<source>>",
@@ -1472,6 +1538,7 @@ describe("ApplicationController requests", () => {
             {
               variableId,
               name: "source",
+              description: "",
               kind: "value",
               value: "temporary",
             },
@@ -1495,6 +1562,8 @@ describe("ApplicationController requests", () => {
     store.selectedWorkspace = {
       workspaceId,
       name: "Workspace",
+      description: "",
+      notes: "",
       role: "owner",
       baseUrl: "",
       headers: [],

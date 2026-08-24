@@ -8,7 +8,7 @@ import { enUsMessages } from "../src/app/i18n/messages";
 import VariableFieldsEditor from "../src/view/presentation/features/VariableFieldsEditor.vue";
 
 describe("VariableFieldsEditor", () => {
-  it("restores an unsaved request-variable draft over persisted metadata", () => {
+  it("restores an unsaved request-variable draft over persisted metadata", async () => {
     const i18n = createI18n({
       legacy: false,
       locale: "en-US",
@@ -21,6 +21,7 @@ describe("VariableFieldsEditor", () => {
           {
             variableId,
             name: "token",
+            description: "Authentication token",
             kind: "secret",
             hasValue: true,
             secretVersion: 2,
@@ -30,6 +31,7 @@ describe("VariableFieldsEditor", () => {
           {
             variableId,
             name: "token",
+            description: "Authentication token",
             kind: "secret",
             value: "replacement",
           },
@@ -48,10 +50,18 @@ describe("VariableFieldsEditor", () => {
       wrapper.get('.secret-input-shell[data-secret-state="replacement"]')
         .element,
     ).toBeInstanceOf(HTMLElement);
+    await wrapper
+      .get('button[aria-label="Add or edit field description"]')
+      .trigger("click");
+    expect(
+      wrapper.get<HTMLInputElement>('input[aria-label="Field description"]')
+        .element.value,
+    ).toBe("Authentication token");
     expect(wrapper.vm.writes()).toEqual([
       {
         variableId,
         name: "token",
+        description: "Authentication token",
         kind: "secret",
         value: "replacement",
       },
@@ -70,6 +80,7 @@ describe("VariableFieldsEditor", () => {
           {
             variableId: "019facab-1eee-765f-bd9f-ac2449151be1",
             name: "base_url",
+            description: "",
             kind: "value",
             value: "https://request.test",
           },
@@ -79,6 +90,7 @@ describe("VariableFieldsEditor", () => {
             variable: {
               variableId: "019facab-1eee-765f-bd9f-ac2449151be2",
               name: "base_url",
+              description: "",
               kind: "value",
               value: "https://workspace.test",
             },
@@ -93,6 +105,7 @@ describe("VariableFieldsEditor", () => {
             variable: {
               variableId: "019facab-1eee-765f-bd9f-ac2449151be3",
               name: "token",
+              description: "",
               kind: "secret",
               hasValue: true,
               secretVersion: 4,
@@ -153,12 +166,14 @@ describe("VariableFieldsEditor", () => {
           {
             variableId: "019facab-1eee-765f-bd9f-ac2449151be1",
             name: "first",
+            description: "",
             kind: "value",
             value: "one",
           },
           {
             variableId: "019facab-1eee-765f-bd9f-ac2449151be2",
             name: "second",
+            description: "",
             kind: "value",
             value: "two",
           },

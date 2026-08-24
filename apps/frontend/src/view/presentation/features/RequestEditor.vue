@@ -12,6 +12,7 @@ import {
   Globe2,
   History,
   Lock,
+  FilePenLine,
   Play,
   Route,
   Save,
@@ -68,6 +69,7 @@ import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 import { useRowReorder } from "@/view/presentation/controls/row-reorder";
 import ResponsePanel from "./ResponsePanel.vue";
 import VariableFieldsEditor from "./VariableFieldsEditor.vue";
+import DocumentationEditor from "./DocumentationEditor.vue";
 
 const ScriptEditor = defineAsyncComponent(
   () => import("@/view/presentation/controls/ScriptEditor.vue"),
@@ -165,9 +167,12 @@ const requestTabs = [
   "preRequest",
   "postResponse",
   "variables",
+  "documentation",
   "versions",
 ] as const;
 const name = ref("");
+const description = ref("");
+const notes = ref("");
 const method = ref<HttpMethod>("GET");
 const targetMode = ref<"absolute" | "composed">("composed");
 const targetUrl = ref("");
@@ -190,6 +195,7 @@ interface PendingMultipartFileField {
   readonly kind: "pending-file";
   name: string;
   enabled: boolean;
+  description?: string;
   readonly textValue: string;
 }
 type MultipartFormField =
@@ -202,6 +208,9 @@ const multipartBoundary = ref(createMultipartBoundary());
 const attachmentInput = ref<HTMLInputElement | null>(null);
 const attachmentTargetIndex = ref<number | null>(null);
 const uploadingAttachment = ref(false);
+const expandedFieldDescriptions = ref<string[]>([]);
+const expandedFormDescriptions = ref<number[]>([]);
+const expandedInheritedDescriptions = ref<RequestField[]>([]);
 const bodyTypeControlId = useId();
 const preRequestScript = ref("");
 const postResponseScript = ref("");
@@ -222,6 +231,8 @@ watch(
   ([draft, revision]) => {
     const source = revision?.request ?? draft;
     name.value = source?.name ?? "";
+    description.value = source?.description ?? "";
+    notes.value = source?.notes ?? "";
     method.value = source?.method ?? "GET";
     targetMode.value = source?.targetMode ?? "composed";
     targetUrl.value = source?.targetUrl ?? "";
@@ -436,6 +447,13 @@ const canSave = computed(
   () =>
     props.viewingRevision === null &&
     validTarget.value &&
+    documentedFieldsHaveNames([
+      ...meaningfulRequestFields(query.value),
+      ...meaningfulRequestFields(headers.value),
+      ...(bodyKind.value === "urlencoded" || bodyKind.value === "multipart"
+        ? meaningfulMultipartFields()
+        : []),
+    ]) &&
     (props.temporary || name.value.trim() !== ""),
 );
 const editorDisabled = computed(
@@ -451,6 +469,11 @@ const draftRevisionLabel = computed(() =>
 function removeField(kind: "query" | "headers", index: number): void {
   const fields = kind === "query" ? query : headers;
   fields.value.splice(index, 1);
+  expandedFieldDescriptions.value = remapRemovedDescriptionIndex(
+    expandedFieldDescriptions.value,
+    kind,
+    index,
+  );
   ensureTrailingBlankRequestField(
     fields.value,
     kind === "headers" ? createBlankHeaderField : undefined,
@@ -473,6 +496,12 @@ function moveActiveField(fromIndex: number, toIndex: number): void {
   const fields = activeFields();
   const [field] = fields.splice(fromIndex, 1);
   if (field !== undefined) fields.splice(toIndex, 0, field);
+  expandedFieldDescriptions.value = remapMovedDescriptionIndex(
+    expandedFieldDescriptions.value,
+    activeTab.value === "headers" ? "headers" : "query",
+    fromIndex,
+    toIndex,
+  );
   ensureTrailingBlankRequestField(
     fields,
     activeTab.value === "headers" ? createBlankHeaderField : undefined,
@@ -492,6 +521,11 @@ const fieldReorder = useRowReorder({
 function moveFormField(fromIndex: number, toIndex: number): void {
   const [field] = formFields.value.splice(fromIndex, 1);
   if (field !== undefined) formFields.value.splice(toIndex, 0, field);
+  expandedFormDescriptions.value = remapMovedIndex(
+    expandedFormDescriptions.value,
+    fromIndex,
+    toIndex,
+  );
   ensureTrailingFormBlank();
   emitChange();
 }
@@ -514,6 +548,12 @@ function updateFormField(index: number): void {
 /** Removes one form field without removing the presentation-only blank row. */
 function removeFormField(index: number): void {
   formFields.value.splice(index, 1);
+  expandedFormDescriptions.value = expandedFormDescriptions.value.flatMap(
+    (expandedIndex) =>
+      expandedIndex === index
+        ? []
+        : [expandedIndex > index ? expandedIndex - 1 : expandedIndex],
+  );
   ensureTrailingFormBlank();
   emitChange();
 }
@@ -562,6 +602,101 @@ function attachmentSelectionDisabled(): boolean {
 /** Reports whether one presentation-only multipart text row is untouched. */
 function isBlankFormField(field: MultipartFormField): boolean {
   return !isMultipartFileValueField(field) && isBlankRequestField(field);
+}
+
+/** Requires a name whenever a meaningful row owns documentation metadata. */
+function documentedFieldsHaveNames(
+  fields: readonly { readonly name: string; readonly description?: string }[],
+): boolean {
+  return fields.every(
+    (field) => (field.description ?? "") === "" || field.name.trim().length > 0,
+  );
+}
+
+/** Returns one clone-stable expansion key for an editable request row. */
+function fieldDescriptionKey(index: number): string {
+  return `${activeTab.value}:${index}`;
+}
+
+/** Toggles an editable query or header description by stable visible position. */
+function toggleFieldDescription(index: number): void {
+  const key = fieldDescriptionKey(index);
+  expandedFieldDescriptions.value = expandedFieldDescriptions.value.includes(
+    key,
+  )
+    ? expandedFieldDescriptions.value.filter((candidate) => candidate !== key)
+    : [...expandedFieldDescriptions.value, key];
+}
+
+/** Toggles one form row's description while preserving expansion on cloning. */
+function toggleFormDescription(index: number): void {
+  expandedFormDescriptions.value = expandedFormDescriptions.value.includes(
+    index,
+  )
+    ? expandedFormDescriptions.value.filter((candidate) => candidate !== index)
+    : [...expandedFormDescriptions.value, index];
+}
+
+/** Remaps expanded numeric positions after moving one row. */
+function remapMovedIndex(
+  expanded: readonly number[],
+  fromIndex: number,
+  toIndex: number,
+): number[] {
+  return expanded.map((index) => {
+    if (index === fromIndex) return toIndex;
+    if (fromIndex < toIndex && index > fromIndex && index <= toIndex) {
+      return index - 1;
+    }
+    if (fromIndex > toIndex && index >= toIndex && index < fromIndex) {
+      return index + 1;
+    }
+    return index;
+  });
+}
+
+/** Remaps one request-field section's expansion keys after moving a row. */
+function remapMovedDescriptionIndex(
+  expanded: readonly string[],
+  kind: "query" | "headers",
+  fromIndex: number,
+  toIndex: number,
+): string[] {
+  const prefix = `${kind}:`;
+  return expanded.map((key) => {
+    if (!key.startsWith(prefix)) return key;
+    const [remapped] = remapMovedIndex(
+      [Number(key.slice(prefix.length))],
+      fromIndex,
+      toIndex,
+    );
+    return `${prefix}${remapped}`;
+  });
+}
+
+/** Removes one expansion key and shifts later positions in the same section. */
+function remapRemovedDescriptionIndex(
+  expanded: readonly string[],
+  kind: "query" | "headers",
+  removedIndex: number,
+): string[] {
+  const prefix = `${kind}:`;
+  return expanded.flatMap((key) => {
+    if (!key.startsWith(prefix)) return [key];
+    const index = Number(key.slice(prefix.length));
+    if (index === removedIndex) return [];
+    return [`${prefix}${index > removedIndex ? index - 1 : index}`];
+  });
+}
+
+/** Toggles the read-only description attached to one inherited declaration. */
+function toggleInheritedDescription(field: RequestField): void {
+  expandedInheritedDescriptions.value =
+    expandedInheritedDescriptions.value.includes(field)
+      ? expandedInheritedDescriptions.value.filter(
+          (candidate) => candidate !== field,
+        )
+      : [...expandedInheritedDescriptions.value, field];
 }
 
 /** Deep-copies persisted multipart rows and appends one text-entry row. */
@@ -646,6 +781,9 @@ async function attachFile(event: Event): Promise<void> {
       kind: "file",
       name: field.name,
       enabled: field.enabled,
+      ...(field.description === undefined
+        ? {}
+        : { description: field.description }),
       attachment,
     });
     ensureTrailingFormBlank();
@@ -667,6 +805,9 @@ function selectFormValueType(index: number, valueType: FormValueType): void {
       kind: "pending-file",
       name: field.name,
       enabled: field.enabled,
+      ...(field.description === undefined
+        ? {}
+        : { description: field.description }),
       textValue: field.value,
     });
     ensureTrailingFormBlank();
@@ -677,6 +818,9 @@ function selectFormValueType(index: number, valueType: FormValueType): void {
     name: field.name,
     value: isPendingMultipartFileField(field) ? field.textValue : "",
     enabled: field.enabled,
+    ...(field.description === undefined
+      ? {}
+      : { description: field.description }),
   });
   ensureTrailingFormBlank();
   emitChange();
@@ -796,6 +940,8 @@ function currentRequestBody(): RequestBodyDefinition {
 function currentDraft(): RequestDraftInput {
   return {
     name: name.value,
+    description: description.value,
+    notes: notes.value,
     method: method.value,
     targetMode: targetMode.value,
     targetUrl: targetUrl.value,
@@ -815,6 +961,8 @@ function currentDraft(): RequestDraftInput {
 function emitChange(): void {
   emit("change", {
     name: name.value,
+    description: description.value,
+    notes: notes.value,
     method: method.value,
     targetMode: targetMode.value,
     targetUrl: targetUrl.value,
@@ -931,6 +1079,9 @@ function requestTabLabel(tab: (typeof requestTabs)[number]): string {
   if (tab === "versions") {
     return t("request.versions.title");
   }
+  if (tab === "documentation") {
+    return t("documentation.title");
+  }
   return tab === "postResponse"
     ? t("scripting.postResponse")
     : t("environment.variables");
@@ -941,6 +1092,9 @@ function requestTabHasContent(tab: (typeof requestTabs)[number]): boolean {
   if (tab === "body") return bodyHasContent.value;
   if (tab === "preRequest") return preRequestScript.value.trim() !== "";
   if (tab === "postResponse") return postResponseScript.value.trim() !== "";
+  if (tab === "documentation") {
+    return description.value.trim() !== "" || notes.value.trim() !== "";
+  }
   return false;
 }
 
@@ -1250,68 +1404,101 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               <span>{{ t("common.fields.value") }}</span>
               <span></span>
             </div>
-            <div
+            <template
               v-for="(field, index) in activeTab === 'headers'
                 ? inheritedHeaders
                 : []"
               :key="`inherited-${index}`"
-              class="request-field-row inherited-header-row"
-              :class="{
-                'is-header-overridden': isInheritedHeaderOverridden(field),
-              }"
             >
-              <CheckboxControl
-                :model-value="field.enabled"
-                visually-hidden-label
-                :label="
-                  t('request.inheritedHeaderEnabled', { index: index + 1 })
-                "
-                disabled
-              />
-              <TextInput
-                :model-value="field.name"
-                class="field-cell-input"
-                density="compact"
-                font="mono"
-                :aria-label="
-                  t('request.inheritedHeaderName', { index: index + 1 })
-                "
-                disabled
-              />
-              <div class="header-value-field">
-                <HeaderMergeModeToggle
-                  :model-value="field.mode ?? 'override'"
-                  readonly
-                />
-                <TemplateTextControl
-                  :model-value="field.value"
-                  class="field-template-input"
-                  density="compact"
-                  font="mono"
-                  :previews="variablePreviews"
-                  :aria-label="
-                    t('request.inheritedHeaderValue', { index: index + 1 })
+              <div
+                class="request-field-row inherited-header-row"
+                :class="{
+                  'is-header-overridden': isInheritedHeaderOverridden(field),
+                }"
+              >
+                <CheckboxControl
+                  :model-value="field.enabled"
+                  visually-hidden-label
+                  :label="
+                    t('request.inheritedHeaderEnabled', { index: index + 1 })
                   "
-                  readonly
+                  disabled
+                />
+                <div class="field-key-cell">
+                  <TextInput
+                    :model-value="field.name"
+                    class="field-cell-input"
+                    density="compact"
+                    font="mono"
+                    :aria-label="
+                      t('request.inheritedHeaderName', { index: index + 1 })
+                    "
+                    disabled
+                  />
+                  <IconButton
+                    size="compact"
+                    class="field-description-action"
+                    :class="{
+                      'has-content': field.description?.trim() !== '',
+                    }"
+                    :label="t('documentation.viewFieldDescription')"
+                    :disabled="field.description?.trim() === ''"
+                    @click="toggleInheritedDescription(field)"
+                  >
+                    <FilePenLine :size="15" aria-hidden="true" />
+                  </IconButton>
+                </div>
+                <div class="header-value-field">
+                  <HeaderMergeModeToggle
+                    :model-value="field.mode ?? 'override'"
+                    readonly
+                  />
+                  <TemplateTextControl
+                    :model-value="field.value"
+                    class="field-template-input"
+                    density="compact"
+                    font="mono"
+                    :previews="variablePreviews"
+                    :aria-label="
+                      t('request.inheritedHeaderValue', { index: index + 1 })
+                    "
+                    readonly
+                  />
+                </div>
+                <div class="row-actions">
+                  <span
+                    class="inherited-header-indicator"
+                    role="img"
+                    :aria-label="
+                      isInheritedHeaderOverridden(field)
+                        ? t('request.inheritedHeaderOverridden')
+                        : t('request.inherited')
+                    "
+                    :title="
+                      isInheritedHeaderOverridden(field)
+                        ? t('request.inheritedHeaderOverridden')
+                        : t('request.inherited')
+                    "
+                  >
+                    <Lock :size="14" aria-hidden="true" />
+                  </span>
+                </div>
+              </div>
+              <div
+                v-if="expandedInheritedDescriptions.includes(field)"
+                class="field-description-row inherited-field-description"
+                :class="{
+                  'is-header-overridden': isInheritedHeaderOverridden(field),
+                }"
+              >
+                <TextInput
+                  :model-value="field.description ?? ''"
+                  :aria-label="t('documentation.fieldDescription')"
+                  :placeholder="t('documentation.fieldDescription')"
+                  disabled
                 />
               </div>
-              <span
-                class="inherited-header-indicator"
-                role="img"
-                :aria-label="
-                  isInheritedHeaderOverridden(field)
-                    ? t('request.inheritedHeaderOverridden')
-                    : t('request.inherited')
-                "
-                :title="
-                  isInheritedHeaderOverridden(field)
-                    ? t('request.inheritedHeaderOverridden')
-                    : t('request.inherited')
-                "
-              >
-                <Lock :size="14" aria-hidden="true" />
-              </span>
-            </div>
+            </template>
             <div
               v-if="activeTab === 'headers' && generatedContentType !== null"
               class="request-field-row generated-header-row"
@@ -1351,131 +1538,163 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 <Lock :size="14" aria-hidden="true" />
               </span>
             </div>
-            <div
+            <template
               v-for="(field, index) in activeTab === 'query' ? query : headers"
               :key="index"
-              class="request-field-row"
-              :class="[
-                fieldReorder.classes(index),
-                {
-                  'is-header-overridden':
-                    activeTab === 'headers' && isHeaderOverriddenByBody(field),
-                },
-              ]"
-              @dragover.stop="fieldReorder.updateDropTarget($event, index)"
-              @drop.stop="fieldReorder.finishDrop($event)"
             >
-              <CheckboxControl
-                v-model="field.enabled"
-                visually-hidden-label
-                :label="
-                  t('request.enableField', {
-                    kind: activeFieldKind(),
-                    index: index + 1,
-                  })
-                "
-                :disabled="editorDisabled"
-                @change="emitChange"
-              />
-              <TextInput
-                v-model="field.name"
-                class="field-cell-input"
-                density="compact"
-                font="mono"
-                :aria-label="
-                  t(
-                    activeTab === 'query'
-                      ? 'request.queryName'
-                      : 'request.headerName',
-                    { index: index + 1 },
-                  )
-                "
-                :placeholder="
-                  isBlankRequestField(field)
-                    ? activeTab === 'query'
-                      ? t('request.addParameter')
-                      : t('request.addHeader')
-                    : t('common.fields.name')
-                "
-                autocomplete="off"
-                spellcheck="false"
-                :disabled="editorDisabled"
-                @input="updateActiveField(index, true)"
-              />
-              <div v-if="activeTab === 'headers'" class="header-value-field">
-                <HeaderMergeModeToggle
-                  :model-value="field.mode ?? 'override'"
+              <div
+                class="request-field-row"
+                :class="[
+                  fieldReorder.classes(index),
+                  {
+                    'is-header-overridden':
+                      activeTab === 'headers' &&
+                      isHeaderOverriddenByBody(field),
+                  },
+                ]"
+                @dragover.stop="fieldReorder.updateDropTarget($event, index)"
+                @drop.stop="fieldReorder.finishDrop($event)"
+              >
+                <CheckboxControl
+                  v-model="field.enabled"
+                  visually-hidden-label
+                  :label="
+                    t('request.enableField', {
+                      kind: activeFieldKind(),
+                      index: index + 1,
+                    })
+                  "
                   :disabled="editorDisabled"
-                  @update:model-value="field.mode = $event"
                   @change="emitChange"
                 />
+                <div class="field-key-cell">
+                  <TextInput
+                    v-model="field.name"
+                    class="field-cell-input"
+                    density="compact"
+                    font="mono"
+                    :aria-label="
+                      t(
+                        activeTab === 'query'
+                          ? 'request.queryName'
+                          : 'request.headerName',
+                        { index: index + 1 },
+                      )
+                    "
+                    :placeholder="
+                      isBlankRequestField(field)
+                        ? activeTab === 'query'
+                          ? t('request.addParameter')
+                          : t('request.addHeader')
+                        : t('common.fields.name')
+                    "
+                    autocomplete="off"
+                    spellcheck="false"
+                    :disabled="editorDisabled"
+                    @input="updateActiveField(index, true)"
+                  />
+                  <IconButton
+                    class="field-description-action"
+                    size="compact"
+                    :class="{ 'has-content': field.description?.trim() !== '' }"
+                    :label="t('documentation.editFieldDescription')"
+                    :disabled="editorDisabled || isBlankRequestField(field)"
+                    @click="toggleFieldDescription(index)"
+                  >
+                    <FilePenLine :size="15" aria-hidden="true" />
+                  </IconButton>
+                </div>
+                <div v-if="activeTab === 'headers'" class="header-value-field">
+                  <HeaderMergeModeToggle
+                    :model-value="field.mode ?? 'override'"
+                    :disabled="editorDisabled"
+                    @update:model-value="field.mode = $event"
+                    @change="emitChange"
+                  />
+                  <TemplateTextControl
+                    v-model="field.value"
+                    class="field-template-input"
+                    density="compact"
+                    font="mono"
+                    :previews="variablePreviews"
+                    :aria-label="t('request.headerValue', { index: index + 1 })"
+                    :placeholder="t('common.fields.value')"
+                    autocomplete="off"
+                    spellcheck="false"
+                    :disabled="editorDisabled"
+                    @input="updateActiveField(index)"
+                  />
+                </div>
                 <TemplateTextControl
+                  v-else
                   v-model="field.value"
                   class="field-template-input"
                   density="compact"
                   font="mono"
                   :previews="variablePreviews"
-                  :aria-label="t('request.headerValue', { index: index + 1 })"
+                  :aria-label="t('request.queryValue', { index: index + 1 })"
                   :placeholder="t('common.fields.value')"
                   autocomplete="off"
                   spellcheck="false"
                   :disabled="editorDisabled"
                   @input="updateActiveField(index)"
                 />
+                <div class="row-actions">
+                  <RowReorderHandle
+                    v-if="!isBlankRequestField(field)"
+                    :label="
+                      t('common.actions.reorderRow', {
+                        item: activeFieldKind(),
+                        index: index + 1,
+                      })
+                    "
+                    :disabled="editorDisabled"
+                    @drag-start="fieldReorder.startDrag($event, index)"
+                    @drag-end="fieldReorder.cancelDrag"
+                    @move="fieldReorder.moveByKeyboard(index, $event)"
+                  />
+                  <IconButton
+                    v-if="!isBlankRequestField(field)"
+                    class="compact-icon-button"
+                    size="compact"
+                    :label="
+                      t('request.removeField', {
+                        kind: activeFieldKind(),
+                        index: index + 1,
+                      })
+                    "
+                    :title="
+                      t('request.removeFieldTitle', {
+                        kind: activeFieldKind(),
+                      })
+                    "
+                    :disabled="editorDisabled"
+                    @click="removeActiveField(index)"
+                  >
+                    <Trash2 :size="15" aria-hidden="true" />
+                  </IconButton>
+                  <span v-else class="new-row-marker" aria-hidden="true">
+                    <Asterisk :size="15" />
+                  </span>
+                </div>
               </div>
-              <TemplateTextControl
-                v-else
-                v-model="field.value"
-                class="field-template-input"
-                density="compact"
-                font="mono"
-                :previews="variablePreviews"
-                :aria-label="t('request.queryValue', { index: index + 1 })"
-                :placeholder="t('common.fields.value')"
-                autocomplete="off"
-                spellcheck="false"
-                :disabled="editorDisabled"
-                @input="updateActiveField(index)"
-              />
-              <div class="row-actions">
-                <RowReorderHandle
-                  v-if="!isBlankRequestField(field)"
-                  :label="
-                    t('common.actions.reorderRow', {
-                      item: activeFieldKind(),
-                      index: index + 1,
-                    })
-                  "
+              <div
+                v-if="
+                  expandedFieldDescriptions.includes(fieldDescriptionKey(index))
+                "
+                class="field-description-row"
+              >
+                <TextInput
+                  :model-value="field.description ?? ''"
+                  :aria-label="t('documentation.fieldDescription')"
+                  :placeholder="t('documentation.fieldDescriptionPlaceholder')"
+                  :maxlength="4096"
                   :disabled="editorDisabled"
-                  @drag-start="fieldReorder.startDrag($event, index)"
-                  @drag-end="fieldReorder.cancelDrag"
-                  @move="fieldReorder.moveByKeyboard(index, $event)"
+                  @update:model-value="field.description = $event"
+                  @input="emitChange"
                 />
-                <IconButton
-                  v-if="!isBlankRequestField(field)"
-                  class="compact-icon-button"
-                  size="compact"
-                  :label="
-                    t('request.removeField', {
-                      kind: activeFieldKind(),
-                      index: index + 1,
-                    })
-                  "
-                  :title="
-                    t('request.removeFieldTitle', {
-                      kind: activeFieldKind(),
-                    })
-                  "
-                  :disabled="editorDisabled"
-                  @click="removeActiveField(index)"
-                >
-                  <Trash2 :size="15" aria-hidden="true" />
-                </IconButton>
-                <span v-else class="new-row-marker" aria-hidden="true">
-                  <Asterisk :size="15" />
-                </span>
               </div>
-            </div>
+            </template>
           </TabsPanel>
 
           <TabsPanel
@@ -1585,153 +1804,189 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 <span>{{ t("common.fields.value") }}</span>
                 <span></span>
               </div>
-              <div
-                v-for="entry in visibleFormFields"
-                :key="entry.index"
-                class="request-field-row"
-                :class="formFieldReorder.classes(entry.index)"
-                @dragover.stop="
-                  formFieldReorder.updateDropTarget($event, entry.index)
-                "
-                @drop.stop="formFieldReorder.finishDrop($event)"
-              >
-                <CheckboxControl
-                  v-model="entry.field.enabled"
-                  visually-hidden-label
-                  :label="
-                    t('request.enableField', {
-                      kind: t('request.formField'),
-                      index: entry.index + 1,
-                    })
-                  "
-                  :disabled="editorDisabled"
-                  @change="updateFormField(entry.index)"
-                />
-                <TemplateTextControl
-                  v-model="entry.field.name"
-                  class="field-template-input"
-                  density="compact"
-                  font="mono"
-                  :previews="variablePreviews"
-                  :aria-label="
-                    t('request.formName', { index: entry.index + 1 })
-                  "
-                  :placeholder="
-                    isBlankFormField(entry.field)
-                      ? t('request.addFormField')
-                      : t('common.fields.name')
-                  "
-                  autocomplete="off"
-                  spellcheck="false"
-                  :disabled="editorDisabled"
-                  @input="updateFormField(entry.index)"
-                />
+              <template v-for="entry in visibleFormFields" :key="entry.index">
                 <div
-                  class="form-value-field"
-                  :class="{
-                    'has-value-type-toggle': bodyKind === 'multipart',
-                  }"
+                  class="request-field-row"
+                  :class="formFieldReorder.classes(entry.index)"
+                  @dragover.stop="
+                    formFieldReorder.updateDropTarget($event, entry.index)
+                  "
+                  @drop.stop="formFieldReorder.finishDrop($event)"
                 >
-                  <FormValueTypeToggle
-                    v-if="bodyKind === 'multipart'"
-                    :model-value="
-                      isMultipartFileValueField(entry.field) ? 'file' : 'text'
-                    "
-                    :disabled="formValueTypeDisabled(entry.field)"
-                    @update:model-value="
-                      selectFormValueType(entry.index, $event)
-                    "
-                  />
-                  <TemplateTextControl
-                    v-if="!isMultipartFileValueField(entry.field)"
-                    v-model="entry.field.value"
-                    class="field-template-input"
-                    density="compact"
-                    font="mono"
-                    :previews="variablePreviews"
-                    :aria-label="
-                      t('request.formValue', { index: entry.index + 1 })
-                    "
-                    :placeholder="t('common.fields.value')"
-                    autocomplete="off"
-                    spellcheck="false"
-                    :disabled="editorDisabled || uploadingAttachment"
-                    @input="updateFormField(entry.index)"
-                  />
-                  <button
-                    v-else-if="isPendingMultipartFileField(entry.field)"
-                    type="button"
-                    class="request-file-part request-file-part-empty"
-                    :disabled="attachmentSelectionDisabled()"
-                    @click="chooseAttachment(entry.index)"
-                  >
-                    {{ t("request.attachFile") }}
-                  </button>
-                  <button
-                    v-else-if="isMultipartFileField(entry.field)"
-                    type="button"
-                    class="request-file-part"
-                    :aria-label="
-                      t('request.replaceAttachedFile', {
-                        fileName: entry.field.attachment.fileName,
-                      })
-                    "
-                    :title="entry.field.attachment.fileName"
-                    :disabled="attachmentSelectionDisabled()"
-                    @click="chooseAttachment(entry.index)"
-                  >
-                    <span class="request-file-name">
-                      {{ entry.field.attachment.fileName }}
-                    </span>
-                    <span class="request-file-metadata">
-                      {{ entry.field.attachment.contentType }} ·
-                      {{
-                        formatAttachmentSize(entry.field.attachment.byteLength)
-                      }}
-                    </span>
-                  </button>
-                </div>
-                <div class="row-actions">
-                  <RowReorderHandle
-                    v-if="!isBlankFormField(entry.field)"
+                  <CheckboxControl
+                    v-model="entry.field.enabled"
+                    visually-hidden-label
                     :label="
-                      t('common.actions.reorderRow', {
-                        item: t('request.formField'),
-                        index: entry.index + 1,
-                      })
-                    "
-                    :disabled="editorDisabled"
-                    @drag-start="
-                      formFieldReorder.startDrag($event, entry.index)
-                    "
-                    @drag-end="formFieldReorder.cancelDrag"
-                    @move="formFieldReorder.moveByKeyboard(entry.index, $event)"
-                  />
-                  <IconButton
-                    v-if="!isBlankFormField(entry.field)"
-                    class="compact-icon-button"
-                    size="compact"
-                    :label="
-                      t('request.removeField', {
+                      t('request.enableField', {
                         kind: t('request.formField'),
                         index: entry.index + 1,
                       })
                     "
-                    :title="
-                      t('request.removeFieldTitle', {
-                        kind: t('request.formField'),
-                      })
-                    "
                     :disabled="editorDisabled"
-                    @click="removeFormField(entry.index)"
+                    @change="updateFormField(entry.index)"
+                  />
+                  <div class="field-key-cell">
+                    <TemplateTextControl
+                      v-model="entry.field.name"
+                      class="field-template-input"
+                      density="compact"
+                      font="mono"
+                      :previews="variablePreviews"
+                      :aria-label="
+                        t('request.formName', { index: entry.index + 1 })
+                      "
+                      :placeholder="
+                        isBlankFormField(entry.field)
+                          ? t('request.addFormField')
+                          : t('common.fields.name')
+                      "
+                      autocomplete="off"
+                      spellcheck="false"
+                      :disabled="editorDisabled"
+                      @input="updateFormField(entry.index)"
+                    />
+                    <IconButton
+                      class="field-description-action"
+                      size="compact"
+                      :class="{
+                        'has-content': entry.field.description?.trim() !== '',
+                      }"
+                      :label="t('documentation.editFieldDescription')"
+                      :disabled="
+                        editorDisabled || isBlankFormField(entry.field)
+                      "
+                      @click="toggleFormDescription(entry.index)"
+                    >
+                      <FilePenLine :size="15" aria-hidden="true" />
+                    </IconButton>
+                  </div>
+                  <div
+                    class="form-value-field"
+                    :class="{
+                      'has-value-type-toggle': bodyKind === 'multipart',
+                    }"
                   >
-                    <Trash2 :size="15" aria-hidden="true" />
-                  </IconButton>
-                  <span v-else class="new-row-marker" aria-hidden="true">
-                    <Asterisk :size="15" />
-                  </span>
+                    <FormValueTypeToggle
+                      v-if="bodyKind === 'multipart'"
+                      :model-value="
+                        isMultipartFileValueField(entry.field) ? 'file' : 'text'
+                      "
+                      :disabled="formValueTypeDisabled(entry.field)"
+                      @update:model-value="
+                        selectFormValueType(entry.index, $event)
+                      "
+                    />
+                    <TemplateTextControl
+                      v-if="!isMultipartFileValueField(entry.field)"
+                      v-model="entry.field.value"
+                      class="field-template-input"
+                      density="compact"
+                      font="mono"
+                      :previews="variablePreviews"
+                      :aria-label="
+                        t('request.formValue', { index: entry.index + 1 })
+                      "
+                      :placeholder="t('common.fields.value')"
+                      autocomplete="off"
+                      spellcheck="false"
+                      :disabled="editorDisabled || uploadingAttachment"
+                      @input="updateFormField(entry.index)"
+                    />
+                    <button
+                      v-else-if="isPendingMultipartFileField(entry.field)"
+                      type="button"
+                      class="request-file-part request-file-part-empty"
+                      :disabled="attachmentSelectionDisabled()"
+                      @click="chooseAttachment(entry.index)"
+                    >
+                      {{ t("request.attachFile") }}
+                    </button>
+                    <button
+                      v-else-if="isMultipartFileField(entry.field)"
+                      type="button"
+                      class="request-file-part"
+                      :aria-label="
+                        t('request.replaceAttachedFile', {
+                          fileName: entry.field.attachment.fileName,
+                        })
+                      "
+                      :title="entry.field.attachment.fileName"
+                      :disabled="attachmentSelectionDisabled()"
+                      @click="chooseAttachment(entry.index)"
+                    >
+                      <span class="request-file-name">
+                        {{ entry.field.attachment.fileName }}
+                      </span>
+                      <span class="request-file-metadata">
+                        {{ entry.field.attachment.contentType }} ·
+                        {{
+                          formatAttachmentSize(
+                            entry.field.attachment.byteLength,
+                          )
+                        }}
+                      </span>
+                    </button>
+                  </div>
+                  <div class="row-actions">
+                    <RowReorderHandle
+                      v-if="!isBlankFormField(entry.field)"
+                      :label="
+                        t('common.actions.reorderRow', {
+                          item: t('request.formField'),
+                          index: entry.index + 1,
+                        })
+                      "
+                      :disabled="editorDisabled"
+                      @drag-start="
+                        formFieldReorder.startDrag($event, entry.index)
+                      "
+                      @drag-end="formFieldReorder.cancelDrag"
+                      @move="
+                        formFieldReorder.moveByKeyboard(entry.index, $event)
+                      "
+                    />
+                    <IconButton
+                      v-if="!isBlankFormField(entry.field)"
+                      class="compact-icon-button"
+                      size="compact"
+                      :label="
+                        t('request.removeField', {
+                          kind: t('request.formField'),
+                          index: entry.index + 1,
+                        })
+                      "
+                      :title="
+                        t('request.removeFieldTitle', {
+                          kind: t('request.formField'),
+                        })
+                      "
+                      :disabled="editorDisabled"
+                      @click="removeFormField(entry.index)"
+                    >
+                      <Trash2 :size="15" aria-hidden="true" />
+                    </IconButton>
+                    <span v-else class="new-row-marker" aria-hidden="true">
+                      <Asterisk :size="15" />
+                    </span>
+                  </div>
                 </div>
-              </div>
+                <div
+                  v-if="expandedFormDescriptions.includes(entry.index)"
+                  class="field-description-row"
+                >
+                  <TextInput
+                    :model-value="entry.field.description ?? ''"
+                    :aria-label="t('documentation.fieldDescription')"
+                    :placeholder="
+                      t('documentation.fieldDescriptionPlaceholder')
+                    "
+                    :maxlength="4096"
+                    :disabled="editorDisabled"
+                    @update:model-value="entry.field.description = $event"
+                    @input="emitChange"
+                  />
+                </div>
+              </template>
             </div>
           </TabsPanel>
 
@@ -1823,6 +2078,19 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 @change="emit('changeVariables', $event)"
               />
             </template>
+          </TabsPanel>
+          <TabsPanel
+            v-if="activeTab === 'documentation'"
+            value="documentation"
+            class="request-documentation"
+          >
+            <DocumentationEditor
+              v-model:description="description"
+              v-model:notes="notes"
+              :disabled="editorDisabled"
+              @update:description="emitChange"
+              @update:notes="emitChange"
+            />
           </TabsPanel>
           <TabsPanel
             v-if="activeTab === 'versions'"

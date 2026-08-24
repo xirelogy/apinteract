@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Asterisk, PanelsTopLeft, Save, Trash2 } from "@lucide/vue";
+import {
+  Asterisk,
+  FilePenLine,
+  PanelsTopLeft,
+  Save,
+  Trash2,
+} from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import { defaultHeaderMergeMode } from "@/app/preferences/header-preferences";
@@ -34,6 +40,7 @@ import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
 import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 import ResourceDeleteDialog from "./ResourceDeleteDialog.vue";
 import VariableFieldsEditor from "./VariableFieldsEditor.vue";
+import DocumentationEditor from "./DocumentationEditor.vue";
 import { useRowReorder } from "@/view/presentation/controls/row-reorder";
 
 interface VariableFieldsEditorApi {
@@ -57,14 +64,20 @@ const emit = defineEmits<{
   preview: [names: readonly string[]];
   save: [
     name: string,
+    description: string,
+    notes: string,
     baseUrl: string,
     headers: readonly RequestField[],
     variables: readonly VariableWrite[],
   ];
 }>();
 const { t } = useI18n();
-const activeSection = ref<"headers" | "variables">("headers");
+const activeSection = ref<"headers" | "variables" | "documentation">("headers");
 const name = ref(props.draft?.name ?? props.workspace.name);
+const description = ref(
+  props.draft?.description ?? props.workspace.description,
+);
+const notes = ref(props.draft?.notes ?? props.workspace.notes);
 const baseUrl = ref(props.draft?.baseUrl ?? props.workspace.baseUrl);
 const deleteConfirmationOpen = ref(false);
 const headers = ref<RequestField[]>(
@@ -74,6 +87,7 @@ const headers = ref<RequestField[]>(
     createBlankHeaderField,
   ),
 );
+const expandedHeaderDescriptions = ref<RequestField[]>([]);
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 const variables = ref<readonly VariableWrite[]>(props.draft?.variables ?? []);
 const headerCount = computed(
@@ -93,11 +107,15 @@ const canSave = computed(
   () =>
     name.value.trim() !== "" &&
     meaningfulRequestFields(headers.value).every(
-      (header) => !header.enabled || header.name.trim() !== "",
+      (header) =>
+        (!header.enabled || header.name.trim() !== "") &&
+        ((header.description ?? "") === "" || header.name.trim() !== ""),
     ),
 );
 watch(previewSignature, scheduleVariablePreview, { immediate: true });
-watch([name, baseUrl, headers], publishDraft, { deep: true });
+watch([name, description, notes, baseUrl, headers], publishDraft, {
+  deep: true,
+});
 
 onBeforeUnmount(() => {
   if (previewTimer !== undefined) clearTimeout(previewTimer);
@@ -121,6 +139,17 @@ function removeHeader(index: number): void {
 /** Materializes the next workspace-header row after the trailing row is edited. */
 function updateHeader(): void {
   ensureTrailingBlankRequestField(headers.value, createBlankHeaderField);
+}
+
+/** Toggles one common-header description by row identity. */
+function toggleHeaderDescription(header: RequestField): void {
+  expandedHeaderDescriptions.value = expandedHeaderDescriptions.value.includes(
+    header,
+  )
+    ? expandedHeaderDescriptions.value.filter(
+        (candidate) => candidate !== header,
+      )
+    : [...expandedHeaderDescriptions.value, header];
 }
 
 /** Applies the global default when a workspace header is given a new name. */
@@ -151,6 +180,8 @@ const headerReorder = useRowReorder({
 function publishDraft(): void {
   emit("change", {
     name: name.value,
+    description: description.value,
+    notes: notes.value,
     baseUrl: baseUrl.value,
     headers: meaningfulRequestFields(headers.value),
     variables: variables.value,
@@ -181,6 +212,8 @@ function save(): void {
   emit(
     "save",
     name.value.trim(),
+    description.value,
+    notes.value,
     baseUrl.value.trim(),
     meaningfulRequestFields(headers.value),
     variableEditor.value?.writes() ?? [],
@@ -284,6 +317,14 @@ function save(): void {
               {{ t("environment.variables") }}
               <span class="tab-count">{{ variableCount }}</span>
             </TabsTrigger>
+            <TabsTrigger class="tab-button" value="documentation">
+              {{ t("documentation.title") }}
+              <span
+                v-if="description.trim() !== '' || notes.trim() !== ''"
+                class="tab-content-indicator"
+                :title="t('request.hasContent')"
+              ></span>
+            </TabsTrigger>
           </TabsList>
           <TabsPanel value="headers" class="collection-properties-section">
             <div class="collection-header-fields">
@@ -293,92 +334,128 @@ function save(): void {
                 <span>{{ t("common.fields.value") }}</span>
                 <span></span>
               </div>
-              <div
-                v-for="(header, index) in headers"
-                :key="index"
-                class="request-field-row"
-                :class="headerReorder.classes(index)"
-                @dragover.stop="headerReorder.updateDropTarget($event, index)"
-                @drop.stop="headerReorder.finishDrop($event)"
-              >
-                <CheckboxControl
-                  v-model="header.enabled"
-                  visually-hidden-label
-                  :label="
-                    t('request.enableField', {
-                      kind: t('request.headerField'),
-                      index: index + 1,
-                    })
-                  "
-                  :disabled="busy || !canEdit"
-                />
-                <TextInput
-                  v-model="header.name"
-                  class="field-cell-input"
-                  density="compact"
-                  font="mono"
-                  :placeholder="
-                    isBlankRequestField(header)
-                      ? t('collection.addHeader')
-                      : t('common.fields.name')
-                  "
-                  :aria-label="t('request.headerName', { index: index + 1 })"
-                  autocomplete="off"
-                  spellcheck="false"
-                  :disabled="busy || !canEdit"
-                  @input="updateHeaderName(index)"
-                />
-                <div class="header-value-field">
-                  <HeaderMergeModeToggle
-                    :model-value="header.mode ?? 'override'"
-                    :disabled="busy || !canEdit"
-                    @update:model-value="header.mode = $event"
-                  />
-                  <TextInput
-                    v-model="header.value"
-                    class="field-cell-input"
-                    density="compact"
-                    font="mono"
-                    :aria-label="t('request.headerValue', { index: index + 1 })"
-                    autocomplete="off"
-                    spellcheck="false"
-                    :disabled="busy || !canEdit"
-                    @input="updateHeader"
-                  />
-                </div>
-                <div class="row-actions">
-                  <RowReorderHandle
-                    v-if="!isBlankRequestField(header)"
+              <template v-for="(header, index) in headers" :key="index">
+                <div
+                  class="request-field-row"
+                  :class="headerReorder.classes(index)"
+                  @dragover.stop="headerReorder.updateDropTarget($event, index)"
+                  @drop.stop="headerReorder.finishDrop($event)"
+                >
+                  <CheckboxControl
+                    v-model="header.enabled"
+                    visually-hidden-label
                     :label="
-                      t('common.actions.reorderRow', {
-                        item: t('request.headerField'),
-                        index: index + 1,
-                      })
-                    "
-                    :disabled="busy || !canEdit"
-                    @drag-start="headerReorder.startDrag($event, index)"
-                    @drag-end="headerReorder.cancelDrag"
-                    @move="headerReorder.moveByKeyboard(index, $event)"
-                  />
-                  <IconButton
-                    v-if="canEdit && !isBlankRequestField(header)"
-                    size="compact"
-                    :label="
-                      t('request.removeField', {
+                      t('request.enableField', {
                         kind: t('request.headerField'),
                         index: index + 1,
                       })
                     "
-                    :disabled="busy"
-                    @click="removeHeader(index)"
-                  >
-                    <Trash2 :size="15" aria-hidden="true" />
-                  </IconButton>
-                  <span v-else class="new-row-marker" aria-hidden="true">
-                    <Asterisk :size="15" />
-                  </span>
+                    :disabled="busy || !canEdit"
+                  />
+                  <div class="field-key-cell">
+                    <TextInput
+                      v-model="header.name"
+                      class="field-cell-input"
+                      density="compact"
+                      font="mono"
+                      :placeholder="
+                        isBlankRequestField(header)
+                          ? t('collection.addHeader')
+                          : t('common.fields.name')
+                      "
+                      :aria-label="
+                        t('request.headerName', { index: index + 1 })
+                      "
+                      autocomplete="off"
+                      spellcheck="false"
+                      :disabled="busy || !canEdit"
+                      @input="updateHeaderName(index)"
+                    />
+                    <IconButton
+                      class="field-description-action"
+                      size="compact"
+                      :class="{
+                        'has-content': header.description?.trim() !== '',
+                      }"
+                      :label="t('documentation.editFieldDescription')"
+                      :disabled="
+                        busy || !canEdit || isBlankRequestField(header)
+                      "
+                      @click="toggleHeaderDescription(header)"
+                    >
+                      <FilePenLine :size="15" aria-hidden="true" />
+                    </IconButton>
+                  </div>
+                  <div class="header-value-field">
+                    <HeaderMergeModeToggle
+                      :model-value="header.mode ?? 'override'"
+                      :disabled="busy || !canEdit"
+                      @update:model-value="header.mode = $event"
+                    />
+                    <TextInput
+                      v-model="header.value"
+                      class="field-cell-input"
+                      density="compact"
+                      font="mono"
+                      :aria-label="
+                        t('request.headerValue', { index: index + 1 })
+                      "
+                      autocomplete="off"
+                      spellcheck="false"
+                      :disabled="busy || !canEdit"
+                      @input="updateHeader"
+                    />
+                  </div>
+                  <div class="row-actions">
+                    <RowReorderHandle
+                      v-if="!isBlankRequestField(header)"
+                      :label="
+                        t('common.actions.reorderRow', {
+                          item: t('request.headerField'),
+                          index: index + 1,
+                        })
+                      "
+                      :disabled="busy || !canEdit"
+                      @drag-start="headerReorder.startDrag($event, index)"
+                      @drag-end="headerReorder.cancelDrag"
+                      @move="headerReorder.moveByKeyboard(index, $event)"
+                    />
+                    <IconButton
+                      v-if="canEdit && !isBlankRequestField(header)"
+                      size="compact"
+                      :label="
+                        t('request.removeField', {
+                          kind: t('request.headerField'),
+                          index: index + 1,
+                        })
+                      "
+                      :disabled="busy"
+                      @click="removeHeader(index)"
+                    >
+                      <Trash2 :size="15" aria-hidden="true" />
+                    </IconButton>
+                    <span v-else class="new-row-marker" aria-hidden="true">
+                      <Asterisk :size="15" />
+                    </span>
+                  </div>
                 </div>
-              </div>
+                <div
+                  v-if="expandedHeaderDescriptions.includes(header)"
+                  class="field-description-row"
+                >
+                  <TextInput
+                    :model-value="header.description ?? ''"
+                    :aria-label="t('documentation.fieldDescription')"
+                    :placeholder="
+                      t('documentation.fieldDescriptionPlaceholder')
+                    "
+                    :maxlength="4096"
+                    :disabled="busy || !canEdit"
+                    @update:model-value="header.description = $event"
+                    @input="publishDraft"
+                  />
+                </div>
+              </template>
             </div>
           </TabsPanel>
           <TabsPanel value="variables" class="collection-properties-section">
@@ -391,6 +468,16 @@ function save(): void {
               :busy="busy"
               @count-change="variableCount = $event"
               @change="updateVariables"
+            />
+          </TabsPanel>
+          <TabsPanel
+            value="documentation"
+            class="collection-properties-section"
+          >
+            <DocumentationEditor
+              v-model:description="description"
+              v-model:notes="notes"
+              :disabled="busy || !canEdit"
             />
           </TabsPanel>
         </TabsRoot>

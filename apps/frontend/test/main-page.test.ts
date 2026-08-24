@@ -69,6 +69,8 @@ describe("MainPage", () => {
       workspaceId,
       parentCollectionId: null,
       name: "Versioned request",
+      description: "",
+      notes: "",
       method: "GET" as const,
       targetMode: "absolute" as const,
       targetUrl: "https://example.test",
@@ -92,6 +94,8 @@ describe("MainPage", () => {
           request,
           draft: {
             name: request.name,
+            description: "",
+            notes: "",
             method: request.method,
             targetMode: request.targetMode,
             targetUrl: request.targetUrl,
@@ -173,6 +177,8 @@ describe("MainPage", () => {
     const otherWorkspaceId = "019facab-1eee-765f-bd9f-ac2449151cf6";
     const draft = {
       name: "Temporary request",
+      description: "",
+      notes: "",
       method: "GET" as const,
       targetMode: "absolute" as const,
       targetUrl: "",

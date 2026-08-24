@@ -39,7 +39,7 @@
   --row-reorder-handle-width: calc(var(--control-height-compact) * 0.5);
   --row-actions-width: calc(
     var(--row-reorder-handle-width) + var(--space-1) +
-      var(--control-height-compact)
+      var(--control-height-compact) + var(--space-1)
   );
   --panel-header-height: 3rem;
   --request-tabs-height: 2.5rem;

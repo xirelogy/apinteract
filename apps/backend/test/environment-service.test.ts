@@ -49,7 +49,14 @@ describe("environment service", () => {
           { name: "base", kind: "value", value: "https://dev.example" },
           { name: "token", kind: "secret", value: "initial-secret" },
         ],
+        [],
+        "Development services",
+        "# Local environment\n\nShared development credentials.",
       );
+      expect(first).toMatchObject({
+        description: "Development services",
+        notes: "# Local environment\n\nShared development credentials.",
+      });
       await expect(
         fixture.environments.create(
           fixture.userId,
@@ -121,8 +128,15 @@ describe("environment service", () => {
             kind: "secret",
           },
         ],
+        undefined,
+        "Updated development services",
+        "Use this environment for local work.",
       );
       expect(preserved.name).toBe("DEVELOPMENT");
+      expect(preserved).toMatchObject({
+        description: "Updated development services",
+        notes: "Use this environment for local work.",
+      });
       expect(preserved.variables[1]).toMatchObject({ secretVersion: 1 });
       await expect(
         fixture.environments.update(

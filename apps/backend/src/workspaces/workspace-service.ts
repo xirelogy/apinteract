@@ -2,6 +2,11 @@ import type { Kysely, Transaction } from "kysely";
 
 import type { AuditService } from "../audit/audit-service.js";
 import {
+  validateFieldDescription,
+  validateResourceDescription,
+  validateResourceNotes,
+} from "../documentation/documentation.js";
+import {
   bytesToId,
   createEntityId,
   idToBytes,
@@ -19,6 +24,7 @@ export interface WorkspaceHeader {
   readonly enabled: boolean;
   /** Controls whether descendants retain or replace older same-name values. */
   readonly mode?: "override" | "append";
+  readonly description?: string;
 }
 
 export interface WorkspaceSummary {
@@ -28,6 +34,8 @@ export interface WorkspaceSummary {
 }
 
 export interface WorkspaceView extends WorkspaceSummary {
+  readonly description: string;
+  readonly notes: string;
   readonly baseUrl: string;
   readonly headers: readonly WorkspaceHeader[];
   readonly revision: number;
@@ -49,7 +57,12 @@ export class WorkspaceService {
   }
 
   /** Creates a workspace and assigns its creator the owner role atomically. */
-  async create(userId: EntityId, name: string): Promise<WorkspaceSummary> {
+  async create(
+    userId: EntityId,
+    name: string,
+    description = "",
+    notes = "",
+  ): Promise<WorkspaceSummary> {
     const workspaceId = createEntityId();
     const now = Date.now();
     await this.#database.transaction().execute(async (transaction) => {
@@ -58,6 +71,8 @@ export class WorkspaceService {
         .values({
           id: idToBytes(workspaceId),
           name: normalizeName(name),
+          description_text: validateResourceDescription(description),
+          notes_markdown: validateResourceNotes(notes),
           revision: 0,
           headers_json: "[]",
           base_url_template: "",
@@ -98,6 +113,8 @@ export class WorkspaceService {
       .select([
         "workspace.id",
         "workspace.name",
+        "workspace.description_text",
+        "workspace.notes_markdown",
         "workspace.revision",
         "workspace.headers_json",
         "workspace.base_url_template",
@@ -114,6 +131,8 @@ export class WorkspaceService {
       workspaceId: bytesToId(row.id),
       name: row.name,
       role: row.role,
+      description: row.description_text,
+      notes: row.notes_markdown,
       baseUrl: row.base_url_template,
       headers: parseWorkspaceHeaders(row.headers_json),
       revision: row.revision,
@@ -128,15 +147,26 @@ export class WorkspaceService {
     name: string,
     headers: readonly WorkspaceHeader[],
     baseUrl = "",
+    description = "",
+    notes = "",
   ): Promise<WorkspaceView> {
     const normalizedName = normalizeName(name);
     const normalizedHeaders = validateWorkspaceHeaders(headers);
     const normalizedBaseUrl = validateBaseUrlTemplate(baseUrl);
+    const normalizedDescription = validateResourceDescription(description);
+    const normalizedNotes = validateResourceNotes(notes);
     return this.#database.transaction().execute(async (transaction) => {
       await this.requireCanEdit(transaction, userId, workspaceId);
       const row = await transaction
         .selectFrom("workspaces")
-        .select(["name", "revision", "headers_json", "base_url_template"])
+        .select([
+          "name",
+          "description_text",
+          "notes_markdown",
+          "revision",
+          "headers_json",
+          "base_url_template",
+        ])
         .where("id", "=", idToBytes(workspaceId))
         .where("deleted_at", "is", null)
         .executeTakeFirst();
@@ -155,6 +185,8 @@ export class WorkspaceService {
         .executeTakeFirstOrThrow();
       if (
         row.name === normalizedName &&
+        row.description_text === normalizedDescription &&
+        row.notes_markdown === normalizedNotes &&
         row.headers_json === headersJson &&
         row.base_url_template === normalizedBaseUrl
       ) {
@@ -162,6 +194,8 @@ export class WorkspaceService {
           workspaceId,
           name: normalizedName,
           role: membership.role,
+          description: normalizedDescription,
+          notes: normalizedNotes,
           baseUrl: normalizedBaseUrl,
           headers: normalizedHeaders,
           revision: row.revision,
@@ -172,6 +206,8 @@ export class WorkspaceService {
         .updateTable("workspaces")
         .set({
           name: normalizedName,
+          description_text: normalizedDescription,
+          notes_markdown: normalizedNotes,
           headers_json: headersJson,
           base_url_template: normalizedBaseUrl,
           revision,
@@ -190,6 +226,8 @@ export class WorkspaceService {
         data: {
           revision,
           nameChanged: row.name !== normalizedName,
+          descriptionChanged: row.description_text !== normalizedDescription,
+          notesChanged: row.notes_markdown !== normalizedNotes,
           headersChanged: row.headers_json !== headersJson,
           baseUrlChanged: row.base_url_template !== normalizedBaseUrl,
         },
@@ -198,6 +236,8 @@ export class WorkspaceService {
         workspaceId,
         name: normalizedName,
         role: membership.role,
+        description: normalizedDescription,
+        notes: normalizedNotes,
         baseUrl: normalizedBaseUrl,
         headers: normalizedHeaders,
         revision,
@@ -391,7 +431,15 @@ function validateWorkspaceHeaders(
     ) {
       throw new Error("Invalid workspace header");
     }
-    return { ...header, mode: header.mode ?? "override" };
+    const description = validateFieldDescription(header.description);
+    if (description !== "" && header.name.trim() === "") {
+      throw new Error("A documented workspace header requires a name");
+    }
+    return {
+      ...header,
+      mode: header.mode ?? "override",
+      ...(description === "" ? {} : { description }),
+    };
   });
 }
 

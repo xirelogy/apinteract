@@ -73,6 +73,7 @@ describe("VariableProfileDialog", () => {
           {
             variableId: "019facab-1eee-765f-bd9f-ac2449151be3",
             name: "optional-token",
+            description: "",
             kind: "secret",
             hasValue: false,
             secretVersion: 0,
@@ -114,6 +115,7 @@ describe("VariableProfileDialog", () => {
             {
               variableId: "019facab-1eee-765f-bd9f-ac2449151be2",
               name: "token",
+              description: "",
               kind: "secret",
               hasValue: true,
               secretVersion: 4,

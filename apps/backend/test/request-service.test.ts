@@ -1044,11 +1044,28 @@ describe("RequestService draft updates", () => {
         "Source",
         "POST",
         "https://example.test/items",
-        [{ name: "page", value: "2", enabled: true }],
-        [{ name: "Accept", value: "application/json", enabled: true }],
+        [
+          {
+            name: "page",
+            value: "2",
+            enabled: true,
+            description: "Pagination",
+          },
+        ],
+        [
+          {
+            name: "Accept",
+            value: "application/json",
+            enabled: true,
+            description: "Response format",
+          },
+        ],
         '{"source":true}',
         "asdk.request.header.set('X-Before', '1');",
         "asdk.test('status', () => asdk.expect(true).toBeTruthy());",
+        "absolute",
+        undefined,
+        { description: "Source request", notes: "# Source notes" },
       );
       const after = await requests.createRequest(
         userId,
@@ -1067,7 +1084,12 @@ describe("RequestService draft updates", () => {
         source.requestId,
         0,
         [
-          { name: "plain", kind: "value", value: "visible" },
+          {
+            name: "plain",
+            kind: "value",
+            value: "visible",
+            description: "Visible value",
+          },
           { name: "stored", kind: "secret", value: "top-secret" },
           { name: "empty", kind: "secret", value: "clear-me" },
         ],
@@ -1101,6 +1123,27 @@ describe("RequestService draft updates", () => {
         createEntityId(),
         source.requestId,
       );
+      const sourceRevisions = await requests.listRevisions(
+        userId,
+        source.requestId,
+      );
+      expect(sourceRevisions).toHaveLength(1);
+      expect(
+        await requests.getRevision(
+          userId,
+          source.requestId,
+          sourceRevisions[0]!.revisionId,
+        ),
+      ).toMatchObject({
+        request: {
+          description: "Source request",
+          notes: "# Source notes",
+          query: [expect.objectContaining({ description: "Pagination" })],
+          headers: [
+            expect.objectContaining({ description: "Response format" }),
+          ],
+        },
+      });
 
       await expect(
         requests.duplicate(viewerId, source.requestId, "Forbidden copy"),
@@ -1114,6 +1157,8 @@ describe("RequestService draft updates", () => {
 
       expect(duplicate).toMatchObject({
         name: "Source copy",
+        description: "Source request",
+        notes: "# Source notes",
         method: source.method,
         targetUrl: source.targetUrl,
         query: source.query,
@@ -1144,6 +1189,7 @@ describe("RequestService draft updates", () => {
           name: "plain",
           kind: "value",
           value: "visible",
+          description: "Visible value",
         }),
         expect.objectContaining({
           name: "stored",
@@ -1260,14 +1306,30 @@ describe("RequestService draft updates", () => {
         request.name,
         "POST",
         "https://example.test/second",
-        [{ name: "page", value: "2", enabled: true }],
-        [{ name: "X-Local", value: "second", enabled: true }],
+        [
+          {
+            name: "page",
+            value: "2",
+            enabled: true,
+            description: "Page number",
+          },
+        ],
+        [
+          {
+            name: "X-Local",
+            value: "second",
+            enabled: true,
+            description: "Local header",
+          },
+        ],
         "",
         "",
         "",
         "absolute",
         null,
         { kind: "text", contentType: "application/json", text: "" },
+        "Request summary",
+        "# Request notes",
       );
       const [firstRevision] = await requests.listRevisions(
         userId,
@@ -1294,6 +1356,8 @@ describe("RequestService draft updates", () => {
       ).toMatchObject({
         name: "Release candidate",
         request: {
+          description: "Request summary",
+          notes: "# Request notes",
           method: "POST",
           targetUrl: "https://example.test/second",
           body: "",
@@ -1302,7 +1366,8 @@ describe("RequestService draft updates", () => {
             contentType: "application/json",
             text: "",
           },
-          headers: [{ name: "X-Local", value: "second", enabled: true }],
+          query: [expect.objectContaining({ description: "Page number" })],
+          headers: [expect.objectContaining({ description: "Local header" })],
         },
       });
       const changed = await requests.update(
@@ -1323,6 +1388,8 @@ describe("RequestService draft updates", () => {
         changed.draftRevision,
       );
       expect(restored).toMatchObject({
+        description: "Request summary",
+        notes: "# Request notes",
         method: "POST",
         targetUrl: "https://example.test/second",
         body: "",
@@ -1350,6 +1417,20 @@ describe("RequestService draft updates", () => {
           text: "",
         },
       });
+      expect(JSON.stringify(prepared.request)).not.toContain("Page number");
+      expect(JSON.stringify(prepared.request)).not.toContain("Local header");
+      expect(JSON.stringify(prepared.request)).not.toContain("Request summary");
+      expect(JSON.stringify(prepared.request)).not.toContain("Request notes");
+      expect(JSON.stringify(prepared.templateRequest)).not.toContain(
+        "Request summary",
+      );
+      const executionSnapshot = await database.db
+        .selectFrom("executions")
+        .select("snapshot_json")
+        .where("id", "=", idToBytes(prepared.executionId))
+        .executeTakeFirstOrThrow();
+      expect(executionSnapshot.snapshot_json).not.toContain("Request summary");
+      expect(executionSnapshot.snapshot_json).not.toContain("Request notes");
       expect(prepared.request.headers).toContainEqual({
         name: "Content-Type",
         value: "application/json",

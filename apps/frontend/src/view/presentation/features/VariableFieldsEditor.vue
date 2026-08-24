@@ -5,6 +5,7 @@ import {
   CircleX,
   Lock,
   LockKeyhole,
+  FilePenLine,
   RotateCcw,
   Trash2,
 } from "@lucide/vue";
@@ -27,6 +28,7 @@ interface DraftVariable {
   kind: "value" | "secret" | "alias" | "unset";
   value: string;
   target: string;
+  description: string;
   hasValue: boolean;
   secretTouched: boolean;
   clearValue: boolean;
@@ -75,6 +77,7 @@ const variables = ref<DraftVariable[]>([
       kind: variable.kind,
       value: variable.kind === "value" ? variable.value : replacement,
       target: variable.kind === "alias" ? variable.target : "",
+      description: variable.description ?? "",
       hasValue: persisted?.kind === "secret" && persisted.hasValue,
       secretTouched: replacement !== "",
       clearValue:
@@ -91,6 +94,8 @@ const kindOptions = computed(() => [
   { value: "alias", label: t("environment.kind.alias") },
   { value: "unset", label: t("environment.kind.unset") },
 ]);
+const expandedDescriptions = ref<symbol[]>([]);
+const expandedInheritedDescriptions = ref<string[]>([]);
 
 /** Creates the presentation-only row used to begin a new variable. */
 function createBlankVariable(): DraftVariable {
@@ -100,6 +105,7 @@ function createBlankVariable(): DraftVariable {
     kind: "value",
     value: "",
     target: "",
+    description: "",
     hasValue: false,
     secretTouched: false,
     clearValue: false,
@@ -114,9 +120,33 @@ function isBlankVariable(variable: DraftVariable): boolean {
     variable.kind === "value" &&
     variable.value === "" &&
     variable.target === "" &&
+    variable.description === "" &&
     !variable.secretTouched &&
     !variable.clearValue
   );
+}
+
+/** Toggles one row's inline description editor without coupling it to position. */
+function toggleDescription(rowKey: symbol): void {
+  expandedDescriptions.value = expandedDescriptions.value.includes(rowKey)
+    ? expandedDescriptions.value.filter((candidate) => candidate !== rowKey)
+    : [...expandedDescriptions.value, rowKey];
+}
+
+/** Builds the stable display key for one inherited variable declaration. */
+function inheritedDescriptionKey(inherited: InheritedVariable): string {
+  return `${inherited.source.scope}:${inherited.source.scopeId}:${inherited.variable.variableId}`;
+}
+
+/** Toggles one inherited variable's read-only description. */
+function toggleInheritedDescription(inherited: InheritedVariable): void {
+  const key = inheritedDescriptionKey(inherited);
+  expandedInheritedDescriptions.value =
+    expandedInheritedDescriptions.value.includes(key)
+      ? expandedInheritedDescriptions.value.filter(
+          (candidate) => candidate !== key,
+        )
+      : [...expandedInheritedDescriptions.value, key];
 }
 
 /** Appends the next blank row after the current trailing row becomes meaningful. */
@@ -269,6 +299,9 @@ function writes(): VariableWrite[] {
           ? {}
           : { variableId: variable.variableId }),
         name: variable.name,
+        ...(variable.description === ""
+          ? {}
+          : { description: variable.description }),
       };
       switch (variable.kind) {
         case "value":
@@ -299,241 +332,303 @@ defineExpose({ writes });
       <span>{{ t("common.fields.valueOrTarget") }}</span>
       <span></span>
     </div>
-    <div
+    <template
       v-for="(inherited, index) in inheritedVariables"
-      :key="`${inherited.source.scope}:${inherited.source.scopeId}:${inherited.variable.variableId}`"
-      class="variable-field-row inherited-variable-row"
-      :class="{
-        'is-variable-overridden': isInheritedVariableOverridden(inherited),
-      }"
+      :key="inheritedDescriptionKey(inherited)"
     >
-      <TextInput
-        :model-value="inherited.variable.name"
-        class="field-cell-input"
-        density="compact"
-        font="mono"
-        :aria-label="t('variables.inheritedName', { index: index + 1 })"
-        disabled
-      />
-      <div class="variable-type-cell">
-        <SelectMenu
-          :model-value="inherited.variable.kind"
-          :options="kindOptions"
-          :label="t('variables.inheritedKind', { index: index + 1 })"
-          density="compact"
-          disabled
-        />
-      </div>
-      <TextInput
-        v-if="inherited.variable.kind === 'value'"
-        :model-value="inherited.variable.value"
-        class="field-cell-input"
-        density="compact"
-        font="mono"
-        :aria-label="t('variables.inheritedValue', { index: index + 1 })"
-        readonly
-      />
-      <TextInput
-        v-else-if="inherited.variable.kind === 'alias'"
-        :model-value="inherited.variable.target"
-        class="field-cell-input"
-        density="compact"
-        font="mono"
-        :aria-label="t('variables.inheritedTarget', { index: index + 1 })"
-        readonly
-      />
-      <TextInput
-        v-else-if="inherited.variable.kind === 'secret'"
-        model-value=""
-        class="field-cell-input"
-        density="compact"
-        font="mono"
-        type="password"
-        :placeholder="
-          inherited.variable.hasValue
-            ? t('environment.secretStoredPlaceholder')
-            : t('environment.enterSecretValue')
-        "
-        :aria-label="t('variables.inheritedValue', { index: index + 1 })"
-        readonly
-      />
-      <span
-        v-else
-        class="variable-field-empty-value"
-        :aria-label="t('environment.noValue')"
-      >
-        —
-      </span>
-      <span
-        class="inherited-variable-indicator"
-        role="img"
-        :aria-label="inheritedVariableDescription(inherited)"
-        :title="inheritedVariableDescription(inherited)"
-      >
-        <Lock :size="14" aria-hidden="true" />
-      </span>
-    </div>
-    <div
-      v-for="(variable, index) in variables"
-      :key="variable.rowKey"
-      class="variable-field-row"
-      :class="variableReorder.classes(index)"
-      @dragover.stop="variableReorder.updateDropTarget($event, index)"
-      @drop.stop="variableReorder.finishDrop($event)"
-    >
-      <TextInput
-        v-model="variable.name"
-        class="field-cell-input"
-        density="compact"
-        font="mono"
-        :disabled="busy || !canEdit"
-        :placeholder="
-          isBlankVariable(variable)
-            ? t('environment.addVariable')
-            : t('common.fields.name')
-        "
-        :aria-label="t('environment.variableName', { index: index + 1 })"
-        autocomplete="off"
-        spellcheck="false"
-        @input="updateVariable"
-      />
       <div
-        class="variable-type-cell"
-        :title="
-          variable.variableId === undefined
-            ? undefined
-            : t('variables.typeLocked')
-        "
+        class="variable-field-row inherited-variable-row"
+        :class="{
+          'is-variable-overridden': isInheritedVariableOverridden(inherited),
+        }"
       >
-        <SelectMenu
-          :model-value="variable.kind"
-          :options="kindOptions"
-          :label="t('environment.variableKind', { index: index + 1 })"
+        <div class="field-key-cell">
+          <TextInput
+            :model-value="inherited.variable.name"
+            class="field-cell-input"
+            density="compact"
+            font="mono"
+            :aria-label="t('variables.inheritedName', { index: index + 1 })"
+            disabled
+          />
+          <IconButton
+            size="compact"
+            class="field-description-action"
+            :class="{
+              'has-content': inherited.variable.description.trim() !== '',
+            }"
+            :label="t('documentation.viewFieldDescription')"
+            :disabled="inherited.variable.description.trim() === ''"
+            @click="toggleInheritedDescription(inherited)"
+          >
+            <FilePenLine :size="15" aria-hidden="true" />
+          </IconButton>
+        </div>
+        <div class="variable-type-cell">
+          <SelectMenu
+            :model-value="inherited.variable.kind"
+            :options="kindOptions"
+            :label="t('variables.inheritedKind', { index: index + 1 })"
+            density="compact"
+            disabled
+          />
+        </div>
+        <TextInput
+          v-if="inherited.variable.kind === 'value'"
+          :model-value="inherited.variable.value"
+          class="field-cell-input"
           density="compact"
-          :disabled="busy || !canEdit || variable.variableId !== undefined"
-          @update:model-value="changeKind(variable, $event)"
-        />
-      </div>
-      <TextInput
-        v-if="variable.kind === 'value'"
-        v-model="variable.value"
-        class="field-cell-input"
-        density="compact"
-        font="mono"
-        :disabled="busy || !canEdit"
-        :placeholder="t('common.fields.value')"
-        :aria-label="t('environment.variableValue', { index: index + 1 })"
-        autocomplete="off"
-        spellcheck="false"
-        @input="updateVariable"
-      />
-      <TextInput
-        v-else-if="variable.kind === 'alias'"
-        v-model="variable.target"
-        class="field-cell-input"
-        density="compact"
-        font="mono"
-        :disabled="busy || !canEdit"
-        :placeholder="t('common.fields.target')"
-        :aria-label="t('environment.aliasTarget', { index: index + 1 })"
-        autocomplete="off"
-        spellcheck="false"
-        @input="updateVariable"
-      />
-      <div
-        v-else-if="variable.kind === 'secret'"
-        class="secret-input-shell"
-        :data-secret-state="secretState(variable)"
-      >
-        <LockKeyhole
-          v-if="secretState(variable) === 'stored'"
-          class="secret-input-lock"
-          :size="15"
-          aria-hidden="true"
+          font="mono"
+          :aria-label="t('variables.inheritedValue', { index: index + 1 })"
+          readonly
         />
         <TextInput
-          :model-value="variable.value"
-          class="secret-input"
+          v-else-if="inherited.variable.kind === 'alias'"
+          :model-value="inherited.variable.target"
+          class="field-cell-input"
+          density="compact"
+          font="mono"
+          :aria-label="t('variables.inheritedTarget', { index: index + 1 })"
+          readonly
+        />
+        <TextInput
+          v-else-if="inherited.variable.kind === 'secret'"
+          model-value=""
+          class="field-cell-input"
           density="compact"
           font="mono"
           type="password"
-          :disabled="busy || !canEdit"
-          autocomplete="new-password"
-          :placeholder="secretPlaceholder(variable)"
-          :aria-label="t('environment.secretValue', { index: index + 1 })"
-          :aria-describedby="secretDescriptionId(index)"
-          @update:model-value="updateSecret(variable, $event)"
-        />
-        <IconButton
-          v-if="secretState(variable) === 'stored' && canEdit"
-          class="secret-input-action"
-          size="compact"
-          :label="t('environment.clearStoredSecret')"
-          :disabled="busy"
-          @click="clearSecret(variable)"
-        >
-          <CircleX :size="16" aria-hidden="true" />
-        </IconButton>
-        <IconButton
-          v-else-if="secretState(variable) === 'replacement' && canEdit"
-          class="secret-input-action"
-          size="compact"
-          :label="t('environment.discardSecretReplacement')"
-          :disabled="busy"
-          @click="discardSecretReplacement(variable)"
-        >
-          <CircleX :size="16" aria-hidden="true" />
-        </IconButton>
-        <IconButton
-          v-else-if="secretState(variable) === 'pending-clear' && canEdit"
-          class="secret-input-action"
-          size="compact"
-          :label="t('environment.keepStoredSecret')"
-          :disabled="busy"
-          @click="restoreStoredSecret(variable)"
-        >
-          <RotateCcw :size="16" aria-hidden="true" />
-        </IconButton>
-        <span :id="secretDescriptionId(index)" class="visually-hidden">
-          {{ secretDescription(variable) }}
-        </span>
-      </div>
-      <span
-        v-else
-        class="variable-field-empty-value"
-        :aria-label="t('environment.noValue')"
-      >
-        —
-      </span>
-      <div class="row-actions">
-        <RowReorderHandle
-          v-if="!isBlankVariable(variable)"
-          :label="
-            t('common.actions.reorderRow', {
-              item: t('environment.variables'),
-              index: index + 1,
-            })
+          :placeholder="
+            inherited.variable.hasValue
+              ? t('environment.secretStoredPlaceholder')
+              : t('environment.enterSecretValue')
           "
-          :disabled="busy || !canEdit"
-          @drag-start="variableReorder.startDrag($event, index)"
-          @drag-end="variableReorder.cancelDrag"
-          @move="variableReorder.moveByKeyboard(index, $event)"
+          :aria-label="t('variables.inheritedValue', { index: index + 1 })"
+          readonly
         />
-        <IconButton
-          v-if="canEdit && !isBlankVariable(variable)"
-          class="compact-icon-button"
-          size="compact"
-          :label="t('environment.removeVariable', { index: index + 1 })"
-          :title="t('environment.removeVariableTitle')"
-          :disabled="busy"
-          @click="removeVariable(index)"
+        <span
+          v-else
+          class="variable-field-empty-value"
+          :aria-label="t('environment.noValue')"
         >
-          <Trash2 :size="16" aria-hidden="true" />
-        </IconButton>
-        <span v-else class="new-row-marker" aria-hidden="true">
-          <Asterisk :size="16" />
+          —
         </span>
+        <div class="row-actions">
+          <span
+            class="inherited-variable-indicator"
+            role="img"
+            :aria-label="inheritedVariableDescription(inherited)"
+            :title="inheritedVariableDescription(inherited)"
+          >
+            <Lock :size="14" aria-hidden="true" />
+          </span>
+        </div>
       </div>
-    </div>
+      <div
+        v-if="
+          expandedInheritedDescriptions.includes(
+            inheritedDescriptionKey(inherited),
+          )
+        "
+        class="field-description-row inherited-field-description"
+        :class="{
+          'is-variable-overridden': isInheritedVariableOverridden(inherited),
+        }"
+      >
+        <TextInput
+          :model-value="inherited.variable.description"
+          :aria-label="t('documentation.fieldDescription')"
+          :placeholder="t('documentation.fieldDescription')"
+          disabled
+        />
+      </div>
+    </template>
+    <template v-for="(variable, index) in variables" :key="variable.rowKey">
+      <div
+        class="variable-field-row"
+        :class="variableReorder.classes(index)"
+        @dragover.stop="variableReorder.updateDropTarget($event, index)"
+        @drop.stop="variableReorder.finishDrop($event)"
+      >
+        <div class="field-key-cell">
+          <TextInput
+            v-model="variable.name"
+            class="field-cell-input"
+            density="compact"
+            font="mono"
+            :disabled="busy || !canEdit"
+            :placeholder="
+              isBlankVariable(variable)
+                ? t('environment.addVariable')
+                : t('common.fields.name')
+            "
+            :aria-label="t('environment.variableName', { index: index + 1 })"
+            autocomplete="off"
+            spellcheck="false"
+            @input="updateVariable"
+          />
+          <IconButton
+            class="field-description-action"
+            size="compact"
+            :class="{ 'has-content': variable.description.trim() !== '' }"
+            :label="t('documentation.editFieldDescription')"
+            :disabled="busy || !canEdit || isBlankVariable(variable)"
+            @click="toggleDescription(variable.rowKey)"
+          >
+            <FilePenLine :size="15" aria-hidden="true" />
+          </IconButton>
+        </div>
+        <div
+          class="variable-type-cell"
+          :title="
+            variable.variableId === undefined
+              ? undefined
+              : t('variables.typeLocked')
+          "
+        >
+          <SelectMenu
+            :model-value="variable.kind"
+            :options="kindOptions"
+            :label="t('environment.variableKind', { index: index + 1 })"
+            density="compact"
+            :disabled="busy || !canEdit || variable.variableId !== undefined"
+            @update:model-value="changeKind(variable, $event)"
+          />
+        </div>
+        <TextInput
+          v-if="variable.kind === 'value'"
+          v-model="variable.value"
+          class="field-cell-input"
+          density="compact"
+          font="mono"
+          :disabled="busy || !canEdit"
+          :placeholder="t('common.fields.value')"
+          :aria-label="t('environment.variableValue', { index: index + 1 })"
+          autocomplete="off"
+          spellcheck="false"
+          @input="updateVariable"
+        />
+        <TextInput
+          v-else-if="variable.kind === 'alias'"
+          v-model="variable.target"
+          class="field-cell-input"
+          density="compact"
+          font="mono"
+          :disabled="busy || !canEdit"
+          :placeholder="t('common.fields.target')"
+          :aria-label="t('environment.aliasTarget', { index: index + 1 })"
+          autocomplete="off"
+          spellcheck="false"
+          @input="updateVariable"
+        />
+        <div
+          v-else-if="variable.kind === 'secret'"
+          class="secret-input-shell"
+          :data-secret-state="secretState(variable)"
+        >
+          <LockKeyhole
+            v-if="secretState(variable) === 'stored'"
+            class="secret-input-lock"
+            :size="15"
+            aria-hidden="true"
+          />
+          <TextInput
+            :model-value="variable.value"
+            class="secret-input"
+            density="compact"
+            font="mono"
+            type="password"
+            :disabled="busy || !canEdit"
+            autocomplete="new-password"
+            :placeholder="secretPlaceholder(variable)"
+            :aria-label="t('environment.secretValue', { index: index + 1 })"
+            :aria-describedby="secretDescriptionId(index)"
+            @update:model-value="updateSecret(variable, $event)"
+          />
+          <IconButton
+            v-if="secretState(variable) === 'stored' && canEdit"
+            class="secret-input-action"
+            size="compact"
+            :label="t('environment.clearStoredSecret')"
+            :disabled="busy"
+            @click="clearSecret(variable)"
+          >
+            <CircleX :size="16" aria-hidden="true" />
+          </IconButton>
+          <IconButton
+            v-else-if="secretState(variable) === 'replacement' && canEdit"
+            class="secret-input-action"
+            size="compact"
+            :label="t('environment.discardSecretReplacement')"
+            :disabled="busy"
+            @click="discardSecretReplacement(variable)"
+          >
+            <CircleX :size="16" aria-hidden="true" />
+          </IconButton>
+          <IconButton
+            v-else-if="secretState(variable) === 'pending-clear' && canEdit"
+            class="secret-input-action"
+            size="compact"
+            :label="t('environment.keepStoredSecret')"
+            :disabled="busy"
+            @click="restoreStoredSecret(variable)"
+          >
+            <RotateCcw :size="16" aria-hidden="true" />
+          </IconButton>
+          <span :id="secretDescriptionId(index)" class="visually-hidden">
+            {{ secretDescription(variable) }}
+          </span>
+        </div>
+        <span
+          v-else
+          class="variable-field-empty-value"
+          :aria-label="t('environment.noValue')"
+        >
+          —
+        </span>
+        <div class="row-actions">
+          <RowReorderHandle
+            v-if="!isBlankVariable(variable)"
+            :label="
+              t('common.actions.reorderRow', {
+                item: t('environment.variables'),
+                index: index + 1,
+              })
+            "
+            :disabled="busy || !canEdit"
+            @drag-start="variableReorder.startDrag($event, index)"
+            @drag-end="variableReorder.cancelDrag"
+            @move="variableReorder.moveByKeyboard(index, $event)"
+          />
+          <IconButton
+            v-if="canEdit && !isBlankVariable(variable)"
+            class="compact-icon-button"
+            size="compact"
+            :label="t('environment.removeVariable', { index: index + 1 })"
+            :title="t('environment.removeVariableTitle')"
+            :disabled="busy"
+            @click="removeVariable(index)"
+          >
+            <Trash2 :size="16" aria-hidden="true" />
+          </IconButton>
+          <span v-else class="new-row-marker" aria-hidden="true">
+            <Asterisk :size="16" />
+          </span>
+        </div>
+      </div>
+      <div
+        v-if="expandedDescriptions.includes(variable.rowKey)"
+        class="field-description-row"
+      >
+        <TextInput
+          v-model="variable.description"
+          :aria-label="t('documentation.fieldDescription')"
+          :placeholder="t('documentation.fieldDescriptionPlaceholder')"
+          :maxlength="4096"
+          :disabled="busy || !canEdit"
+          @input="updateVariable"
+        />
+      </div>
+    </template>
   </div>
 </template>

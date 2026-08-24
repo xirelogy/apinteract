@@ -13,6 +13,7 @@ const RowReorderHost = defineComponent({
     const reorder = useRowReorder({
       canMove: (index) =>
         rows.value[index] !== undefined && rows.value[index] !== "",
+      /** Moves one fixture row while preserving the trailing blank entry. */
       move(fromIndex, toIndex) {
         const [row] = rows.value.splice(fromIndex, 1);
         if (row !== undefined) rows.value.splice(toIndex, 0, row);

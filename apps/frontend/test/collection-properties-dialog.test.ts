@@ -75,6 +75,8 @@ describe("CollectionPropertiesDialog", () => {
           workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
           parentCollectionId: null,
           name: "Examples",
+          description: "",
+          notes: "",
           pathPrefix: "https://<<host>>",
           inheritedTarget: "https://<<parent_host>>/root",
           effectivePath: "https://<<host>>",
@@ -231,6 +233,8 @@ describe("CollectionPropertiesDialog", () => {
           workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
           parentCollectionId: null,
           name: "Examples",
+          description: "",
+          notes: "",
           pathPrefix: "",
           inheritedTarget: "",
           effectivePath: "",
@@ -264,6 +268,9 @@ describe("CollectionPropertiesDialog", () => {
     await wrapper
       .get('input[aria-label="Collection name"]')
       .setValue("Renamed examples");
+    await wrapper
+      .get('input[aria-label="Description"]')
+      .setValue("Example operations");
     const collectionHeader = wrapper.get('input[aria-label="Header name 1"]');
     expect(collectionHeader.attributes("placeholder")).toBe(
       "Add common header",
@@ -324,6 +331,8 @@ describe("CollectionPropertiesDialog", () => {
     expect(wrapper.emitted("save")).toEqual([
       [
         "Renamed examples",
+        "Example operations",
+        "",
         "/v1/examples",
         [
           {
@@ -360,6 +369,8 @@ describe("CollectionPropertiesDialog", () => {
           workspaceId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
           parentCollectionId: null,
           name: "Examples",
+          description: "",
+          notes: "",
           pathPrefix: "",
           inheritedTarget: "",
           effectivePath: "",
@@ -417,6 +428,8 @@ describe("WorkspacePropertiesDialog", () => {
         workspace: {
           workspaceId,
           name: "Platform",
+          description: "",
+          notes: "",
           role: "owner",
           baseUrl: "https://<<host>>",
           headers: [],
@@ -498,6 +511,8 @@ describe("WorkspacePropertiesDialog", () => {
         workspace: {
           workspaceId,
           name: "Platform",
+          description: "",
+          notes: "",
           role: "owner",
           baseUrl: "",
           headers: [],
@@ -558,6 +573,8 @@ describe("WorkspacePropertiesDialog", () => {
     expect(wrapper.emitted("save")).toEqual([
       [
         "Platform",
+        "",
+        "",
         "https://api.example.test",
         [
           {
@@ -586,6 +603,8 @@ describe("WorkspacePropertiesDialog", () => {
         workspace: {
           workspaceId,
           name: "Platform",
+          description: "",
+          notes: "",
           role: "owner",
           baseUrl: "",
           headers: [],

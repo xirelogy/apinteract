@@ -14,7 +14,12 @@ describe("import providers", () => {
       name: "pets.json",
       text: JSON.stringify({
         openapi: "3.1.0",
-        info: { title: "Pet API", version: "1" },
+        info: {
+          title: "Pet API",
+          summary: "Pet operations",
+          description: "# Pet API notes",
+          version: "1",
+        },
         servers: [{ url: "https://api.example.test/v1" }],
         components: {
           securitySchemes: {
@@ -34,11 +39,13 @@ describe("import providers", () => {
             ],
             get: {
               summary: "Get pet",
+              description: "Returns one pet.",
               parameters: [
                 {
                   name: "include",
                   in: "query",
                   schema: { type: "string" },
+                  description: "Related resources to include",
                 },
               ],
             },
@@ -65,6 +72,8 @@ describe("import providers", () => {
 
     expect(plan.providerId).toBe("openapi-json");
     expect(plan.suggestedName).toBe("Pet API");
+    expect(plan.description).toBe("Pet operations");
+    expect(plan.notes).toBe("# Pet API notes");
     expect(plan.pathPrefix).toBe("https://api.example.test/v1");
     expect(plan.variables).toEqual([
       { name: "petId", kind: "value", value: "p-1" },
@@ -81,10 +90,19 @@ describe("import providers", () => {
     expect(plan.requests).toHaveLength(2);
     expect(plan.requests[0]).toMatchObject({
       name: "Get pet",
+      description: "Get pet",
+      notes: "Returns one pet.",
       method: "GET",
       targetMode: "composed",
       targetUrl: "",
-      query: [{ name: "include", value: "", enabled: false }],
+      query: [
+        {
+          name: "include",
+          value: "",
+          enabled: false,
+          description: "Related resources to include",
+        },
+      ],
       headers: [
         {
           name: "Authorization",
@@ -197,12 +215,22 @@ describe("import providers", () => {
           "/items/{id}": {
             get: {
               parameters: [
-                { name: "id", in: "path", schema: { default: "common" } },
+                {
+                  name: "id",
+                  in: "path",
+                  description: "Canonical item identifier",
+                  schema: { default: "common" },
+                },
               ],
             },
             post: {
               parameters: [
-                { name: "id", in: "path", schema: { default: "special" } },
+                {
+                  name: "id",
+                  in: "path",
+                  description: "Alternate item identifier",
+                  schema: { default: "special" },
+                },
               ],
             },
             delete: {
@@ -216,7 +244,12 @@ describe("import providers", () => {
     });
 
     expect(plan.variables).toEqual([
-      { name: "id", kind: "value", value: "common" },
+      {
+        name: "id",
+        kind: "value",
+        value: "common",
+        description: "Canonical item identifier",
+      },
     ]);
     expect(plan.collections).toEqual([
       expect.objectContaining({
@@ -235,6 +268,58 @@ describe("import providers", () => {
         itemIds: ["operation:GET:/items/{id}", "operation:POST:/items/{id}"],
       }),
     );
+    expect(plan.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "openapi_variable_description_conflict",
+        severity: "warning",
+        itemIds: ["operation:GET:/items/{id}", "operation:POST:/items/{id}"],
+      }),
+    );
+  });
+
+  it("keeps the first non-empty description for a deduplicated OpenAPI variable", async () => {
+    const plan = await new ImportProviderRegistry([
+      new OpenApiJsonImportProvider(),
+    ]).preview("openapi-json", {
+      name: "documented-variable.json",
+      text: JSON.stringify({
+        openapi: "3.1.0",
+        info: { title: "Documented variable", version: "1" },
+        paths: {
+          "/items/{id}": {
+            get: {
+              parameters: [
+                { name: "id", in: "path", schema: { default: "item" } },
+              ],
+            },
+            post: {
+              parameters: [
+                {
+                  name: "id",
+                  in: "path",
+                  description: "Item identifier",
+                  schema: { default: "item" },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    });
+
+    expect(plan.variables).toEqual([
+      {
+        name: "id",
+        kind: "value",
+        value: "item",
+        description: "Item identifier",
+      },
+    ]);
+    expect(plan.diagnostics).not.toContainEqual(
+      expect.objectContaining({
+        code: "openapi_variable_description_conflict",
+      }),
+    );
   });
 
   it("preserves primary OpenAPI tags above their path collections", async () => {
@@ -246,7 +331,10 @@ describe("import providers", () => {
         openapi: "3.1.0",
         info: { title: "Tagged API", version: "1" },
         servers: [{ url: "https://api.example.test" }],
-        tags: [{ name: "Pets" }, { name: "Owners" }],
+        tags: [
+          { name: "Pets", description: "Pet endpoints" },
+          { name: "Owners", description: "Owner endpoints" },
+        ],
         paths: {
           "/owners": { get: { tags: ["Owners"] } },
           "/pets": { get: { tags: ["Pets", "Public"] } },
@@ -262,7 +350,9 @@ describe("import providers", () => {
       (collection) => collection.name === "Owners",
     );
     expect(pets?.parentCollectionKey).toBeNull();
+    expect(pets?.notes).toBe("Pet endpoints");
     expect(owners?.parentCollectionKey).toBeNull();
+    expect(owners?.notes).toBe("Owner endpoints");
     expect(
       plan.collections
         .filter((collection) => collection.parentCollectionKey === null)
@@ -304,8 +394,10 @@ describe("import providers", () => {
           version: "1.2",
           entries: [
             {
+              comment: "Recorded create-item exchange",
               startedDateTime: "2025-01-02T03:04:05.000Z",
               request: {
+                comment: "Creates one item",
                 method: "POST",
                 url: "https://example.test/items?draft=true",
                 headers: [
@@ -313,11 +405,17 @@ describe("import providers", () => {
                   { name: ":method", value: "POST" },
                   { name: "Authorization", value: "Bearer secret" },
                   { name: "Content-Length", value: "7" },
-                  { name: "X-Client", value: "test" },
+                  {
+                    name: "X-Client",
+                    value: "test",
+                    comment: "Calling application",
+                  },
                 ],
                 postData: {
                   mimeType: "application/x-www-form-urlencoded",
-                  params: [{ name: "name", value: "Mochi" }],
+                  params: [
+                    { name: "name", value: "Mochi", comment: "Item name" },
+                  ],
                 },
               },
               response: {
@@ -343,6 +441,8 @@ describe("import providers", () => {
     expect(plan.requests).toHaveLength(1);
     expect(plan.requests[0]).toMatchObject({
       method: "POST",
+      description: "Creates one item",
+      notes: "Recorded create-item exchange\n\nCreates one item",
       targetUrl: "https://example.test/items",
       query: [{ name: "draft", value: "true", enabled: true }],
       headers: [
@@ -351,7 +451,12 @@ describe("import providers", () => {
           value: "<<imported_authorization>>",
           enabled: true,
         },
-        { name: "X-Client", value: "test", enabled: true },
+        {
+          name: "X-Client",
+          value: "test",
+          enabled: true,
+          description: "Calling application",
+        },
       ],
       variables: [],
       capturedExchange: {
@@ -361,6 +466,9 @@ describe("import providers", () => {
         bodyEncoding: "text",
         recordedAt: "2025-01-02T03:04:05.000Z",
       },
+    });
+    expect(plan.requests[0]?.requestBody).toMatchObject({
+      fields: [expect.objectContaining({ description: "Item name" })],
     });
     expect(plan.variables).toEqual([
       {

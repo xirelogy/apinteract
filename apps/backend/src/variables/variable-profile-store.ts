@@ -1,5 +1,6 @@
 import type { Kysely, Transaction } from "kysely";
 
+import { validateFieldDescription } from "../documentation/documentation.js";
 import {
   bytesToId,
   createEntityId,
@@ -19,23 +20,27 @@ export type VariableWrite =
   | {
       readonly variableId?: EntityId;
       readonly name: string;
+      readonly description?: string;
       readonly kind: "value";
       readonly value: string;
     }
   | {
       readonly variableId?: EntityId;
       readonly name: string;
+      readonly description?: string;
       readonly kind: "alias";
       readonly target: string;
     }
   | {
       readonly variableId?: EntityId;
       readonly name: string;
+      readonly description?: string;
       readonly kind: "unset";
     }
   | {
       readonly variableId?: EntityId;
       readonly name: string;
+      readonly description?: string;
       readonly kind: "secret";
       readonly value?: string;
       readonly clearValue?: boolean;
@@ -45,23 +50,27 @@ export type VariableView =
   | {
       readonly variableId: EntityId;
       readonly name: string;
+      readonly description: string;
       readonly kind: "value";
       readonly value: string;
     }
   | {
       readonly variableId: EntityId;
       readonly name: string;
+      readonly description: string;
       readonly kind: "alias";
       readonly target: string;
     }
   | {
       readonly variableId: EntityId;
       readonly name: string;
+      readonly description: string;
       readonly kind: "unset";
     }
   | {
       readonly variableId: EntityId;
       readonly name: string;
+      readonly description: string;
       readonly kind: "secret";
       readonly hasValue: boolean;
       readonly secretVersion: number;
@@ -195,6 +204,7 @@ export class VariableProfileStore {
       .select([
         "variable.position",
         "variable.name",
+        "variable.description_text",
         "variable.kind",
         "variable.value_text",
         "variable.alias_target",
@@ -213,6 +223,7 @@ export class VariableProfileStore {
           profile_id: idToBytes(profileId),
           position: variable.position,
           name: variable.name,
+          description_text: variable.description_text,
           kind: variable.kind,
           value_text: variable.value_text,
           alias_target: variable.alias_target,
@@ -315,6 +326,7 @@ export class VariableProfileStore {
       .select([
         "variable.id",
         "variable.name",
+        "variable.description_text",
         "variable.kind",
         "variable.value_text",
         "variable.alias_target",
@@ -325,7 +337,11 @@ export class VariableProfileStore {
       .orderBy("variable.position")
       .execute();
     return rows.map((row): VariableView => {
-      const common = { variableId: bytesToId(row.id), name: row.name };
+      const common = {
+        variableId: bytesToId(row.id),
+        name: row.name,
+        description: row.description_text,
+      };
       switch (row.kind) {
         case "value":
           return { ...common, kind: "value", value: row.value_text ?? "" };
@@ -451,6 +467,7 @@ export class VariableProfileStore {
       if (write.kind === "alias") {
         validateVariableName(write.target);
       }
+      const description = validateFieldDescription(write.description);
       if (write.kind === "secret") {
         const replacing = write.value !== undefined;
         if (replacing && write.clearValue === true) {
@@ -464,7 +481,7 @@ export class VariableProfileStore {
           throw new Error("A new secret requires a value");
         }
       }
-      return { write, variableId, position, previous };
+      return { write, variableId, position, previous, description };
     });
     const mutations: SecretMutation[] = [];
     for (const [variableId, previous] of existing) {
@@ -489,6 +506,7 @@ export class VariableProfileStore {
           profile_id: idToBytes(profileId),
           position: item.position,
           name: write.name,
+          description_text: item.description,
           kind: write.kind,
           value_text: write.kind === "value" ? write.value : null,
           alias_target: write.kind === "alias" ? write.target : null,

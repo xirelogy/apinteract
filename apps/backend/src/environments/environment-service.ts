@@ -2,6 +2,10 @@ import type { Kysely, Transaction } from "kysely";
 
 import type { AuditService } from "../audit/audit-service.js";
 import {
+  validateResourceDescription,
+  validateResourceNotes,
+} from "../documentation/documentation.js";
+import {
   bytesToId,
   createEntityId,
   idToBytes,
@@ -31,6 +35,8 @@ export interface EnvironmentView {
   readonly environmentId: EntityId;
   readonly workspaceId: EntityId;
   readonly name: string;
+  readonly description: string;
+  readonly notes: string;
   readonly revision: number;
   readonly includedEnvironments: readonly EnvironmentSummary[];
   readonly variables: readonly EnvironmentVariableView[];
@@ -195,7 +201,11 @@ export class EnvironmentService {
     name: string,
     variables: readonly EnvironmentVariableWrite[],
     includedEnvironmentIds: readonly EntityId[] = [],
+    description = "",
+    notes = "",
   ): Promise<EnvironmentView> {
+    const normalizedDescription = validateResourceDescription(description);
+    const normalizedNotes = validateResourceNotes(notes);
     return this.#database.transaction().execute(async (transaction) => {
       await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
       const environmentId = createEntityId();
@@ -208,6 +218,8 @@ export class EnvironmentService {
           workspace_id: idToBytes(workspaceId),
           name: displayName,
           name_key: environmentNameKey(displayName),
+          description_text: normalizedDescription,
+          notes_markdown: normalizedNotes,
           revision: 0,
           created_by: idToBytes(userId),
           created_at: now,
@@ -269,7 +281,11 @@ export class EnvironmentService {
     name: string,
     variables: readonly EnvironmentVariableWrite[],
     includedEnvironmentIds?: readonly EntityId[],
+    description = "",
+    notes = "",
   ): Promise<EnvironmentView> {
+    const normalizedDescription = validateResourceDescription(description);
+    const normalizedNotes = validateResourceNotes(notes);
     return this.#database.transaction().execute(async (transaction) => {
       const row = await this.#row(transaction, environmentId);
       const workspaceId = bytesToId(row.workspace_id);
@@ -307,6 +323,8 @@ export class EnvironmentService {
         .set({
           name: displayName,
           name_key: environmentNameKey(displayName),
+          description_text: normalizedDescription,
+          notes_markdown: normalizedNotes,
           revision: expectedRevision + 1,
           updated_by: idToBytes(userId),
           updated_at: Date.now(),
@@ -860,6 +878,8 @@ export class EnvironmentService {
       environmentId,
       workspaceId,
       name: environment.name,
+      description: environment.description_text,
+      notes: environment.notes_markdown,
       revision: environment.revision,
       includedEnvironments: await this.#directIncludes(database, environmentId),
       variables: await this.#variables.redactedVariables(
