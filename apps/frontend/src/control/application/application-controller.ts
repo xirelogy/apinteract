@@ -11,6 +11,7 @@ import {
   type RestoredResourceTabEntry,
 } from "@/control/persistence/request-session-storage";
 import type {
+  CollectionDeleteResult,
   CollectionView,
   ImportApplyResult,
   ImportPlan,
@@ -1426,84 +1427,59 @@ export class ApplicationController {
     });
   }
 
-  /** Deletes a collection subtree and removes its loaded tabs and navigation state. */
+  /** Deletes a collection subtree and closes every affected open editor. */
   async deleteCollection(
     collectionId: string,
     expectedRevision: number,
   ): Promise<void> {
     const store = useApplicationStore();
     const workspaceId = requireSelection(store.selectedWorkspaceId);
-    const collectionTab = store.resourceTabs.find(
-      (tab) =>
-        tab.kind === "collection" &&
-        tab.collection.collectionId === collectionId,
-    );
-    const collection =
-      collectionTab?.kind === "collection"
-        ? collectionTab.collection
-        : store.selectedCollection;
-    const parentCollectionId =
-      collection?.collectionId === collectionId
-        ? collection.parentCollectionId
-        : null;
-    const deleted = loadedCollectionSubtree(
-      collectionId,
-      store.collectionChildren,
-    );
     await this.#run(async () => {
-      await this.#webSocket.command("collection.delete", {
-        collectionId,
-        expectedRevision,
-      });
-      store.requestTabs = store.requestTabs.filter((tab) => {
-        const request = tab.request;
-        return !(
-          tab.workspaceId === workspaceId &&
-          ((request !== null && deleted.requestIds.has(request.requestId)) ||
-            (request !== null &&
-              request.parentCollectionId !== null &&
-              deleted.collectionIds.has(request.parentCollectionId)) ||
-            (tab.pendingParentCollectionId !== null &&
-              deleted.collectionIds.has(tab.pendingParentCollectionId)))
-        );
-      });
-      store.resourceTabs = store.resourceTabs.filter(
-        (tab) =>
-          tab.kind !== "collection" ||
-          !deleted.collectionIds.has(tab.collection.collectionId),
+      const result = await this.#webSocket.command<CollectionDeleteResult>(
+        "collection.delete",
+        { collectionId, expectedRevision },
       );
-      const retainedIds = new Set([
-        ...store.requestTabs.map((tab) => tab.tabId),
-        ...store.resourceTabs.map((tab) => tab.tabId),
-      ]);
-      store.workbenchTabOrder = store.workbenchTabOrder.filter((tabId) =>
-        retainedIds.has(tabId),
-      );
+      const deletedCollectionIds = new Set(result.deletedCollectionIds);
+      const deletedRequestIds = new Set(result.deletedRequestIds);
+      const closingTabIds = [
+        ...store.requestTabs
+          .filter(
+            (tab) =>
+              tab.workspaceId === workspaceId &&
+              ((tab.request !== null &&
+                deletedRequestIds.has(tab.request.requestId)) ||
+                (tab.pendingParentCollectionId !== null &&
+                  deletedCollectionIds.has(tab.pendingParentCollectionId))),
+          )
+          .map((tab) => tab.tabId),
+        ...store.resourceTabs
+          .filter(
+            (tab) =>
+              tab.kind === "collection" &&
+              deletedCollectionIds.has(tab.collection.collectionId),
+          )
+          .map((tab) => tab.tabId),
+      ];
+      this.closeWorkbenchTabs(closingTabIds);
       if (
-        !store.requestTabs.some((tab) => tab.tabId === store.activeRequestTabId)
+        store.selectedCollectionId !== null &&
+        deletedCollectionIds.has(store.selectedCollectionId)
       ) {
-        store.activeRequestTabId = null;
+        store.selectedCollectionId = null;
+        store.selectedCollection = null;
+        store.selectedVariableProfile = null;
+        store.variablePreviews = [];
       }
-      if (
-        store.activeWorkbenchTabId !== null &&
-        !retainedIds.has(store.activeWorkbenchTabId)
-      ) {
-        this.#activateNearestWorkbenchTab();
-      }
-      store.selectedCollectionId = null;
-      store.selectedCollection = null;
-      store.selectedVariableProfile = null;
-      store.variablePreviews = [];
       store.expandedCollectionIds = store.expandedCollectionIds.filter(
-        (id) => !deleted.collectionIds.has(id),
+        (id) => !deletedCollectionIds.has(id),
       );
-      for (const id of deleted.collectionIds) {
+      for (const id of deletedCollectionIds) {
         delete store.collectionChildren[id];
       }
       this.#previewNames = [];
       this.#previewContext = null;
       this.#previewSequence += 1;
-      await this.#reloadCollection(workspaceId, parentCollectionId);
+      await this.#reloadCollection(workspaceId, result.parentCollectionId);
     });
   }
 
@@ -3096,34 +3072,6 @@ function executableDraft(draft: RequestDraftInput) {
 /** Returns an array containing the value exactly once. */
 function includeOnce(values: readonly string[], value: string): string[] {
   return values.includes(value) ? [...values] : [...values, value];
-}
-
-/** Collects every currently loaded collection and request beneath one collection. */
-function loadedCollectionSubtree(
-  rootCollectionId: string,
-  children: Readonly<Record<string, readonly TreeNode[]>>,
-): {
-  readonly collectionIds: ReadonlySet<string>;
-  readonly requestIds: ReadonlySet<string>;
-} {
-  const collectionIds = new Set([rootCollectionId]);
-  const requestIds = new Set<string>();
-  const pending = [rootCollectionId];
-  for (let index = 0; index < pending.length; index += 1) {
-    const collectionId = pending[index];
-    if (collectionId === undefined) continue;
-    for (const node of children[collectionId] ?? []) {
-      if (node.kind === "collection") {
-        if (!collectionIds.has(node.nodeId)) {
-          collectionIds.add(node.nodeId);
-          pending.push(node.nodeId);
-        }
-      } else {
-        requestIds.add(node.nodeId);
-      }
-    }
-  }
-  return { collectionIds, requestIds };
 }
 
 /** Updates request labels and methods in every loaded tree branch. */

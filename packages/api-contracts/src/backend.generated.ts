@@ -467,6 +467,14 @@ export interface components {
        */
       type: "CollectionUpdateCommand";
     };
+    /** @description Identifies the complete persisted subtree removed by a recursive collection deletion. */
+    CollectionDeleteResult: {
+      /** @constant */
+      deleted: true;
+      parentCollectionId: components["schemas"]["CollectionId"] | null;
+      deletedCollectionIds: components["schemas"]["CollectionId"][];
+      deletedRequestIds: components["schemas"]["RequestId"][];
+    };
     /** @description Recursively deletes a collection, its descendant collections and requests, and their mutable profiles. Existing execution snapshots remain available. */
     CollectionDeleteCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
@@ -1069,6 +1077,7 @@ export interface components {
       | components["schemas"]["EnvironmentView"]
       | components["schemas"]["VariableProfileView"]
       | components["schemas"]["VariablePreviewResult"]
+      | components["schemas"]["CollectionDeleteResult"]
       | components["schemas"]["ImportProvidersView"]
       | components["schemas"]["ImportPlan"]
       | components["schemas"]["ImportApplyResult"]

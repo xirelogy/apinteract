@@ -6,6 +6,8 @@ export type WorkspaceSummary = components["schemas"]["WorkspaceSummary"];
 export type WorkspaceView = components["schemas"]["WorkspaceView"];
 export type TreeNode = components["schemas"]["TreeNode"];
 export type CollectionView = components["schemas"]["CollectionView"];
+export type CollectionDeleteResult =
+  components["schemas"]["CollectionDeleteResult"];
 export type EnvironmentSummary = components["schemas"]["EnvironmentSummary"];
 export type EnvironmentListView = components["schemas"]["EnvironmentListView"];
 export type EnvironmentView = components["schemas"]["EnvironmentView"];

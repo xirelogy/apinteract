@@ -1257,6 +1257,34 @@
           }
         ]
       },
+      "CollectionDeleteResult": {
+        "description": "Identifies the complete persisted subtree removed by a recursive collection deletion.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deleted",
+          "parentCollectionId",
+          "deletedCollectionIds",
+          "deletedRequestIds"
+        ],
+        "properties": {
+          "deleted": { "const": true },
+          "parentCollectionId": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/CollectionId" },
+              { "type": "null" }
+            ]
+          },
+          "deletedCollectionIds": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CollectionId" }
+          },
+          "deletedRequestIds": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RequestId" }
+          }
+        }
+      },
       "CollectionDeleteCommand": {
         "description": "Recursively deletes a collection, its descendant collections and requests, and their mutable profiles. Existing execution snapshots remain available.",
         "allOf": [
@@ -2629,6 +2657,7 @@
           { "$ref": "#/components/schemas/EnvironmentView" },
           { "$ref": "#/components/schemas/VariableProfileView" },
           { "$ref": "#/components/schemas/VariablePreviewResult" },
+          { "$ref": "#/components/schemas/CollectionDeleteResult" },
           { "$ref": "#/components/schemas/ImportProvidersView" },
           { "$ref": "#/components/schemas/ImportPlan" },
           { "$ref": "#/components/schemas/ImportApplyResult" },

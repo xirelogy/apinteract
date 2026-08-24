@@ -206,6 +206,14 @@ export interface RequestImportCollectionResult {
   readonly parentCollectionId: EntityId | null;
 }
 
+/** Identifies the complete persisted subtree removed with one collection. */
+export interface CollectionDeletionResult {
+  readonly deleted: true;
+  readonly parentCollectionId: EntityId | null;
+  readonly deletedCollectionIds: readonly EntityId[];
+  readonly deletedRequestIds: readonly EntityId[];
+}
+
 /** Identifies entities created by one atomic provider import. */
 export interface RequestImportResult {
   readonly collectionId: EntityId;
@@ -869,7 +877,7 @@ export class RequestService {
     userId: EntityId,
     collectionId: EntityId,
     expectedRevision: number,
-  ): Promise<{ readonly deleted: true }> {
+  ): Promise<CollectionDeletionResult> {
     return this.#database.transaction().execute(async (transaction) => {
       const row = await this.#collectionRow(transaction, collectionId);
       const workspaceId = bytesToId(row.workspace_id);
@@ -888,6 +896,9 @@ export class RequestService {
 
       const requestIds = descendants
         .filter((node) => node.kind === "request")
+        .map((node) => node.nodeId);
+      const collectionIds = descendants
+        .filter((node) => node.kind === "collection")
         .map((node) => node.nodeId);
       await this.#detachAndDeleteRequestHistory(transaction, requestIds);
       await this.#deleteVariableProfiles(
@@ -924,14 +935,17 @@ export class RequestService {
         data: {
           collectionId,
           parentCollectionId,
-          deletedCollections: descendants.filter(
-            (node) => node.kind === "collection",
-          ).length,
+          deletedCollections: collectionIds.length,
           deletedRequests: requestIds.length,
           orderRevision,
         },
       });
-      return { deleted: true };
+      return {
+        deleted: true,
+        parentCollectionId,
+        deletedCollectionIds: collectionIds,
+        deletedRequestIds: requestIds,
+      };
     });
   }
 

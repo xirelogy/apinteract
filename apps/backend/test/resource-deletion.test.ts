@@ -298,7 +298,12 @@ describe("resource deletion", () => {
           target.nodeId,
           updated.revision,
         ),
-      ).resolves.toEqual({ deleted: true });
+      ).resolves.toEqual({
+        deleted: true,
+        parentCollectionId: parent.nodeId,
+        deletedCollectionIds: [target.nodeId, nested.nodeId],
+        deletedRequestIds: [nestedRequest.requestId],
+      });
 
       await expect(
         fixture.requests.listChildren(

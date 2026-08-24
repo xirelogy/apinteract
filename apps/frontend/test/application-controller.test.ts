@@ -220,6 +220,118 @@ describe("ApplicationController workspaces", () => {
     expect(store.activeRequestTabId).toBeNull();
   });
 
+  it("closes tabs from an unloaded collection subtree after deletion", async () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151ca1";
+    const parentCollectionId = "019facab-1eee-765f-bd9f-ac2449151ca2";
+    const collectionId = "019facab-1eee-765f-bd9f-ac2449151ca3";
+    const childCollectionId = "019facab-1eee-765f-bd9f-ac2449151ca4";
+    const deletedRequestId = "019facab-1eee-765f-bd9f-ac2449151ca5";
+    const keptRequestId = "019facab-1eee-765f-bd9f-ac2449151ca6";
+    /** Creates one collection view for an editor tab fixture. */
+    const collection = (id: string, parentId: string | null) => ({
+      collectionId: id,
+      workspaceId,
+      parentCollectionId: parentId,
+      name: id === collectionId ? "Parent" : "Child",
+      description: "",
+      notes: "",
+      pathPrefix: "",
+      inheritedTarget: "",
+      effectivePath: "",
+      headers: [],
+      inheritedHeaders: [],
+      effectiveHeaders: [],
+      revision: 0,
+    });
+    /** Creates one saved request view for a request tab fixture. */
+    const request = (requestId: string, parentId: string | null) => ({
+      requestId,
+      workspaceId,
+      parentCollectionId: parentId,
+      name: requestId === deletedRequestId ? "Deleted request" : "Kept request",
+      description: "",
+      notes: "",
+      method: "GET" as const,
+      targetMode: "absolute" as const,
+      targetUrl: "https://example.test",
+      inheritedTarget: "",
+      queryMode: "structured" as const,
+      query: [],
+      headers: [],
+      inheritedHeaders: [],
+      body: "",
+      requestBody: { kind: "none" as const },
+      preRequestScript: "",
+      postResponseScript: "",
+      draftRevision: 0,
+    });
+    const command = vi.fn((type: string, payload: Record<string, unknown>) => {
+      if (type === "collection.get") {
+        return payload.collectionId === collectionId
+          ? collection(collectionId, parentCollectionId)
+          : collection(childCollectionId, collectionId);
+      }
+      if (type === "variable_profile.get") {
+        return {
+          workspaceId,
+          scopeKind: "collection" as const,
+          scopeId: payload.scopeId,
+          scopeName: "Variables",
+          revision: 0,
+          variables: [],
+          inheritedVariables: [],
+        };
+      }
+      if (type === "request.get") {
+        return payload.requestId === deletedRequestId
+          ? request(deletedRequestId, childCollectionId)
+          : request(keptRequestId, parentCollectionId);
+      }
+      if (type === "request.exchange.list") return { exchanges: [] };
+      if (type === "collection.delete") {
+        return {
+          deleted: true as const,
+          parentCollectionId,
+          deletedCollectionIds: [collectionId, childCollectionId],
+          deletedRequestIds: [deletedRequestId],
+        };
+      }
+      if (type === "tree.list") return { children: [] };
+      throw new Error(`Unexpected command ${type}`);
+    });
+    const controller = new ApplicationController(
+      {} as SessionController,
+      { command, onEvent: vi.fn() } as unknown as BackendWebSocketClient,
+    );
+    const store = useApplicationStore();
+    store.selectedWorkspaceId = workspaceId;
+
+    await controller.openCollectionPropertiesTab(collectionId);
+    await controller.openCollectionPropertiesTab(childCollectionId);
+    await controller.selectRequest(deletedRequestId);
+    controller.createTemporaryRequest(childCollectionId);
+    await controller.selectRequest(keptRequestId);
+    const keptTabId = store.activeWorkbenchTabId;
+    await controller.selectRequest(deletedRequestId);
+    expect(store.collectionChildren[collectionId]).toBeUndefined();
+
+    await controller.deleteCollection(collectionId, 0);
+
+    expect(
+      store.resourceTabs.filter((tab) => tab.kind === "collection"),
+    ).toEqual([]);
+    expect(store.requestTabs).toHaveLength(1);
+    expect(store.requestTabs[0]?.request?.requestId).toBe(keptRequestId);
+    expect(store.workbenchTabOrder).toEqual([keptTabId]);
+    expect(store.activeWorkbenchTabId).toBe(keptTabId);
+    expect(store.expandedCollectionIds).toEqual([]);
+    expect(command).toHaveBeenCalledWith("tree.list", {
+      workspaceId,
+      parentCollectionId,
+    });
+  });
+
   it("refreshes an open child collection after its parent changes", async () => {
     setActivePinia(createPinia());
     const workspaceId = "019facab-1eee-765f-bd9f-ac2449151cf1";
