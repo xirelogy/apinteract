@@ -1029,6 +1029,11 @@ describe("RequestEditor", () => {
     expect(
       wrapper.get('input[aria-label="Request path"]').attributes("placeholder"),
     ).toBe("Request URL");
+    expect(send?.attributes("disabled")).toBeDefined();
+    await wrapper
+      .get('input[aria-label="Request path"]')
+      .setValue("<<base_url>>/42");
+    expect(send?.attributes("disabled")).toBeUndefined();
     vi.useRealTimers();
   });
 

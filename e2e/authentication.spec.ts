@@ -21,7 +21,7 @@ test("completes the browser login and session lifecycle", async ({
 
   await expect(page).toHaveURL(/#\/main$/u);
   await expect(
-    page.getByRole("button", { name: "Log out Administrator" }),
+    page.getByRole("button", { name: "Account menu for admin" }),
   ).toBeVisible();
   await expect
     .poll(() =>
@@ -37,10 +37,15 @@ test("completes the browser login and session lifecycle", async ({
 
   await expect(page).toHaveURL(/#\/main$/u);
   await expect(
-    page.getByRole("button", { name: "Log out Administrator" }),
+    page.getByRole("button", { name: "Account menu for admin" }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Log out Administrator" }).click();
+  await page.getByRole("button", { name: "Account menu for admin" }).click();
+  await page.getByRole("menuitem", { name: "Log out" }).click();
+  await page
+    .getByRole("dialog", { name: "Log out" })
+    .getByRole("button", { name: "Log out" })
+    .click();
   await expect(page).toHaveURL(/#\/login$/u);
 
   await page.goto("/web-ui/#/main");

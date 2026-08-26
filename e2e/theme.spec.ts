@@ -23,10 +23,11 @@ test("follows the system color scheme and accepts explicit overrides", async ({
   await expect(body).toHaveCSS("background-color", "rgb(244, 246, 247)");
   await expect(body).toHaveCSS("color", "rgb(23, 33, 36)");
   await login(page);
+  await openAccountOptions(page);
   await expectLocaleSelectorStates(page, {
-    color: "rgb(255, 255, 255)",
-    background: "rgb(42, 54, 56)",
-    border: "rgb(80, 96, 100)",
+    color: "rgb(23, 33, 36)",
+    background: "rgb(238, 241, 242)",
+    border: "rgb(174, 185, 188)",
   });
 
   await page.emulateMedia({ colorScheme: "light" });
@@ -36,9 +37,9 @@ test("follows the system color scheme and accepts explicit overrides", async ({
   await expect(body).toHaveCSS("background-color", "rgb(17, 23, 24)");
   await expect(body).toHaveCSS("color", "rgb(230, 237, 238)");
   await expectLocaleSelectorStates(page, {
-    color: "rgb(245, 247, 247)",
-    background: "rgb(24, 32, 34)",
-    border: "rgb(70, 86, 90)",
+    color: "rgb(230, 237, 238)",
+    background: "rgb(34, 44, 46)",
+    border: "rgb(80, 96, 100)",
   });
 });
 
@@ -56,6 +57,13 @@ async function login(page: Page): Promise<void> {
   await expect(page).toHaveURL(/#\/main$/u);
 }
 
+/** Opens the account options surface that owns authenticated preferences. */
+async function openAccountOptions(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Account menu for admin" }).click();
+  await page.getByRole("menuitem", { name: "Options" }).click();
+  await expect(page.getByRole("dialog", { name: "Options" })).toBeVisible();
+}
+
 /** Verifies that pointer, keyboard, and expanded select states stay legible. */
 async function expectLocaleSelectorStates(
   page: Page,
@@ -65,7 +73,9 @@ async function expectLocaleSelectorStates(
     return;
   }
 
-  const trigger = page.locator(".locale-selector .select-menu-trigger");
+  const trigger = page
+    .getByRole("dialog", { name: "Options" })
+    .getByRole("combobox", { name: "Language" });
   await trigger.hover();
   await expectTriggerColors(trigger, expected);
 

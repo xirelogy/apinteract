@@ -127,6 +127,7 @@ describe("persisted variable scopes", () => {
           { name: "base_url", kind: "value", value: "https://workspace.test" },
           { name: "workspace_only", kind: "value", value: "workspace" },
           { name: "token", kind: "secret", value: "super-secret" },
+          { name: "cycle_a", kind: "alias", target: "cycle_b" },
         ],
       );
       await variables.update(userId, "collection", root.nodeId, 0, [
@@ -136,6 +137,7 @@ describe("persisted variable scopes", () => {
       await variables.update(userId, "collection", leaf.nodeId, 0, [
         { name: "collection_only", kind: "value", value: "leaf" },
         { name: "blocked", kind: "unset" },
+        { name: "cycle_b", kind: "alias", target: "cycle_a" },
       ]);
       const environment = await environments.create(
         userId,
@@ -187,6 +189,7 @@ describe("persisted variable scopes", () => {
         [
           { name: "base_url", kind: "value", value: "https://request.test" },
           { name: "secret_alias", kind: "alias", target: "token" },
+          { name: "cycle_b", kind: "alias", target: "cycle_a" },
         ],
       );
       const requestProfileWithInheritance = await variables.get(
@@ -218,6 +221,11 @@ describe("persisted variable scopes", () => {
           sourceName: "Variable workspace",
         },
         {
+          name: "cycle_a",
+          sourceScope: "workspace",
+          sourceName: "Variable workspace",
+        },
+        {
           name: "environment_only",
           sourceScope: "environment",
           sourceName: "Development",
@@ -229,6 +237,11 @@ describe("persisted variable scopes", () => {
         },
         {
           name: "blocked",
+          sourceScope: "collection",
+          sourceName: "Leaf",
+        },
+        {
+          name: "cycle_b",
           sourceScope: "collection",
           sourceName: "Leaf",
         },
@@ -366,6 +379,23 @@ describe("persisted variable scopes", () => {
         null,
         "Foreign collection",
       );
+      const foreignRequest = await requests.createRequest(
+        viewerId,
+        foreignWorkspace.workspaceId,
+        foreignCollection.nodeId,
+        "Foreign request",
+        "GET",
+        "https://foreign.example",
+        [],
+        [],
+        "",
+      );
+      await expect(
+        variables.get(userId, "request", foreignRequest.requestId),
+      ).rejects.toBeInstanceOf(ResourceNotFoundError);
+      await expect(
+        variables.update(userId, "request", foreignRequest.requestId, 0, []),
+      ).rejects.toBeInstanceOf(ResourceNotFoundError);
       await expect(
         variables.previewVariables(
           userId,
@@ -375,6 +405,9 @@ describe("persisted variable scopes", () => {
           null,
           ["workspace_only"],
         ),
+      ).rejects.toBeInstanceOf(ResourceNotFoundError);
+      await expect(
+        requests.prepareExecution(userId, sessionId, foreignRequest.requestId),
       ).rejects.toBeInstanceOf(ResourceNotFoundError);
 
       const preview = await variables.previewVariables(
@@ -429,6 +462,68 @@ describe("persisted variable scopes", () => {
         },
       ]);
       expect(JSON.stringify(preview)).not.toContain("super-secret");
+
+      await expect(
+        variables.previewVariables(
+          userId,
+          sessionId,
+          workspace.workspaceId,
+          leaf.nodeId,
+          request.requestId,
+          ["blocked", "cycle_a", "cycle_b"],
+        ),
+      ).resolves.toMatchObject({
+        previews: [
+          {
+            name: "blocked",
+            status: "unset",
+            source: { scope: "collection", scopeName: "Leaf" },
+            diagnostic: "Variable blocked is unset",
+          },
+          {
+            name: "cycle_a",
+            status: "error",
+            source: { scope: "workspace", scopeName: "Variable workspace" },
+            diagnostic: "Variable alias cycle: cycle_a -> cycle_b -> cycle_a",
+          },
+          {
+            name: "cycle_b",
+            status: "error",
+            source: { scope: "request", scopeName: "Scoped request" },
+            diagnostic: "Variable alias cycle: cycle_b -> cycle_a -> cycle_b",
+          },
+        ],
+      });
+      await expect(
+        requests.prepareTemporaryExecution(
+          userId,
+          sessionId,
+          workspace.workspaceId,
+          leaf.nodeId,
+          {
+            method: "GET",
+            targetUrl: "<<blocked>>",
+            query: [],
+            headers: [],
+            body: "",
+          },
+        ),
+      ).rejects.toThrow("Variable blocked is unset");
+      await expect(
+        requests.prepareTemporaryExecution(
+          userId,
+          sessionId,
+          workspace.workspaceId,
+          leaf.nodeId,
+          {
+            method: "GET",
+            targetUrl: "<<cycle_a>>",
+            query: [],
+            headers: [],
+            body: "",
+          },
+        ),
+      ).rejects.toThrow("Variable alias cycle: cycle_a -> cycle_b -> cycle_a");
 
       const prepared = await requests.prepareExecution(
         userId,

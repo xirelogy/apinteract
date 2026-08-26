@@ -1943,7 +1943,11 @@ export class RequestService {
     });
   }
 
-  /** Creates an execution snapshot and reuses an identical latest revision. */
+  /**
+   * Creates an execution snapshot and reuses an identical latest revision.
+   * Read authorization precedes edit authorization so foreign requests remain
+   * indistinguishable from missing requests.
+   */
   async prepareExecution(
     userId: EntityId,
     sessionId: EntityId,
@@ -1952,6 +1956,11 @@ export class RequestService {
     return this.#database.transaction().execute(async (transaction) => {
       const row = await this.#requestRow(transaction, requestId);
       const request = mapRequest(row);
+      await this.#workspaces.requireCanRead(
+        transaction,
+        userId,
+        request.workspaceId,
+      );
       await this.#workspaces.requireCanEdit(
         transaction,
         userId,
@@ -2080,7 +2089,7 @@ export class RequestService {
     });
   }
 
-  /** Creates an execution from one immutable revision without changing history. */
+  /** Creates an authorized execution from one immutable revision without changing history. */
   async prepareRevisionExecution(
     userId: EntityId,
     sessionId: EntityId,
@@ -2090,6 +2099,7 @@ export class RequestService {
     return this.#database.transaction().execute(async (transaction) => {
       const row = await this.#requestRow(transaction, requestId);
       const workspaceId = bytesToId(row.workspace_id);
+      await this.#workspaces.requireCanRead(transaction, userId, workspaceId);
       await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
       const revision = await this.#revisionRow(
         transaction,
@@ -2199,7 +2209,7 @@ export class RequestService {
     });
   }
 
-  /** Creates a durable workspace-owned execution without saving a request. */
+  /** Creates a durable authorized workspace execution without saving a request. */
   async prepareTemporaryExecution(
     userId: EntityId,
     sessionId: EntityId,
@@ -2213,6 +2223,7 @@ export class RequestService {
       ...normalizeExecutionInput(input),
     };
     return this.#database.transaction().execute(async (transaction) => {
+      await this.#workspaces.requireCanRead(transaction, userId, workspaceId);
       await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
       await this.#validateParent(transaction, workspaceId, parentCollectionId);
       const resolvedHeaders = await this.#resolveHeaders(

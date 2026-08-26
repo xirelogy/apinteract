@@ -286,8 +286,10 @@ watch(
 );
 const validTarget = computed(() =>
   targetMode.value === "composed"
-    ? isValidPathTemplate(targetUrl.value) &&
-      isValidComposedPrefix(props.inheritedTarget)
+    ? props.inheritedTarget === ""
+      ? isValidTargetTemplate(targetUrl.value)
+      : isValidPathTemplate(targetUrl.value) &&
+        isValidComposedPrefix(props.inheritedTarget)
     : isValidTargetTemplate(targetUrl.value),
 );
 const displayedInheritedTarget = computed(() => {

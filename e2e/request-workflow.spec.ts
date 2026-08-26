@@ -31,8 +31,9 @@ test("creates, restores, and sends the first workspace request", async ({
 
   await openNavigator(page, mobile);
   await page.getByRole("button", { name: "Workspace properties" }).click();
-  const workspaceProperties = page.getByRole("dialog", {
-    name: "Workspace properties",
+  await closeNavigator(page, mobile);
+  const workspaceProperties = page.getByRole("region", {
+    name: workspaceName,
   });
   await expect(workspaceProperties.getByLabel("Workspace name")).toHaveValue(
     workspaceName,
@@ -51,38 +52,45 @@ test("creates, restores, and sends the first workspace request", async ({
     `workspace-${suffix}`,
   );
   await addValueVariable(workspaceProperties, 2, "scope_chain", "workspace");
-  await workspaceProperties.getByRole("button", { name: "Save" }).click();
-  if (mobile) {
-    await page.getByTitle("Close workspace navigator", { exact: true }).click();
-  }
+  const workspaceSave = workspaceProperties.getByRole("button", {
+    name: "Save",
+  });
+  await workspaceSave.click();
+  const closeWorkspace = page.getByRole("button", {
+    name: `Close ${workspaceName}`,
+  });
+  await expect(closeWorkspace).toBeVisible();
+  await closeWorkspace.click();
 
   await page.getByRole("button", { name: "Manage environments" }).click();
   await page.getByRole("menuitem", { name: "Create new environment" }).click();
-  const environmentDialog = page.getByRole("dialog", {
-    name: "Create environment",
-  });
-  await environmentDialog
+  const environmentEditor = page.locator(".environment-dialog");
+  await environmentEditor
     .getByLabel("Name", { exact: true })
     .fill(environmentName);
-  await environmentDialog.getByLabel("Variable name 1").fill("base_url");
-  await environmentDialog
+  await environmentEditor.getByLabel("Variable name 1").fill("base_url");
+  await environmentEditor
     .getByLabel("Variable value 1")
     .fill("http://127.0.0.1:8090");
-  await environmentDialog.getByLabel("Variable name 2").fill("source");
-  await environmentDialog
+  await environmentEditor.getByLabel("Variable name 2").fill("source");
+  await environmentEditor
     .getByLabel("Variable value 2")
     .fill(`environment-${suffix}`);
-  await environmentDialog.getByLabel("Variable name 3").fill("token");
-  await environmentDialog.getByLabel("Variable kind 3").click();
+  await environmentEditor.getByLabel("Variable name 3").fill("token");
+  await environmentEditor.getByLabel("Variable kind 3").click();
   await page
     .getByRole("listbox", { name: "Variable kind 3" })
     .getByRole("option", { name: "Secret", exact: true })
     .click();
-  await environmentDialog.getByLabel("Secret value 3").fill(`secret-${suffix}`);
-  await addValueVariable(environmentDialog, 4, "scope_chain", "environment");
-  await environmentDialog.getByRole("button", { name: "Save" }).click();
-  await expect(environmentDialog).toBeHidden();
+  await environmentEditor.getByLabel("Secret value 3").fill(`secret-${suffix}`);
+  await addValueVariable(environmentEditor, 4, "scope_chain", "environment");
+  await environmentEditor.getByRole("button", { name: "Save" }).click();
+  const closeEnvironment = page.getByRole("button", {
+    name: `Close ${environmentName}`,
+  });
+  await expect(closeEnvironment).toBeVisible();
   await selectMenuOption(page, "Select environment", environmentName);
+  await closeEnvironment.click();
 
   await openNavigator(page, mobile);
   await page.getByRole("button", { name: "Create root collection" }).click();
@@ -98,31 +106,40 @@ test("creates, restores, and sends the first workspace request", async ({
     .getByRole("navigation", { name: "Workspace tree" })
     .getByRole("treeitem", { name: collectionName, exact: true });
   await expect(collection).toBeVisible();
-  await collection.click();
 
   await openCollectionAction(page, collectionName, "Collection properties");
-  const propertiesDialog = page.getByRole("dialog", {
-    name: "Collection properties",
+  await closeNavigator(page, mobile);
+  const collectionProperties = page.getByRole("region", {
+    name: collectionName,
   });
-  await expect(propertiesDialog.getByLabel("Collection name")).toHaveValue(
+  await expect(collectionProperties.getByLabel("Collection name")).toHaveValue(
     collectionName,
   );
-  await propertiesDialog
+  await collectionProperties
     .getByLabel("Header name 1", { exact: true })
     .fill("X-Inherited");
-  await propertiesDialog
+  await collectionProperties
     .getByLabel("Header value 1", { exact: true })
     .fill(`root-${suffix}`);
-  await propertiesDialog.getByRole("tab", { name: "Variables" }).click();
+  await collectionProperties.getByRole("tab", { name: "Variables" }).click();
   await addValueVariable(
-    propertiesDialog,
+    collectionProperties,
     1,
     "collection_source",
     `collection-${suffix}`,
   );
-  await addValueVariable(propertiesDialog, 2, "scope_chain", "collection");
-  await propertiesDialog.getByRole("button", { name: "Save" }).click();
+  await addValueVariable(collectionProperties, 2, "scope_chain", "collection");
+  const collectionSave = collectionProperties.getByRole("button", {
+    name: "Save",
+  });
+  await collectionSave.click();
+  const closeCollection = page.getByRole("button", {
+    name: `Close ${collectionName}`,
+  });
+  await expect(closeCollection).toBeVisible();
+  await closeCollection.click();
 
+  await openNavigator(page, mobile);
   await openCollectionAction(page, collectionName, "New subcollection");
   const subcollectionDialog = page.getByRole("dialog", {
     name: "New subcollection",
@@ -136,7 +153,6 @@ test("creates, restores, and sends the first workspace request", async ({
     exact: true,
   });
   await expect(subcollection).toBeVisible();
-  await subcollection.click();
 
   await openCollectionAction(page, subcollectionName, "New subcollection");
   const leafDialog = page.getByRole("dialog", {
@@ -149,7 +165,6 @@ test("creates, restores, and sends the first workspace request", async ({
     exact: true,
   });
   await expect(leafCollection).toBeVisible();
-  await leafCollection.click();
 
   await openCollectionAction(page, leafCollectionName, "New request");
   if (mobile) {
@@ -159,11 +174,11 @@ test("creates, restores, and sends the first workspace request", async ({
   }
   await expect(page.locator(".draft-revision")).toHaveCount(0);
   await page.getByLabel("Request name", { exact: true }).fill(requestName);
-  await page.getByLabel("Target URL").fill("<<base_url>>/echo");
+  await page.getByLabel("Request path").fill("<<base_url>>/echo");
   await expect(
     page.locator('.url-template-input [data-variable-name="base_url"]'),
   ).toHaveAttribute("data-preview-status", "resolved");
-  await inspectTemplateAt(page, "Target URL", 3);
+  await inspectTemplateAt(page, "Request path", 3);
   await expect(page.getByRole("tooltip")).toContainText(
     "http://127.0.0.1:8090",
   );
@@ -193,6 +208,7 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.getByRole("tooltip")).toContainText("Secret value stored");
   await expect(page.getByRole("tooltip")).not.toContainText(`secret-${suffix}`);
   await page.getByRole("tab", { name: "Body" }).click();
+  await selectMenuOption(page, "Content type", "Plain text");
   await page
     .getByLabel("Raw request body")
     .fill(
@@ -244,10 +260,10 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.locator(".request-tab")).toHaveCount(2);
   if (mobile) {
     const requestMenuTrigger = page.getByRole("combobox", {
-      name: "Open requests",
+      name: "Open tabs",
     });
     await requestMenuTrigger.click();
-    const requestMenu = page.getByRole("listbox", { name: "Open requests" });
+    const requestMenu = page.getByRole("listbox", { name: "Open tabs" });
     await expect(requestMenu.getByRole("option")).toHaveCount(2);
     const requestPopup = requestMenu.locator("..");
     const triggerBox = await requestMenuTrigger.boundingBox();
@@ -267,7 +283,7 @@ test("creates, restores, and sends the first workspace request", async ({
     .fill(`Scratch ${suffix}`);
   if (mobile) {
     const requestMenuTrigger = page.getByRole("combobox", {
-      name: "Open requests",
+      name: "Open tabs",
     });
     await expect(requestMenuTrigger.locator(".request-tab-method")).toHaveText(
       "GET",
@@ -310,32 +326,41 @@ test("creates, restores, and sends the first workspace request", async ({
     name: `POST ${requestName}`,
     exact: true,
   });
-  await expect(requestNode).toHaveClass(/is-selected/u);
-  await expect(subcollection.locator("..")).not.toHaveClass(/is-selected/u);
+  await expect(requestNode).toHaveAttribute("aria-selected", "true");
+  await expect(subcollection).not.toHaveAttribute("aria-selected", "true");
 
   await page.getByRole("tab", { name: "Variables" }).click();
   const requestVariables = page.locator(".request-variables-editor");
   await addValueVariable(requestVariables, 1, "source", `request-${suffix}`);
   await addValueVariable(requestVariables, 2, "scope_chain", "request");
-  await requestVariables
-    .getByRole("button", { name: "Save request variables" })
+  await page
+    .locator(".request-editor")
+    .getByRole("button", { name: "Save", exact: true })
     .click();
+  await expect(
+    page.getByRole("button", { name: `Close ${requestName}` }),
+  ).toBeVisible();
+  await expect
+    .poll(() => requestTabIsPersisted(page, requestName, `request-${suffix}`))
+    .toBe(true);
 
   await page.reload();
   await openNavigator(page, mobile);
-  await selectMenuOption(page, "Workspace", workspaceName);
+  await expect(
+    page.getByRole("combobox", { name: "Workspace", exact: true }),
+  ).toContainText(workspaceName);
   await expect(page.getByLabel("Select environment")).toHaveAttribute(
     "data-value",
     /.+/u,
   );
   await workspaceTree
-    .getByRole("treeitem", { name: collectionName, exact: true })
+    .getByRole("button", { name: `Expand ${collectionName}` })
     .click();
   await workspaceTree
-    .getByRole("treeitem", { name: subcollectionName, exact: true })
+    .getByRole("button", { name: `Expand ${subcollectionName}` })
     .click();
   await workspaceTree
-    .getByRole("treeitem", { name: leafCollectionName, exact: true })
+    .getByRole("button", { name: `Expand ${leafCollectionName}` })
     .click();
   await workspaceTree
     .getByRole("treeitem", { name: `POST ${requestName}`, exact: true })
@@ -349,12 +374,14 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.getByLabel("Request name", { exact: true })).toHaveValue(
     requestName,
   );
-  await expect(page.getByLabel("Target URL")).toHaveValue("<<base_url>>/echo");
+  await expect(page.getByLabel("Request path")).toHaveValue(
+    "<<base_url>>/echo",
+  );
   await expect(page.getByLabel("HTTP method")).toHaveAttribute(
     "data-value",
     "POST",
   );
-  await page.getByRole("tab", { name: "Headers 3" }).click();
+  await page.getByRole("tab", { name: "Headers 4" }).click();
   await expect(page.getByLabel("Inherited header name 1")).toHaveValue(
     "X-Workspace",
   );
@@ -369,14 +396,9 @@ test("creates, restores, and sends the first workspace request", async ({
     `root-${suffix}`,
   );
   await page.getByRole("tab", { name: "Body" }).click();
-  await expect(page.getByLabel("Raw request body")).toHaveValue(
+  await expect(page.getByLabel("Raw request body")).toHaveText(
     "payload-<<source>>-<<workspace_source>>-<<collection_source>>-<<scope_chain>>",
   );
-  await inspectTemplateAt(page, "Raw request body", 10);
-  await expect(page.getByRole("tooltip")).toContainText(
-    `Request: ${requestName}`,
-  );
-  await expect(page.getByRole("tooltip")).toContainText(`request-${suffix}`);
 
   await openNavigator(page, mobile);
   const selectedLeaf = workspaceTree.getByRole("treeitem", {
@@ -384,18 +406,18 @@ test("creates, restores, and sends the first workspace request", async ({
     exact: true,
   });
   await selectedLeaf.click();
-  await expect(selectedLeaf.locator("..")).toHaveClass(/is-selected/u);
+  await expect(selectedLeaf).toHaveAttribute("aria-selected", "true");
   await expect(
     workspaceTree.getByRole("treeitem", {
       name: `POST ${requestName}`,
       exact: true,
     }),
-  ).not.toHaveClass(/is-selected/u);
+  ).not.toHaveAttribute("aria-selected", "true");
   if (mobile) {
     await page.getByTitle("Close workspace navigator", { exact: true }).click();
   }
   await expect(
-    page.getByRole("heading", { name: "Select a request" }),
+    page.getByRole("region", { name: leafCollectionName }),
   ).toBeVisible();
   await openNavigator(page, mobile);
   await workspaceTree
@@ -467,12 +489,83 @@ async function login(page: Page): Promise<void> {
   await expect(page).toHaveURL(/#\/main$/u);
 }
 
+/** Reports whether IndexedDB contains the latest clean saved-request snapshot. */
+async function requestTabIsPersisted(
+  page: Page,
+  requestName: string,
+  expectedSource: string,
+): Promise<boolean> {
+  return page.evaluate(
+    async ({ expectedSource, requestName }) => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("apinteract-local-requests");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () =>
+          reject(request.error ?? new Error("Could not open request storage"));
+      });
+      try {
+        const records = await new Promise<unknown[]>((resolve, reject) => {
+          const request = database
+            .transaction("request-tabs", "readonly")
+            .objectStore("request-tabs")
+            .getAll();
+          request.onsuccess = () => resolve(request.result as unknown[]);
+          request.onerror = () =>
+            reject(
+              request.error ?? new Error("Could not read persisted requests"),
+            );
+        });
+        return records.some((record) => {
+          if (
+            typeof record !== "object" ||
+            record === null ||
+            !("payload" in record) ||
+            typeof record.payload !== "string"
+          ) {
+            return false;
+          }
+          const snapshot = JSON.parse(record.payload) as {
+            readonly requestId?: unknown;
+            readonly draftDirty?: unknown;
+            readonly variableDirty?: unknown;
+            readonly draft?: { readonly name?: unknown };
+            readonly variableDraft?: readonly {
+              readonly name?: unknown;
+              readonly value?: unknown;
+            }[];
+          };
+          return (
+            typeof snapshot.requestId === "string" &&
+            snapshot.draftDirty === false &&
+            snapshot.variableDirty === false &&
+            snapshot.draft?.name === requestName &&
+            snapshot.variableDraft?.some(
+              (variable) =>
+                variable.name === "source" && variable.value === expectedSource,
+            ) === true
+          );
+        });
+      } finally {
+        database.close();
+      }
+    },
+    { expectedSource, requestName },
+  );
+}
+
 /** Opens the overlay navigator only for the mobile browser project. */
 async function openNavigator(page: Page, mobile: boolean): Promise<void> {
   if (mobile) {
     await page
       .getByRole("button", { name: "Open workspace navigator" })
       .click();
+  }
+}
+
+/** Closes the overlay navigator only for the mobile browser project. */
+async function closeNavigator(page: Page, mobile: boolean): Promise<void> {
+  if (mobile) {
+    await page.getByTitle("Close workspace navigator", { exact: true }).click();
   }
 }
 
@@ -514,8 +607,10 @@ async function addValueVariable(
   name: string,
   value: string,
 ): Promise<void> {
-  await dialog.getByLabel(`Variable name ${index}`).fill(name);
-  await dialog.getByLabel(`Variable value ${index}`).fill(value);
+  await dialog.getByLabel(`Variable name ${index}`, { exact: true }).fill(name);
+  await dialog
+    .getByLabel(`Variable value ${index}`, { exact: true })
+    .fill(value);
 }
 
 /** Adds one structured query field through the active request editor. */

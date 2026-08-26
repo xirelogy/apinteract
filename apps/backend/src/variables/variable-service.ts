@@ -255,7 +255,11 @@ export class VariableService {
     );
   }
 
-  /** Applies one authorized profile update with explicitly bounded creation policy. */
+  /**
+   * Applies one authorized profile update with explicitly bounded creation policy.
+   * Read authorization runs first so foreign scope identifiers remain concealed,
+   * while known viewers still receive the ordinary edit-capability denial.
+   */
   async #updateInTransaction(
     transaction: Transaction<DatabaseSchema>,
     userId: EntityId,
@@ -266,6 +270,11 @@ export class VariableService {
     options: VariableUpdateOptions,
   ): Promise<VariableProfileView> {
     const identity = await this.#scopeIdentity(transaction, scopeKind, scopeId);
+    await this.#workspaces.requireCanRead(
+      transaction,
+      userId,
+      identity.workspaceId,
+    );
     await this.#workspaces.requireCanEdit(
       transaction,
       userId,

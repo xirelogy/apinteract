@@ -157,6 +157,7 @@ async function createPersistentJourney(client, accessToken, targetUrl) {
     parentCollectionId: collection.nodeId,
     name: requestName,
     method: "POST",
+    targetMode: "absolute",
     targetUrl: "<<base_url>>",
     query: [{ name: "marker", value: "<<marker>>", enabled: true }],
     headers: [
@@ -417,6 +418,7 @@ async function verifyExecutionFailure(client) {
     parentCollectionId: null,
     request: {
       method: "GET",
+      targetMode: "absolute",
       targetUrl: "http://127.0.0.1:1/unreachable",
       query: [],
       headers: [],
