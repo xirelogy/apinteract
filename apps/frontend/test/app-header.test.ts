@@ -105,7 +105,7 @@ describe("AppHeader", () => {
       'button[aria-label="Account menu for admin"]',
     );
     expect(wrapper.get<HTMLImageElement>(".brand-logo").attributes("src")).toBe(
-      "/logo_square_360.png",
+      "/logo.svg",
     );
     expect(wrapper.get(".header-actions").text()).toBe("admin");
     expect(accountTrigger.find(".lucide-circle-user-round").exists()).toBe(

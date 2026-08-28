@@ -9,7 +9,7 @@ import AccountOptionsDialog from "@/view/presentation/features/AccountOptionsDia
 import LogoutConfirmationDialog from "@/view/presentation/features/LogoutConfirmationDialog.vue";
 
 const { t } = useI18n();
-const logoUrl = `${import.meta.env.BASE_URL}logo_square_360.png`;
+const logoUrl = `${import.meta.env.BASE_URL}logo.svg`;
 const optionsOpen = ref(false);
 const logoutConfirmationOpen = ref(false);
 const accountActions = computed(() => [
