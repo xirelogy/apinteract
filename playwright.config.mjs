@@ -44,6 +44,7 @@ export default defineConfig({
   webServer: {
     command: "node tooling/run-browser-test-application.mjs",
     url: "http://127.0.0.1:5173/web-ui/",
+    env: { APINTERACT_BROWSER_TEST_FRONTEND_MODE: "production" },
     reuseExistingServer: false,
     timeout: 120_000,
   },

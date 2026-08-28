@@ -19,6 +19,11 @@ describe("backend static frontend hosting", () => {
       "<main>APInteract</main>",
     );
     await writeFile(join(frontendPath, "assets", "app-hash.js"), "export {};");
+    await writeFile(join(frontendPath, "manifest.webmanifest"), "{}");
+    await writeFile(
+      join(frontendPath, "sw.js"),
+      "self.addEventListener('fetch', () => {});",
+    );
     const application = {
       proxy: { health: () => Promise.resolve(true) },
       audit: {
@@ -71,6 +76,24 @@ describe("backend static frontend hosting", () => {
       expect(asset.headers["cache-control"]).toBe(
         "public, max-age=31536000, immutable",
       );
+
+      const manifest = await server.inject({
+        method: "GET",
+        url: "/web-ui/manifest.webmanifest",
+      });
+      expect(manifest.statusCode).toBe(200);
+      expect(manifest.headers["content-type"]).toContain(
+        "application/manifest+json",
+      );
+      expect(manifest.headers["cache-control"]).toBe("no-cache");
+
+      const serviceWorker = await server.inject({
+        method: "GET",
+        url: "/web-ui/sw.js",
+      });
+      expect(serviceWorker.statusCode).toBe(200);
+      expect(serviceWorker.headers["content-type"]).toContain("javascript");
+      expect(serviceWorker.headers["cache-control"]).toBe("no-cache");
 
       const redirect = await server.inject({
         method: "GET",

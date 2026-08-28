@@ -9,6 +9,7 @@ import {
 } from "./app/i18n/translation-service";
 import { initializeDisplayStyle } from "./app/preferences/display-style";
 import { router } from "./app/router";
+import { initializePwaRegistration } from "./app/pwa-registration";
 import { ApplicationController } from "./control/application/application-controller";
 import { SessionController } from "./control/session/session-controller";
 import { BackendHttpClient } from "./control/transport/http-client";
@@ -36,5 +37,8 @@ app.provide(applicationControllerKey, controller);
 // cookie rotation is still in progress.
 await session.restore();
 app.use(router);
+session.onAuthenticationLost(() => void router.replace("/login"));
+session.startNetworkRecovery();
 await router.isReady();
 app.mount("#app");
+initializePwaRegistration();

@@ -20,7 +20,12 @@ import type {
   WorkspaceSummary,
 } from "../contracts/backend";
 
-export type ConnectionState = "disconnected" | "connecting" | "authenticated";
+export type ConnectionState =
+  | "disconnected"
+  | "connecting"
+  | "authenticated"
+  | "offline"
+  | "reconnecting";
 
 export type ApplicationErrorCode =
   | "operationFailed"

@@ -14,6 +14,9 @@ const backendPort = Number.parseInt(
   process.env.APINTERACT_BROWSER_TEST_BACKEND_PORT ?? "8080",
   10,
 );
+const productionFrontend =
+  process.env.APINTERACT_BROWSER_TEST_FRONTEND_MODE === "production";
+const frontendDistPath = resolve(runtimeRoot, "frontend");
 const children = [];
 let stopping = false;
 
@@ -23,6 +26,9 @@ process.once("SIGTERM", () => void stop());
 try {
   await prepareRuntime();
   await initializeAdministrator();
+  if (productionFrontend) {
+    await buildFrontend();
+  }
 
   startProcess("fixture", ["exec", "node", "tooling/run-http-fixture.mjs"]);
   await waitForUrl("http://127.0.0.1:8090/hello");
@@ -49,21 +55,42 @@ try {
   ]);
   await waitForUrl(`http://127.0.0.1:${backendPort}/health`);
 
-  startProcess("frontend", [
+  startFrontend();
+  await waitForUrl("http://127.0.0.1:5173/web-ui/");
+} catch (cause) {
+  await stop(1);
+  throw cause;
+}
+
+/** Builds the exact production PWA into the disposable browser-test runtime. */
+async function buildFrontend() {
+  await runProcess("frontend build", [
     "--filter",
     "@apinteract/frontend",
     "exec",
     "vite",
+    "build",
+    "--outDir",
+    frontendDistPath,
+    "--emptyOutDir",
+  ]);
+}
+
+/** Starts either the normal development server or production preview server. */
+function startFrontend() {
+  const arguments_ = [
+    "--filter",
+    "@apinteract/frontend",
+    "exec",
+    "vite",
+    ...(productionFrontend ? ["preview", "--outDir", frontendDistPath] : []),
     "--host",
     "127.0.0.1",
     "--port",
     "5173",
     "--strictPort",
-  ]);
-  await waitForUrl("http://127.0.0.1:5173/web-ui/");
-} catch (cause) {
-  await stop(1);
-  throw cause;
+  ];
+  startProcess("frontend", arguments_);
 }
 
 /** Creates isolated component state and strict YAML configuration files. */

@@ -41,6 +41,12 @@ class FakeWebSocket {
     this.#emit("close", {});
   }
 
+  /** Simulates an unexpected remote close. */
+  disconnect(): void {
+    this.readyState = FakeWebSocket.CLOSED;
+    this.#emit("close", {});
+  }
+
   /** Transitions the test socket to open and emits its open event. */
   open(): void {
     this.readyState = FakeWebSocket.OPEN;
@@ -144,6 +150,31 @@ describe("BackendWebSocketClient", () => {
     const pending = client.command("workspace.list", {});
     client.close();
     await expect(pending).rejects.toThrow("Backend connection closed");
+  });
+
+  it("announces unexpected closure but not an explicit client close", async () => {
+    const client = new BackendWebSocketClient();
+    const disconnected = vi.fn();
+    client.onDisconnect(disconnected);
+    const connected = client.connect("access-token");
+    const socket = requireSocket();
+    socket.open();
+    const authentication = await nextSentCommand(socket);
+    socket.receive(successReply(authentication.id, {}));
+    await connected;
+
+    socket.disconnect();
+    expect(disconnected).toHaveBeenCalledOnce();
+
+    const reconnected = client.connect("access-token");
+    const nextSocket = FakeWebSocket.instances[1];
+    if (nextSocket === undefined) throw new Error("Expected another socket");
+    nextSocket.open();
+    const nextAuthentication = await nextSentCommand(nextSocket);
+    nextSocket.receive(successReply(nextAuthentication.id, {}));
+    await reconnected;
+    client.close();
+    expect(disconnected).toHaveBeenCalledOnce();
   });
 });
 

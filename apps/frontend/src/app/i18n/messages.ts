@@ -46,6 +46,21 @@ export const enUsMessages = {
     signingIn: "Signing in",
     username: "Username",
   },
+  pwa: {
+    offlineTitle: "APInteract is offline",
+    offlineDescription:
+      "Reconnect to the APInteract server to continue working.",
+    reconnectingDescription: "Reconnecting securely to the APInteract server…",
+    offlinePrivacy:
+      "Workspace and account data stay hidden until your session is authorized again.",
+    updateTitle: "An APInteract update is ready",
+    updateDescription: "Reload now to use the latest application version.",
+    updateDraftBlocked:
+      "Save or discard unsaved changes before applying this update.",
+    updateExecutionBlocked:
+      "Wait for active request executions to finish before applying this update.",
+    updateAction: "Update and reload",
+  },
   header: {
     accountMenu: "Account menu for {name}",
     closeNavigator: "Close workspace navigator",

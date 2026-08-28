@@ -36,6 +36,7 @@ async function main() {
       "The verification administrator password is required on stdin",
     );
   }
+  await verifyPublicPwa();
   const accessToken = await login(values.origin, password);
   const client = new VerificationWebSocketClient(values.origin);
   await client.connect(accessToken);
@@ -65,6 +66,75 @@ async function main() {
   } finally {
     client.close();
   }
+}
+
+/** Verifies the packaged public PWA contract through the AIO HTTP boundary. */
+async function verifyPublicPwa() {
+  const root = "http://127.0.0.1:8080/web-ui/";
+  const shell = await requirePublicAsset(root, "text/html");
+  if (
+    shell.headers.get("cache-control") !== "no-cache" ||
+    !shell.body.includes('rel="manifest"') ||
+    !shell.body.includes("/web-ui/manifest.webmanifest")
+  ) {
+    throw new Error(
+      "The AIO frontend shell has invalid PWA metadata or caching",
+    );
+  }
+
+  const manifestAsset = await requirePublicAsset(
+    `${root}manifest.webmanifest`,
+    "application/manifest+json",
+  );
+  if (manifestAsset.headers.get("cache-control") !== "no-cache") {
+    throw new Error("The AIO web app manifest must be revalidated");
+  }
+  const manifest = JSON.parse(manifestAsset.body);
+  if (
+    manifest.id !== "/web-ui/" ||
+    manifest.scope !== "/web-ui/" ||
+    manifest.start_url !== "/web-ui/" ||
+    manifest.display !== "standalone"
+  ) {
+    throw new Error("The AIO web app manifest has an invalid application root");
+  }
+  const requiredIcons = new Set([
+    "/web-ui/icons/icon-192.png",
+    "/web-ui/icons/icon-512.png",
+    "/web-ui/icons/icon-maskable-512.png",
+  ]);
+  for (const icon of manifest.icons ?? []) requiredIcons.delete(icon.src);
+  if (requiredIcons.size > 0) {
+    throw new Error("The AIO web app manifest is missing required PWA icons");
+  }
+  for (const icon of manifest.icons) {
+    await requirePublicAsset(`http://127.0.0.1:8080${icon.src}`, "image/png");
+  }
+  await requirePublicAsset(`${root}icons/apple-touch-icon.png`, "image/png");
+
+  const worker = await requirePublicAsset(`${root}sw.js`, "javascript");
+  if (
+    worker.headers.get("cache-control") !== "no-cache" ||
+    !worker.body.includes("auth|api|ws") ||
+    /NetworkFirst|StaleWhileRevalidate|CacheFirst/u.test(worker.body)
+  ) {
+    throw new Error(
+      "The AIO service worker violates the static-only cache policy",
+    );
+  }
+}
+
+/** Fetches one public deployment asset and validates its media type. */
+async function requirePublicAsset(url, expectedMediaType) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`${url} returned HTTP ${response.status}`);
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes(expectedMediaType)) {
+    throw new Error(`${url} returned unexpected content type ${contentType}`);
+  }
+  return { headers: response.headers, body: await response.text() };
 }
 
 /** Reads one secret from standard input without placing it in process arguments. */

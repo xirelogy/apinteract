@@ -42,6 +42,9 @@ export class WebSocketCommandError extends Error {
   }
 }
 
+/** Indicates that the authenticated backend control channel is unavailable. */
+export class BackendConnectionError extends Error {}
+
 /**
  * Correlates frontend commands with replies on one backend control connection.
  *
@@ -52,6 +55,7 @@ export class WebSocketCommandError extends Error {
 export class BackendWebSocketClient {
   readonly #pending = new Map<string, PendingCommand>();
   readonly #eventListeners = new Set<(event: EventMessage) => void>();
+  readonly #disconnectListeners = new Set<() => void>();
   #socket: WebSocket | null = null;
 
   /** Opens and authenticates a fresh backend control connection. */
@@ -64,12 +68,20 @@ export class BackendWebSocketClient {
       socket.addEventListener("open", () => resolve(), { once: true });
       socket.addEventListener(
         "error",
-        () => reject(new Error("Could not connect to the backend")),
+        () =>
+          reject(
+            new BackendConnectionError("Could not connect to the backend"),
+          ),
+        { once: true },
+      );
+      socket.addEventListener(
+        "close",
+        () => reject(new BackendConnectionError("Backend connection closed")),
         { once: true },
       );
     });
     socket.addEventListener("message", (event) => this.#receive(event.data));
-    socket.addEventListener("close", () => this.#rejectPending());
+    socket.addEventListener("close", () => this.#handleClose(socket));
     // Domain commands are not valid until this command establishes connection
     // ownership on the backend.
     await this.command("session.authenticate", { accessToken });
@@ -87,7 +99,9 @@ export class BackendWebSocketClient {
   ): Promise<T> {
     const socket = this.#socket;
     if (socket?.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error("Backend connection is not open"));
+      return Promise.reject(
+        new BackendConnectionError("Backend connection is not open"),
+      );
     }
     const id = uuidV7();
     // Register before send so even an immediate reply can resolve its command.
@@ -115,11 +129,26 @@ export class BackendWebSocketClient {
     return () => this.#eventListeners.delete(listener);
   }
 
+  /** Registers for unexpected control-channel closure notifications. */
+  onDisconnect(listener: () => void): () => void {
+    this.#disconnectListeners.add(listener);
+    return () => this.#disconnectListeners.delete(listener);
+  }
+
   /** Closes the socket and rejects every outstanding command. */
   close(): void {
-    this.#socket?.close();
+    const socket = this.#socket;
+    this.#socket = null;
+    socket?.close();
+    this.#rejectPending();
+  }
+
+  /** Rejects pending work and announces an unexpected current-socket closure. */
+  #handleClose(socket: WebSocket): void {
+    if (this.#socket !== socket) return;
     this.#socket = null;
     this.#rejectPending();
+    for (const listener of this.#disconnectListeners) listener();
   }
 
   /** Routes one decoded server message to listeners or its pending command. */
@@ -153,7 +182,7 @@ export class BackendWebSocketClient {
   /** Rejects and removes all commands waiting on the current connection. */
   #rejectPending(): void {
     for (const pending of this.#pending.values()) {
-      pending.reject(new Error("Backend connection closed"));
+      pending.reject(new BackendConnectionError("Backend connection closed"));
     }
     this.#pending.clear();
   }

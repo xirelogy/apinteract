@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BackendHttpClient } from "../src/control/transport/http-client";
+import {
+  BackendHttpClient,
+  BackendUnavailableError,
+} from "../src/control/transport/http-client";
 
 describe("BackendHttpClient byte transfers", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -99,6 +102,14 @@ describe("BackendHttpClient byte transfers", () => {
         },
         body: file,
       },
+    );
+  });
+
+  it("distinguishes network unavailability from an HTTP problem", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
+
+    await expect(new BackendHttpClient().refresh()).rejects.toBeInstanceOf(
+      BackendUnavailableError,
     );
   });
 });

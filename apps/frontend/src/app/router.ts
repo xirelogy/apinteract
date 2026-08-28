@@ -14,7 +14,11 @@ export const router = createRouter({
 });
 
 router.beforeEach((to) => {
-  const authenticated = useApplicationStore().session !== null;
+  const store = useApplicationStore();
+  const authenticated = store.session !== null;
+  const unavailable =
+    store.connection === "offline" || store.connection === "reconnecting";
+  if (unavailable && to.path !== "/login") return true;
   if (!authenticated && to.path !== "/login") {
     return "/login";
   }

@@ -15,6 +15,9 @@ export class HttpProblemError extends Error {
   }
 }
 
+/** Indicates that no HTTP response could be obtained from the backend. */
+export class BackendUnavailableError extends Error {}
+
 /**
  * Thin HTTP adapter for session lifecycle and blob operations.
  *
@@ -52,7 +55,7 @@ export class BackendHttpClient {
 
   /** Revokes a bearer session while accepting an already-invalid token. */
   async logout(accessToken: string): Promise<void> {
-    const response = await fetch("/auth/logout", {
+    const response = await this.#fetch("/auth/logout", {
       method: "POST",
       credentials: "include",
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -67,7 +70,7 @@ export class BackendHttpClient {
     accessToken: string,
     executionId: string,
   ): Promise<Blob> {
-    const response = await fetch(
+    const response = await this.#fetch(
       `/api/executions/${encodeURIComponent(executionId)}/body`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
@@ -102,11 +105,23 @@ export class BackendHttpClient {
 
   /** Performs one JSON request and converts non-success responses to problems. */
   async #request<T>(path: string, init: RequestInit): Promise<T> {
-    const response = await fetch(path, init);
+    const response = await this.#fetch(path, init);
     if (!response.ok) {
       throw await this.#problem(response);
     }
     return (await response.json()) as T;
+  }
+
+  /** Performs a browser request while preserving network failures as a typed state. */
+  async #fetch(path: string, init: RequestInit): Promise<Response> {
+    try {
+      return await fetch(path, init);
+    } catch (cause) {
+      throw new BackendUnavailableError(
+        "The APInteract backend is unavailable.",
+        { cause },
+      );
+    }
   }
 
   /** Parses a problem response or constructs a safe fallback problem. */
