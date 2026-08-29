@@ -16,14 +16,24 @@ test("displays structured, isolated, image, and binary responses", async ({
   await sendFixtureRequest(page, "/response/json");
   const rawJson = page.getByLabel("Raw response body");
   const structuredJson = page.getByLabel("Formatted JSON response body");
-  await expect(rawJson).toBeVisible();
-  await expect(structuredJson).toBeHidden();
+  const responseTabs = page.getByRole("tablist", { name: "Response details" });
+  await expect(
+    responseTabs.getByRole("tab", { name: "JSON", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(rawJson).toBeHidden();
+  await expect(structuredJson).toBeVisible();
   await page
     .getByRole("tablist", { name: "Response details" })
     .getByRole("tab", { name: "JSON", exact: true })
     .click();
   await expect(rawJson).toBeHidden();
   await expect(structuredJson).toBeVisible();
+  await page
+    .getByRole("tablist", { name: "Response details" })
+    .getByRole("tab", { name: "Raw", exact: true })
+    .click();
+  await expect(rawJson).toBeVisible();
+  await expect(structuredJson).toBeHidden();
 
   await sendFixtureRequest(page, "/response/xml");
   await page

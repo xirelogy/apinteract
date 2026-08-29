@@ -259,6 +259,13 @@ const visibleDetailTabs = computed<readonly ResponseDetailTab[]>(() => [
   ...resultDetailTabs.value,
 ]);
 
+/** Chooses a parsed structured body view before falling back to the raw body. */
+const defaultDetailTab = computed<ResponseDetailTab>(() => {
+  if (props.execution?.error !== undefined) return "error";
+  const structured = content.value?.structured;
+  return structured?.valid === true ? structured.language : "raw";
+});
+
 /** Keeps an error-only execution in the compact tabless presentation. */
 const showsStandaloneError = computed(
   () => props.execution?.error !== undefined && !hasTabbedError.value,
@@ -299,9 +306,13 @@ function exchangeStatusLabel(summary: RequestExchangeSummary): string {
 }
 
 watch(
-  () => [props.execution?.executionId, props.execution?.error !== undefined],
+  () => [
+    props.execution?.executionId,
+    props.execution?.error !== undefined,
+    defaultDetailTab.value,
+  ],
   () => {
-    selectedTab.value = props.execution?.error === undefined ? "raw" : "error";
+    selectedTab.value = defaultDetailTab.value;
   },
   { immediate: true },
 );

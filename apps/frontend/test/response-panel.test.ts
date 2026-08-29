@@ -526,13 +526,6 @@ describe("ResponsePanel body transfer", () => {
     const jsonPanel = (viewers[1]!.element as Element).closest<HTMLElement>(
       '[role="tabpanel"]',
     );
-    expect(rawPanel?.hidden).toBe(false);
-    expect(jsonPanel?.hidden).toBe(true);
-
-    await wrapper
-      .findAll('[role="tab"]')
-      .find((tab) => tab.text() === "JSON")
-      ?.trigger("click");
     expect(rawPanel?.hidden).toBe(true);
     expect(jsonPanel?.hidden).toBe(false);
 
@@ -542,6 +535,13 @@ describe("ResponsePanel body transfer", () => {
       ?.trigger("click");
     expect(rawPanel?.hidden).toBe(false);
     expect(jsonPanel?.hidden).toBe(true);
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text() === "JSON")
+      ?.trigger("click");
+    expect(rawPanel?.hidden).toBe(true);
+    expect(jsonPanel?.hidden).toBe(false);
   });
 
   it("reports invalid structured content without offering a derived tab", () => {
