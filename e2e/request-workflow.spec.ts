@@ -219,6 +219,10 @@ test("creates, restores, and sends the first workspace request", async ({
 
   await expect(page.getByRole("status")).toHaveText("In progress");
   await expect(page.locator(".status-code")).toHaveText("201");
+  await page
+    .getByRole("tablist", { name: "Response details" })
+    .getByRole("tab", { name: "Raw", exact: true })
+    .click();
   await expect(page.locator(".body-preview")).toContainText(`"method":"POST"`);
   await expect(page.locator(".body-preview")).toContainText(
     `"query":[["source","environment-${suffix}"],["scope","collection"]]`,

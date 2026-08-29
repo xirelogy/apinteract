@@ -64,6 +64,35 @@ export const pwaOptions = {
 export default defineConfig({
   base: "/web-ui/",
   plugins: [vue(), VitePWA(pwaOptions)],
+  build: {
+    rollupOptions: {
+      output: {
+        /** Keeps editor and documentation dependencies out of the app shell. */
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("/@codemirror/view/")) return "codemirror-view";
+          if (id.includes("/@codemirror/state/")) return "codemirror-state";
+          if (id.includes("/@codemirror/language/")) {
+            return "codemirror-language";
+          }
+          if (id.includes("/@codemirror/commands/")) {
+            return "codemirror-commands";
+          }
+          if (id.includes("/@codemirror/")) return "codemirror-support";
+          if (id.includes("/@lezer/")) return "lezer";
+          if (
+            id.includes("/dompurify/") ||
+            id.includes("/markdown-it/") ||
+            id.includes("/entities/") ||
+            id.includes("/linkify-it/")
+          ) {
+            return "documentation-support";
+          }
+          return "vendor";
+        },
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

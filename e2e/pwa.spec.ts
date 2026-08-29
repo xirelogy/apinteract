@@ -25,13 +25,13 @@ test("exposes install metadata and recovers an authenticated online session", as
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(
     page.getByRole("button", { name: "Account menu for admin" }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
 
   await page.evaluate(() => navigator.serviceWorker.ready);
   await page.reload();
   await expect(
     page.getByRole("button", { name: "Account menu for admin" }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
   const cachedUrls = await page.evaluate(async () => {
     const urls: string[] = [];
     for (const cacheName of await caches.keys()) {

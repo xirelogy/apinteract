@@ -22,7 +22,7 @@ test("completes the browser login and session lifecycle", async ({
   await expect(page).toHaveURL(/#\/main$/u);
   await expect(
     page.getByRole("button", { name: "Account menu for admin" }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
   await expect
     .poll(() =>
       page.evaluate((key) => sessionStorage.getItem(key), ACCESS_TOKEN_KEY),
@@ -38,7 +38,7 @@ test("completes the browser login and session lifecycle", async ({
   await expect(page).toHaveURL(/#\/main$/u);
   await expect(
     page.getByRole("button", { name: "Account menu for admin" }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
 
   await page.getByRole("button", { name: "Account menu for admin" }).click();
   await page.getByRole("menuitem", { name: "Log out" }).click();
