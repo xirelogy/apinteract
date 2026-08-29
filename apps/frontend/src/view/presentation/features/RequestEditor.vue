@@ -104,6 +104,7 @@ const props = withDefaults(
     viewingRevision?: RequestRevisionView | null;
     recoveryWarnings?: readonly RequestRecoveryWarning[];
     uploadAttachment?: ((file: File) => Promise<RequestAttachment>) | null;
+    loadResponseBody?: ((executionId: string) => Promise<Blob>) | null;
   }>(),
   {
     inheritedTarget: "",
@@ -119,6 +120,7 @@ const props = withDefaults(
     viewingRevision: null,
     recoveryWarnings: () => [],
     uploadAttachment: null,
+    loadResponseBody: null,
   },
 );
 const { locale, t } = useI18n();
@@ -2196,6 +2198,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
         :captured-response="capturedResponse"
         :exchange-summaries="exchangeSummaries"
         :selected-exchange-id="selectedExchangeId"
+        :load-body="loadResponseBody"
         @download="emit('download', $event)"
         @select-exchange="emit('selectExchange', $event)"
       />

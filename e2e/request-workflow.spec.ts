@@ -56,6 +56,7 @@ test("creates, restores, and sends the first workspace request", async ({
     name: "Save",
   });
   await workspaceSave.click();
+  await expect(page.getByLabel("Unsaved changes")).toHaveCount(0);
   const closeWorkspace = page.getByRole("button", {
     name: `Close ${workspaceName}`,
   });
@@ -231,6 +232,18 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.locator(".body-preview")).toContainText(
     `"body":"payload-environment-${suffix}-workspace-${suffix}-collection-${suffix}-collection"`,
   );
+  await expect(page.getByLabel("Raw response body")).toBeVisible();
+  await expect(
+    page.locator(".body-preview .cm-lineNumbers .cm-gutterElement"),
+  ).not.toHaveCount(0);
+  await page
+    .getByRole("tablist", { name: "Response details" })
+    .getByRole("tab", { name: "JSON", exact: true })
+    .click();
+  const formattedJson = page.getByLabel("Formatted JSON response body");
+  await expect(formattedJson).toBeVisible();
+  await expect(formattedJson).toContainText('"method": "POST"');
+  await expect(formattedJson.locator(".cm-line")).not.toHaveCount(1);
   await expect(
     workspaceTree.getByRole("treeitem", {
       name: `POST ${requestName}`,

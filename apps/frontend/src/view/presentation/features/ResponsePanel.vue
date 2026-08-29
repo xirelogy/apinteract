@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, defineAsyncComponent, ref, watch } from "vue";
 import { Download, LoaderCircle } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
@@ -7,6 +7,10 @@ import {
   formatDateTime,
   useDateTimeFormatPreference,
 } from "@/app/preferences/date-time-format";
+import {
+  analyzeResponseContent,
+  RESPONSE_IMAGE_PREVIEW_LIMIT_BYTES,
+} from "@/model/domain/response-content";
 import type {
   ExecutionView,
   RequestExchangeSummary,
@@ -20,12 +24,19 @@ import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
 import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
 import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
 import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
+import HtmlResponsePreview from "@/view/presentation/features/HtmlResponsePreview.vue";
+import ImageResponsePreview from "@/view/presentation/features/ImageResponsePreview.vue";
+
+const CodeEditor = defineAsyncComponent(
+  () => import("@/view/presentation/controls/CodeEditor.vue"),
+);
 
 const props = defineProps<{
   execution: ExecutionView | null;
   capturedResponse?: boolean;
   exchangeSummaries?: readonly RequestExchangeSummary[];
   selectedExchangeId?: string | null;
+  loadBody?: ((executionId: string) => Promise<Blob>) | null;
 }>();
 const emit = defineEmits<{
   download: [executionId: string];
@@ -34,7 +45,16 @@ const emit = defineEmits<{
 const { locale, t } = useI18n();
 const dateTimeFormatPreference = useDateTimeFormatPreference();
 
-type ResponseDetailTab = "error" | "request" | "headers" | "raw" | "scripts";
+type ResponseDetailTab =
+  | "error"
+  | "request"
+  | "raw"
+  | "json"
+  | "xml"
+  | "html"
+  | "image"
+  | "headers"
+  | "scripts";
 const selectedTab = ref<ResponseDetailTab>("raw");
 
 type ScriptLog = ExecutionView["scriptLogs"][number];
@@ -128,6 +148,75 @@ const hasResponseBody = computed(() => {
   );
 });
 
+/** Classifies retained response evidence without fetching exact blob bytes. */
+const content = computed(() =>
+  props.execution === null
+    ? null
+    : analyzeResponseContent(props.execution, props.capturedResponse),
+);
+
+/** Exposes only successfully prepared or safely loadable derived body tabs. */
+const derivedDetailTabs = computed<readonly ResponseDetailTab[]>(() => {
+  const analysis = content.value;
+  const execution = props.execution;
+  if (analysis === null || execution === null) return [];
+  if (analysis.kind === "json" && analysis.structured?.valid === true) {
+    return ["json"];
+  }
+  if (analysis.kind === "xml" && analysis.structured?.valid === true) {
+    return ["xml"];
+  }
+  if (analysis.kind === "html" && analysis.previewComplete) {
+    return [
+      ...(analysis.structured?.valid === true ? (["xml"] as const) : []),
+      "html",
+    ];
+  }
+  if (
+    analysis.kind === "image" &&
+    execution.bodyBlobId !== undefined &&
+    props.loadBody != null &&
+    (execution.bodyBytes ?? 0) <= RESPONSE_IMAGE_PREVIEW_LIMIT_BYTES
+  ) {
+    return ["image"];
+  }
+  return [];
+});
+
+/** Reports a declared structured body that could not produce a parsed view. */
+const hasInvalidStructuredBody = computed(
+  () => content.value?.structured?.valid === false,
+);
+
+/** Reports an image that is retained but intentionally too large to preview. */
+const imageExceedsPreviewLimit = computed(
+  () =>
+    content.value?.kind === "image" &&
+    (props.execution?.bodyBytes ?? 0) > RESPONSE_IMAGE_PREVIEW_LIMIT_BYTES,
+);
+
+/** Binds complete guarded image metadata to the lazy preview component. */
+const imagePreview = computed(() => {
+  const analysis = content.value;
+  const execution = props.execution;
+  const loadBody = props.loadBody;
+  if (
+    analysis?.kind !== "image" ||
+    analysis.mediaType === null ||
+    execution === null ||
+    execution.bodyBytes === undefined ||
+    loadBody == null
+  ) {
+    return null;
+  }
+  return {
+    executionId: execution.executionId,
+    mediaType: analysis.mediaType,
+    byteLength: execution.bodyBytes,
+    loadBody,
+  };
+});
+
 /** Exposes data tabs backed by useful execution results after failure. */
 const resultDetailTabs = computed<readonly ResponseDetailTab[]>(() => {
   const execution = props.execution;
@@ -138,6 +227,7 @@ const resultDetailTabs = computed<readonly ResponseDetailTab[]>(() => {
         ? ([] as const)
         : (["request"] as const)),
       "raw",
+      ...derivedDetailTabs.value,
       "headers",
       "scripts",
     ];
@@ -149,6 +239,7 @@ const resultDetailTabs = computed<readonly ResponseDetailTab[]>(() => {
     ...(hasResponseHead.value || hasResponseBody.value
       ? (["raw"] as const)
       : ([] as const)),
+    ...derivedDetailTabs.value,
     ...(hasResponseHead.value ? (["headers"] as const) : ([] as const)),
     ...(scriptResultCards.value.length > 0
       ? (["scripts"] as const)
@@ -358,6 +449,34 @@ function formatScriptLocation(error: ScriptError): string {
           {{ t("response.raw") }}
         </TabsTrigger>
         <TabsTrigger
+          v-if="visibleDetailTabs.includes('json')"
+          class="tab-button"
+          value="json"
+        >
+          {{ t("response.json") }}
+        </TabsTrigger>
+        <TabsTrigger
+          v-if="visibleDetailTabs.includes('xml')"
+          class="tab-button"
+          value="xml"
+        >
+          {{ t("response.xml") }}
+        </TabsTrigger>
+        <TabsTrigger
+          v-if="visibleDetailTabs.includes('html')"
+          class="tab-button"
+          value="html"
+        >
+          {{ t("response.preview") }}
+        </TabsTrigger>
+        <TabsTrigger
+          v-if="visibleDetailTabs.includes('image')"
+          class="tab-button"
+          value="image"
+        >
+          {{ t("response.image") }}
+        </TabsTrigger>
+        <TabsTrigger
           v-if="visibleDetailTabs.includes('headers')"
           class="tab-button"
           value="headers"
@@ -475,14 +594,124 @@ function formatScriptLocation(error: ScriptError): string {
         value="raw"
         class="response-content"
       >
-        <pre class="body-preview">{{
-          execution.bodyPreview ??
-          (execution.state === "running"
-            ? t("response.waitingBody")
-            : capturedResponse
-              ? t("response.capturedBodyUnavailable")
-              : t("response.binaryBody"))
-        }}</pre>
+        <div v-if="execution.bodyPreview !== undefined" class="body-preview">
+          <p
+            v-if="content?.previewTruncated"
+            class="response-preview-notice"
+            role="status"
+          >
+            {{ t("response.previewTruncated") }}
+          </p>
+          <p
+            v-if="hasInvalidStructuredBody"
+            class="response-preview-notice"
+            role="status"
+          >
+            {{
+              t(
+                content?.kind === "json"
+                  ? "response.invalidJson"
+                  : "response.invalidXml",
+              )
+            }}
+          </p>
+          <CodeEditor
+            class="response-code-viewer"
+            :model-value="execution.bodyPreview"
+            :label="t('response.rawBody')"
+            read-only
+          />
+        </div>
+        <div v-else class="response-body-state">
+          <strong v-if="execution.state === 'running'">
+            {{ t("response.waitingBody") }}
+          </strong>
+          <strong v-else-if="content?.kind === 'empty'">
+            {{ t("response.emptyResponseBody") }}
+          </strong>
+          <strong v-else-if="content?.kind === 'unavailable'">
+            {{ t("response.capturedBodyUnavailable") }}
+          </strong>
+          <strong v-else>{{ t("response.binaryBody") }}</strong>
+          <p v-if="imageExceedsPreviewLimit">
+            {{ t("response.imageTooLarge") }}
+          </p>
+          <dl
+            v-if="execution.state !== 'running'"
+            class="response-body-metadata"
+          >
+            <div>
+              <dt>{{ t("response.mediaType") }}</dt>
+              <dd>
+                {{ content?.mediaType ?? t("response.mediaTypeUnknown") }}
+              </dd>
+            </div>
+            <div>
+              <dt>{{ t("response.bodySize") }}</dt>
+              <dd>{{ formatBytes(execution.bodyBytes ?? 0) }}</dd>
+            </div>
+            <div v-if="execution.bodySha256">
+              <dt>{{ t("response.sha256") }}</dt>
+              <dd>
+                <code>{{ execution.bodySha256 }}</code>
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </TabsPanel>
+      <TabsPanel
+        v-if="visibleDetailTabs.includes('json')"
+        value="json"
+        class="response-content response-body-view"
+      >
+        <CodeEditor
+          v-if="content?.structured?.value !== undefined"
+          class="response-code-viewer"
+          :model-value="content.structured.value"
+          :label="t('response.jsonBody')"
+          language="json"
+          read-only
+          foldable
+        />
+      </TabsPanel>
+      <TabsPanel
+        v-if="visibleDetailTabs.includes('xml')"
+        value="xml"
+        class="response-content response-body-view"
+      >
+        <CodeEditor
+          v-if="content?.structured?.value !== undefined"
+          class="response-code-viewer"
+          :model-value="content.structured.value"
+          :label="t('response.xmlBody')"
+          language="xml"
+          read-only
+          foldable
+        />
+      </TabsPanel>
+      <TabsPanel
+        v-if="visibleDetailTabs.includes('html')"
+        value="html"
+        class="response-content response-body-view"
+      >
+        <HtmlResponsePreview
+          v-if="execution.bodyPreview !== undefined"
+          :source="execution.bodyPreview"
+          :title="t('response.htmlPreviewTitle')"
+        />
+      </TabsPanel>
+      <TabsPanel
+        v-if="visibleDetailTabs.includes('image')"
+        value="image"
+        class="response-content response-body-view"
+      >
+        <ImageResponsePreview
+          v-if="activeTab === 'image' && imagePreview !== null"
+          :execution-id="imagePreview.executionId"
+          :media-type="imagePreview.mediaType"
+          :byte-length="imagePreview.byteLength"
+          :load-body="imagePreview.loadBody"
+        />
       </TabsPanel>
       <TabsPanel
         v-if="visibleDetailTabs.includes('scripts')"

@@ -583,6 +583,11 @@ async function downloadExecutionBody(executionId: string): Promise<void> {
   }
 }
 
+/** Loads exact response bytes for an authenticated in-application preview. */
+async function loadExecutionBody(executionId: string): Promise<Blob> {
+  return controller.downloadExecutionBody(executionId);
+}
+
 /** Saves every editable property for the selected collection. */
 async function saveCollectionProperties(
   tabId: string,
@@ -1015,6 +1020,7 @@ function discardActiveResourceTab(): void {
             :viewing-revision="activeTab?.viewingRevision ?? null"
             :recovery-warnings="activeTab?.recoveryWarnings ?? []"
             :upload-attachment="uploadActiveRequestAttachment"
+            :load-response-body="loadExecutionBody"
             @change="updateActiveRequestDraft"
             @save="saveRequest"
             @execute="executeRequest"

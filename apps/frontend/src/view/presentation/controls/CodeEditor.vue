@@ -9,8 +9,11 @@ import {
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
+import { xml } from "@codemirror/lang-xml";
 import {
   bracketMatching,
+  foldGutter,
+  foldKeymap,
   HighlightStyle,
   indentOnInput,
   syntaxHighlighting,
@@ -25,7 +28,12 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 
-export type CodeEditorLanguage = "plain" | "json" | "javascript" | "markdown";
+export type CodeEditorLanguage =
+  | "plain"
+  | "json"
+  | "javascript"
+  | "markdown"
+  | "xml";
 
 /** Provides an accessible text editor with switchable syntax support. */
 const props = withDefaults(
@@ -34,10 +42,14 @@ const props = withDefaults(
     label: string;
     language?: CodeEditorLanguage;
     disabled?: boolean;
+    readOnly?: boolean;
+    foldable?: boolean;
   }>(),
   {
     language: "plain",
     disabled: false,
+    readOnly: false,
+    foldable: false,
   },
 );
 
@@ -139,17 +151,22 @@ function languageExtension(language: CodeEditorLanguage): Extension {
   if (language === "javascript") return javascript();
   if (language === "json") return json();
   if (language === "markdown") return markdown();
+  if (language === "xml") return xml();
   return [];
 }
 
 /** Builds the extensions that follow mutable component properties. */
 function dynamicExtensions(): Extension {
+  const readOnly = props.disabled || props.readOnly;
   return [
-    EditorState.readOnly.of(props.disabled),
-    EditorView.editable.of(!props.disabled),
+    EditorState.readOnly.of(readOnly),
+    EditorView.editable.of(!readOnly),
+    ...(props.foldable ? [foldGutter(), keymap.of(foldKeymap)] : []),
     EditorView.contentAttributes.of({
       "aria-label": props.label,
       "aria-multiline": "true",
+      "aria-readonly": String(readOnly),
+      ...(props.disabled ? { "aria-disabled": "true" } : {}),
       autocapitalize: "off",
       autocomplete: "off",
       spellcheck: "false",
@@ -203,11 +220,19 @@ watch(
   },
 );
 
-watch([() => props.disabled, () => props.label], () => {
-  editor?.dispatch({
-    effects: dynamicConfiguration.reconfigure(dynamicExtensions()),
-  });
-});
+watch(
+  [
+    () => props.disabled,
+    () => props.readOnly,
+    () => props.foldable,
+    () => props.label,
+  ],
+  () => {
+    editor?.dispatch({
+      effects: dynamicConfiguration.reconfigure(dynamicExtensions()),
+    });
+  },
+);
 
 watch(
   () => props.language,

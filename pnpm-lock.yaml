@@ -132,6 +132,9 @@ importers:
       '@codemirror/lang-markdown':
         specifier: ^6.5.2
         version: 6.5.2
+      '@codemirror/lang-xml':
+        specifier: 6.1.0
+        version: 6.1.0
       '@codemirror/language':
         specifier: 6.12.4
         version: 6.12.4
@@ -144,6 +147,9 @@ importers:
       '@lezer/highlight':
         specifier: 1.2.3
         version: 1.2.3
+      '@lezer/xml':
+        specifier: 1.0.6
+        version: 1.0.6
       '@lucide/vue':
         specifier: 1.25.0
         version: 1.25.0(vue@3.5.22)
@@ -1451,6 +1457,17 @@ packages:
       '@lezer/markdown': 1.7.2
     dev: false
 
+  /@codemirror/lang-xml@6.1.0:
+    resolution: {integrity: sha512-3z0blhicHLfwi2UgkZYRPioSgVTo9PV5GP5ducFH6FaHy0IAJRg+ixj5gTR1gnT/glAIC8xv4w2VL1LoZfs+Jg==}
+    dependencies:
+      '@codemirror/autocomplete': 6.20.3
+      '@codemirror/language': 6.12.4
+      '@codemirror/state': 6.7.1
+      '@codemirror/view': 6.43.8
+      '@lezer/common': 1.5.2
+      '@lezer/xml': 1.0.6
+    dev: false
+
   /@codemirror/language@6.12.4:
     resolution: {integrity: sha512-1q4PaT+o6PbgpkJt4Q8Fv5XJxTy4FUZ4MWETtyiDw3J0Pyr9E2vqcKL+k9wcvjNTIsauxvE7OfmWj3FRPHQ76A==}
     dependencies:
@@ -2414,6 +2431,14 @@ packages:
     dependencies:
       '@lezer/common': 1.5.2
       '@lezer/highlight': 1.2.3
+    dev: false
+
+  /@lezer/xml@1.0.6:
+    resolution: {integrity: sha512-CdDwirL0OEaStFue/66ZmFSeppuL6Dwjlk8qk153mSQwiSH/Dlri4GNymrNWnUmPl2Um7QfV1FO9KFUyX3Twww==}
+    dependencies:
+      '@lezer/common': 1.5.2
+      '@lezer/highlight': 1.2.3
+      '@lezer/lr': 1.4.10
     dev: false
 
   /@lucide/vue@1.25.0(vue@3.5.22):

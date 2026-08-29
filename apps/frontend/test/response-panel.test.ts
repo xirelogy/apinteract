@@ -1,15 +1,18 @@
 // @vitest-environment jsdom
 
 import { createI18n } from "vue-i18n";
-import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { flushPromises, mount } from "@vue/test-utils";
+import { describe, expect, it, vi } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
 import type {
   ExecutionView,
   RequestExchangeSummary,
 } from "../src/model/contracts/backend";
+import CodeEditor from "../src/view/presentation/controls/CodeEditor.vue";
 import SelectMenu from "../src/view/presentation/controls/SelectMenu.vue";
+import HtmlResponsePreview from "../src/view/presentation/features/HtmlResponsePreview.vue";
+import ImageResponsePreview from "../src/view/presentation/features/ImageResponsePreview.vue";
 import ResponsePanel from "../src/view/presentation/features/ResponsePanel.vue";
 
 describe("ResponsePanel body transfer", () => {
@@ -180,9 +183,13 @@ describe("ResponsePanel body transfer", () => {
       global: { plugins: [i18n] },
     });
 
-    expect(wrapper.get(".body-preview").text()).toBe(
+    const bodyState = wrapper.get(".response-body-state");
+    expect(bodyState.text()).toContain(
       "Binary or non-previewable response body.",
     );
+    expect(bodyState.text()).toContain("application/octet-stream");
+    expect(bodyState.text()).toContain("4 bytes");
+    expect(bodyState.text()).toContain("digest");
     await wrapper
       .get('button[aria-label="Download response body"]')
       .trigger("click");
@@ -215,7 +222,7 @@ describe("ResponsePanel body transfer", () => {
       },
     });
 
-    expect(wrapper.get(".body-preview").text()).toBe(
+    expect(wrapper.get(".response-body-state").text()).toContain(
       "Response content was not included in the imported HAR.",
     );
   });
@@ -304,7 +311,12 @@ describe("ResponsePanel body transfer", () => {
       .findAll('[role="tab"]')
       .find((tab) => tab.text() === "Raw")
       ?.trigger("click");
-    expect(wrapper.get(".body-preview").text()).toBe("partial");
+    await vi.waitFor(() =>
+      expect(wrapper.findComponent(CodeEditor).exists()).toBe(true),
+    );
+    expect(wrapper.getComponent(CodeEditor).props("modelValue")).toBe(
+      "partial",
+    );
   });
 
   it("keeps request and script data beside a tabbed execution error", async () => {
@@ -453,8 +465,204 @@ describe("ResponsePanel body transfer", () => {
     );
     expect(
       wrapper
-        .get(".body-preview")
+        .get(".response-body-state")
         .element.closest<HTMLElement>('[role="tabpanel"]')?.hidden,
     ).toBe(false);
+  });
+
+  it("keeps exact raw JSON beside a faithful formatted structured view", async () => {
+    const source = '{"large":9007199254740993,"large":2}';
+    const execution: ExecutionView = {
+      executionId: "019fa8be-a510-76b9-b73b-69f4c7af7920",
+      state: "completed",
+      status: 200,
+      headers: [{ name: "content-type", value: "application/json" }],
+      bodyComplete: true,
+      bodyBytes: source.length,
+      bodyPreview: source,
+      createdAt: "2026-08-29T00:00:00.000Z",
+      completedAt: "2026-08-29T00:00:01.000Z",
+      scriptLogs: [],
+      scriptTests: [],
+    };
+    const wrapper = mount(ResponsePanel, {
+      props: { execution },
+      global: {
+        plugins: [
+          createI18n({
+            legacy: false,
+            locale: "en-US",
+            messages: { "en-US": enUsMessages },
+          }),
+        ],
+      },
+    });
+
+    await vi.waitFor(() =>
+      expect(wrapper.findAllComponents(CodeEditor)).toHaveLength(2),
+    );
+    expect(wrapper.findAll('[role="tab"]').map((tab) => tab.text())).toEqual([
+      "Raw",
+      "JSON",
+      "Headers 1",
+      "Scripts 0",
+    ]);
+    const viewers = wrapper.findAllComponents(CodeEditor);
+    expect(viewers[0]!.props()).toMatchObject({
+      modelValue: source,
+      language: "plain",
+      readOnly: true,
+    });
+    expect(viewers[1]!.props()).toMatchObject({
+      modelValue: '{\n  "large": 9007199254740993,\n  "large": 2\n}',
+      language: "json",
+      readOnly: true,
+      foldable: true,
+    });
+
+    const rawPanel = (viewers[0]!.element as Element).closest<HTMLElement>(
+      '[role="tabpanel"]',
+    );
+    const jsonPanel = (viewers[1]!.element as Element).closest<HTMLElement>(
+      '[role="tabpanel"]',
+    );
+    expect(rawPanel?.hidden).toBe(false);
+    expect(jsonPanel?.hidden).toBe(true);
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text() === "JSON")
+      ?.trigger("click");
+    expect(rawPanel?.hidden).toBe(true);
+    expect(jsonPanel?.hidden).toBe(false);
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text() === "Raw")
+      ?.trigger("click");
+    expect(rawPanel?.hidden).toBe(false);
+    expect(jsonPanel?.hidden).toBe(true);
+  });
+
+  it("reports invalid structured content without offering a derived tab", () => {
+    const source = '{"broken":}';
+    const execution: ExecutionView = {
+      executionId: "019fa8be-a510-76b9-b73b-69f4c7af7921",
+      state: "completed",
+      status: 200,
+      headers: [{ name: "content-type", value: "application/json" }],
+      bodyComplete: true,
+      bodyBytes: source.length,
+      bodyPreview: source,
+      createdAt: "2026-08-29T00:00:00.000Z",
+      completedAt: "2026-08-29T00:00:01.000Z",
+      scriptLogs: [],
+      scriptTests: [],
+    };
+    const wrapper = mount(ResponsePanel, {
+      props: { execution },
+      global: {
+        plugins: [
+          createI18n({
+            legacy: false,
+            locale: "en-US",
+            messages: { "en-US": enUsMessages },
+          }),
+        ],
+      },
+    });
+
+    expect(
+      wrapper.findAll('[role="tab"]').map((tab) => tab.text()),
+    ).not.toContain("JSON");
+    expect(wrapper.get(".response-preview-notice").text()).toContain(
+      "could not be parsed",
+    );
+  });
+
+  it("offers isolated HTML and loads raster bytes only after selecting Image", async () => {
+    const html = "<h1>Safe preview</h1>";
+    const htmlExecution: ExecutionView = {
+      executionId: "019fa8be-a510-76b9-b73b-69f4c7af7922",
+      state: "completed",
+      status: 200,
+      headers: [{ name: "content-type", value: "text/html" }],
+      bodyComplete: true,
+      bodyBytes: html.length,
+      bodyPreview: html,
+      createdAt: "2026-08-29T00:00:00.000Z",
+      completedAt: "2026-08-29T00:00:01.000Z",
+      scriptLogs: [],
+      scriptTests: [],
+    };
+    const plugin = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const htmlWrapper = mount(ResponsePanel, {
+      props: { execution: htmlExecution },
+      global: { plugins: [plugin] },
+    });
+    expect(
+      htmlWrapper.findAll('[role="tab"]').map((tab) => tab.text()),
+    ).toContain("Preview");
+    expect(htmlWrapper.getComponent(HtmlResponsePreview).props("source")).toBe(
+      html,
+    );
+
+    const bytes = new Uint8Array(24);
+    bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
+    bytes.set([73, 72, 68, 82], 12);
+    new DataView(bytes.buffer).setUint32(16, 1);
+    new DataView(bytes.buffer).setUint32(20, 1);
+    const body = new Blob([bytes]);
+    const loadBody = vi.fn().mockResolvedValue(body);
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:image");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    const imageExecution: ExecutionView = {
+      executionId: "019fa8be-a510-76b9-b73b-69f4c7af7923",
+      state: "completed",
+      status: 200,
+      headers: [{ name: "content-type", value: "image/png" }],
+      bodyComplete: true,
+      bodyBytes: body.size,
+      bodyBlobId: "019fa8be-a510-76b9-b73b-69f4c7af7924",
+      createdAt: "2026-08-29T00:00:00.000Z",
+      completedAt: "2026-08-29T00:00:01.000Z",
+      scriptLogs: [],
+      scriptTests: [],
+    };
+    const imageWrapper = mount(ResponsePanel, {
+      props: {
+        execution: imageExecution,
+        loadBody,
+      },
+      global: {
+        plugins: [
+          createI18n({
+            legacy: false,
+            locale: "en-US",
+            messages: { "en-US": enUsMessages },
+          }),
+        ],
+      },
+    });
+    expect(imageWrapper.findComponent(ImageResponsePreview).exists()).toBe(
+      false,
+    );
+    expect(loadBody).not.toHaveBeenCalled();
+    await imageWrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text() === "Image")
+      ?.trigger("click");
+    await flushPromises();
+    expect(imageWrapper.findComponent(ImageResponsePreview).exists()).toBe(
+      true,
+    );
+    expect(loadBody).toHaveBeenCalledWith(
+      "019fa8be-a510-76b9-b73b-69f4c7af7923",
+    );
+    imageWrapper.unmount();
   });
 });
