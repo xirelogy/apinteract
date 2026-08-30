@@ -530,7 +530,10 @@ function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
             </section>
           </TabsPanel>
 
-          <TabsPanel value="documentation" class="environment-editor-section">
+          <TabsPanel
+            value="documentation"
+            class="environment-editor-section environment-documentation"
+          >
             <DocumentationEditor
               :description="description"
               :notes="notes"

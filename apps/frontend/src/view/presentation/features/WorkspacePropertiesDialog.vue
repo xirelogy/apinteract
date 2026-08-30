@@ -472,7 +472,7 @@ function save(): void {
           </TabsPanel>
           <TabsPanel
             value="documentation"
-            class="collection-properties-section"
+            class="collection-properties-section collection-documentation"
           >
             <DocumentationEditor
               v-model:description="description"

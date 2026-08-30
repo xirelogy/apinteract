@@ -1377,6 +1377,21 @@
   padding-top: var(--space-3);
 }
 
+.request-settings-tabs > .request-documentation:not([hidden]) {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.request-documentation > .documentation-editor {
+  height: 100%;
+  min-height: 0;
+}
+
+.request-documentation .documentation-notes {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
 .row-reorder-handle:active {
   cursor: grabbing;
 }
@@ -2331,13 +2346,14 @@
 
 .collection-properties-dialog .resource-dialog-surface {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   height: 100%;
 }
 
 .collection-properties-dialog .resource-dialog-form {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-row: 3;
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 }
@@ -2362,6 +2378,27 @@
   padding-block-end: var(--focus-outline-clearance);
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+:is(
+  .collection-properties-tabs > .collection-documentation,
+  .environment-editor-tabs > .environment-documentation
+):not([hidden]) {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+
+:is(.collection-documentation, .environment-documentation)
+  > .documentation-editor {
+  height: 100%;
+  min-height: 0;
+}
+
+:is(.collection-documentation, .environment-documentation)
+  .documentation-notes {
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .collection-properties-section,
