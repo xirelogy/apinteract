@@ -20,24 +20,43 @@ const semanticVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 
 /** Registers source adapters and owns deterministic detection and plan validation. */
 export class ImportProviderRegistry {
-  readonly #providers = new Map<ImportProviderId, ImportProvider>();
+  readonly #providers = new Map<
+    ImportProviderId,
+    {
+      readonly provider: ImportProvider;
+      readonly weight: number;
+      readonly sequence: number;
+    }
+  >();
+  #sequence = 0;
 
   constructor(providers: readonly ImportProvider[] = []) {
     for (const provider of providers) this.register(provider);
   }
 
   /** Registers one uniquely identified parser before the service accepts work. */
-  register(provider: ImportProvider): void {
+  register(provider: ImportProvider, weight = 0): void {
     validateImportProviderManifest(provider.manifest);
     if (this.#providers.has(provider.manifest.id)) {
       throw new Error(`Duplicate import provider ${provider.manifest.id}`);
     }
-    this.#providers.set(provider.manifest.id, provider);
+    this.#providers.set(provider.manifest.id, {
+      provider,
+      weight: validateWeight(weight),
+      sequence: this.#sequence++,
+    });
   }
 
   /** Lists public provider metadata in registration order. */
   manifests(): readonly ImportProviderManifest[] {
-    return [...this.#providers.values()].map((provider) => provider.manifest);
+    return [...this.#providers.values()]
+      .sort(compareWeightedEntries)
+      .map(({ provider }) => provider.manifest);
+  }
+
+  /** Returns registered implementations for atomic host validation only. */
+  providers(): readonly ImportProvider[] {
+    return [...this.#providers.values()].map(({ provider }) => provider);
   }
 
   /** Detects or selects a provider and returns one validated canonical plan. */
@@ -49,14 +68,26 @@ export class ImportProviderRegistry {
     const provider =
       providerId === null
         ? this.#detect(source)
-        : this.#providers.get(providerId);
+        : this.#providers.get(providerId)?.provider;
     if (provider === undefined) {
       throw new ImportSourceError(
         "import_provider_not_found",
         "The selected import provider is not available.",
       );
     }
-    const plan = await provider.parse(source);
+    let plan: Awaited<ReturnType<ImportProvider["parse"]>>;
+    try {
+      plan = await provider.parse(source);
+    } catch (cause) {
+      if (
+        cause instanceof Error &&
+        "code" in cause &&
+        typeof cause.code === "string"
+      ) {
+        throw new ImportSourceError(cause.code, cause.message);
+      }
+      throw cause;
+    }
     if (plan.providerId !== provider.manifest.id) {
       throw new Error("Import provider returned a mismatched provider ID");
     }
@@ -70,8 +101,22 @@ export class ImportProviderRegistry {
     if (itemIds.size !== plan.requests.length) {
       throw new Error("Import provider returned duplicate item IDs");
     }
-    validateCollections(plan.collections, plan.requests);
-    const normalizedPlan = normalizeImportVariables(plan);
+    const stampedPlan: Omit<ImportPlan, "sourceFingerprint"> = {
+      ...plan,
+      requests: plan.requests.map(({ capturedExchange, ...request }) => ({
+        ...request,
+        ...(capturedExchange === undefined
+          ? {}
+          : {
+              capturedExchange: {
+                ...capturedExchange,
+                source: provider.manifest.id,
+              },
+            }),
+      })),
+    };
+    validateCollections(stampedPlan.collections, stampedPlan.requests);
+    const normalizedPlan = normalizeImportVariables(stampedPlan);
     return {
       ...normalizedPlan,
       diagnostics: groupDiagnostics(normalizedPlan.diagnostics),
@@ -82,7 +127,7 @@ export class ImportProviderRegistry {
   /** Selects the single highest-confidence provider above the recognition floor. */
   #detect(source: ImportSource): ImportProvider {
     const candidates = [...this.#providers.values()]
-      .map((provider) => ({ provider, probe: provider.probe(source) }))
+      .map(({ provider }) => ({ provider, probe: provider.probe(source) }))
       .filter((candidate) => candidate.probe.confidence >= 0.5)
       .sort((left, right) => right.probe.confidence - left.probe.confidence);
     const first = candidates[0];
@@ -104,6 +149,24 @@ export class ImportProviderRegistry {
     }
     return first.provider;
   }
+}
+
+/** Compares provider package weights while preserving registration ties. */
+function compareWeightedEntries(
+  left: { readonly weight: number; readonly sequence: number },
+  right: { readonly weight: number; readonly sequence: number },
+): number {
+  return right.weight - left.weight || left.sequence - right.sequence;
+}
+
+/** Validates one bounded plugin/provider presentation weight. */
+function validateWeight(weight: number): number {
+  if (!Number.isSafeInteger(weight) || weight < -10000 || weight > 10000) {
+    throw new Error(
+      "Plugin weight must be a safe integer between -10000 and 10000",
+    );
+  }
+  return weight;
 }
 
 /** Validates metadata that must remain selectable through the component API. */

@@ -1,10 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { HarImportProvider } from "../src/imports/har-provider.js";
+import { HarImportProvider } from "../../../plugins/har-import/src/har-provider.js";
 import { ImportProviderRegistry } from "../src/imports/import-provider-registry.js";
-import { OpenApiJsonImportProvider } from "../src/imports/openapi-json-provider.js";
+import { OpenApiJsonImportProvider } from "../../../plugins/openapi-import/src/openapi-json-provider.js";
 
 describe("import providers", () => {
+  it("lists providers by plugin weight with registration order as the tie-breaker", () => {
+    const registry = new ImportProviderRegistry();
+    registry.register(new HarImportProvider(), 0);
+    registry.register(new OpenApiJsonImportProvider(), 10);
+
+    expect(registry.manifests().map((provider) => provider.id)).toEqual([
+      "openapi-json",
+      "har",
+    ]);
+  });
+
   it("detects and maps OpenAPI operations into composed request plans", async () => {
     const registry = new ImportProviderRegistry([
       new OpenApiJsonImportProvider(),

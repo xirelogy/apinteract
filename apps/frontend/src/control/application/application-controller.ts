@@ -1,4 +1,5 @@
 import { v7 as uuidV7 } from "uuid";
+import type { EnabledPlugin } from "@apinteract/plugin-api";
 
 import {
   BrowserRequestSessionStorage,
@@ -59,6 +60,7 @@ import {
   type WorkspacePropertiesDraft,
   type WorkspacePropertiesTab,
 } from "@/model/domain/application";
+import { frontendPluginRuntime } from "@/app/plugins/frontend-plugin-host";
 
 class WorkflowError extends Error {
   readonly code: ApplicationErrorCode;
@@ -139,6 +141,23 @@ export class ApplicationController {
     const userId = useApplicationStore().session?.user.userId;
     if (userId !== undefined) {
       this.#startLocalSessionPersistence(userId);
+    }
+  }
+
+  /** Loads enabled backend metadata and merges it with local frontend plugins. */
+  async loadPlugins(): Promise<void> {
+    const store = useApplicationStore();
+    store.pluginListState = "loading";
+    const frontend = frontendPluginRuntime.plugins.list();
+    try {
+      const result = await this.#webSocket.command<{
+        plugins: readonly EnabledPlugin[];
+      }>("plugin.list", {});
+      store.plugins = [...frontend, ...result.plugins].sort(comparePlugins);
+      store.pluginListState = "ready";
+    } catch {
+      store.plugins = [...frontend].sort(comparePlugins);
+      store.pluginListState = "unavailable";
     }
   }
 
@@ -3072,6 +3091,15 @@ function executableDraft(draft: RequestDraftInput) {
 /** Returns an array containing the value exactly once. */
 function includeOnce(values: readonly string[], value: string): string[] {
   return values.includes(value) ? [...values] : [...values, value];
+}
+
+/** Orders enabled plugins consistently by name, target, and stable ID. */
+function comparePlugins(left: EnabledPlugin, right: EnabledPlugin): number {
+  return (
+    left.name.localeCompare(right.name) ||
+    left.target.localeCompare(right.target) ||
+    left.id.localeCompare(right.id)
+  );
 }
 
 /** Updates request labels and methods in every loaded tree branch. */

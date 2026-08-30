@@ -36,6 +36,31 @@ export async function registerHttpRoutes(
     (_request, body, done) => done(null, body),
   );
 
+  /** Publishes validated frontend plugin metadata without executable details. */
+  server.get("/plugins/catalog.json", async (_request, reply) =>
+    reply
+      .header("Cache-Control", "no-cache")
+      .header("X-Content-Type-Options", "nosniff")
+      .send({ plugins: application.plugins.frontendCatalog() }),
+  );
+
+  /** Serves one immutable asset from a content-addressed frontend package. */
+  server.get<{
+    Params: { pluginId: string; hash: string; "*": string };
+  }>("/plugins/:pluginId/:hash/*", async (request, reply) => {
+    const asset = application.plugins.frontendAsset(
+      request.params.pluginId,
+      request.params.hash,
+      request.params["*"],
+    );
+    if (asset === undefined) return reply.code(404).send();
+    return reply
+      .header("Cache-Control", "public, max-age=31536000, immutable")
+      .header("X-Content-Type-Options", "nosniff")
+      .type(asset.contentType)
+      .send(asset.bytes);
+  });
+
   /** Reports backend readiness, including proxy and audit-outbox dependencies. */
   server.get("/health", async (_request, reply) => {
     const proxyReady = await application.proxy.health();

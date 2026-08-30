@@ -23,6 +23,7 @@ const REQUEST_BODY_DEFINITION_MIGRATION = "0013_request_body_definition";
 const REQUEST_ATTACHMENTS_MIGRATION = "0014_request_attachments";
 const CAPTURED_EXCHANGES_MIGRATION = "0015_captured_exchanges";
 const RESOURCE_DOCUMENTATION_MIGRATION = "0016_resource_documentation";
+const GENERIC_CAPTURE_SOURCE_MIGRATION = "0017_generic_capture_source";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -191,7 +192,7 @@ CREATE TABLE captured_exchanges (
   workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   request_id BLOB NOT NULL REFERENCES request_drafts(request_id) ON DELETE CASCADE,
   request_revision_id BLOB NOT NULL REFERENCES request_revisions(id) ON DELETE CASCADE,
-  source_provider_id TEXT NOT NULL CHECK(source_provider_id = 'har'),
+  source_provider_id TEXT NOT NULL CHECK(length(source_provider_id) BETWEEN 1 AND 100),
   status INTEGER NOT NULL CHECK(status BETWEEN 100 AND 599),
   status_text TEXT NOT NULL,
   headers_json TEXT NOT NULL,
@@ -433,6 +434,13 @@ export class SqliteDatabase {
     ) {
       this.#migrateResourceDocumentation();
     }
+
+    const genericCaptureSourceApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(GENERIC_CAPTURE_SOURCE_MIGRATION);
+    if (genericCaptureSourceApplied === undefined) {
+      this.#migrateGenericCaptureSource();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -477,6 +485,7 @@ export class SqliteDatabase {
         REQUEST_ATTACHMENTS_MIGRATION,
         CAPTURED_EXCHANGES_MIGRATION,
         RESOURCE_DOCUMENTATION_MIGRATION,
+        GENERIC_CAPTURE_SOURCE_MIGRATION,
       ].some((identifier) => !identifiers.has(identifier)) ||
       !this.#columnExists("request_drafts", "body_json") ||
       !this.#tableExists("request_attachments") ||
@@ -1017,7 +1026,7 @@ export class SqliteDatabase {
     })();
   }
 
-  /** Adds immutable HAR response captures without conflating them with executions. */
+  /** Adds immutable imported response captures without conflating executions. */
   #migrateCapturedExchanges(): void {
     this.#driver.transaction(() => {
       if (!this.#tableExists("captured_exchanges")) {
@@ -1027,7 +1036,7 @@ export class SqliteDatabase {
             workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
             request_id BLOB NOT NULL REFERENCES request_drafts(request_id) ON DELETE CASCADE,
             request_revision_id BLOB NOT NULL REFERENCES request_revisions(id) ON DELETE CASCADE,
-            source_provider_id TEXT NOT NULL CHECK(source_provider_id = 'har'),
+            source_provider_id TEXT NOT NULL CHECK(length(source_provider_id) BETWEEN 1 AND 100),
             status INTEGER NOT NULL CHECK(status BETWEEN 100 AND 599),
             status_text TEXT NOT NULL,
             headers_json TEXT NOT NULL,
@@ -1049,6 +1058,37 @@ export class SqliteDatabase {
       if (applied === undefined) {
         this.#recordMigration(CAPTURED_EXCHANGES_MIGRATION);
       }
+    })();
+  }
+
+  /** Widens legacy capture provenance to any validated import-provider ID. */
+  #migrateGenericCaptureSource(): void {
+    this.#driver.transaction(() => {
+      this.#driver.exec(`
+        ALTER TABLE captured_exchanges RENAME TO captured_exchanges_legacy_source;
+        CREATE TABLE captured_exchanges (
+          id BLOB PRIMARY KEY CHECK(length(id) = 16),
+          workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          request_id BLOB NOT NULL REFERENCES request_drafts(request_id) ON DELETE CASCADE,
+          request_revision_id BLOB NOT NULL REFERENCES request_revisions(id) ON DELETE CASCADE,
+          source_provider_id TEXT NOT NULL CHECK(length(source_provider_id) BETWEEN 1 AND 100),
+          status INTEGER NOT NULL CHECK(status BETWEEN 100 AND 599),
+          status_text TEXT NOT NULL,
+          headers_json TEXT NOT NULL,
+          content_type TEXT,
+          body_text TEXT NOT NULL,
+          body_encoding TEXT NOT NULL CHECK(body_encoding IN ('text', 'base64')),
+          body_complete INTEGER NOT NULL CHECK(body_complete IN (0, 1)),
+          body_bytes INTEGER NOT NULL CHECK(body_bytes >= 0),
+          recorded_at INTEGER,
+          imported_at INTEGER NOT NULL
+        ) STRICT;
+        INSERT INTO captured_exchanges SELECT * FROM captured_exchanges_legacy_source;
+        DROP TABLE captured_exchanges_legacy_source;
+        CREATE INDEX captured_exchanges_request_imported
+          ON captured_exchanges(request_id, imported_at DESC, id DESC);
+      `);
+      this.#recordMigration(GENERIC_CAPTURE_SOURCE_MIGRATION);
     })();
   }
 

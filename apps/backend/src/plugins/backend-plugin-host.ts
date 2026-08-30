@@ -1,37 +1,77 @@
 import type {
-  BackendPlugin,
-  BackendPluginProviders,
+  EnabledPlugin,
+  PluginPackageManifest,
+  PluginSource,
+} from "@apinteract/plugin-api";
+import type {
+  BackendPluginModule,
   ImportProvider,
 } from "@apinteract/plugin-api/backend";
 
 import { ImportProviderRegistry } from "../imports/import-provider-registry.js";
-import { builtinImportPlugin } from "./builtin-import-plugin.js";
 
-const pluginIdPattern = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u;
-const semanticVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
-
-/** Owns installed backend plugins and routes server-side contributions. */
+/** Owns installed backend plugins and commits each package atomically. */
 export class BackendPluginHost {
   readonly #imports: ImportProviderRegistry;
-  readonly #installed = new Set<string>();
+  readonly #installed = new Map<string, EnabledPlugin>();
 
   constructor(imports: ImportProviderRegistry) {
     this.#imports = imports;
   }
 
-  /** Installs one backend-only plugin before services accept requests. */
-  install(plugin: BackendPlugin): void {
-    validateBackendManifest(plugin);
-    if (this.#installed.has(plugin.manifest.id)) {
+  /** Installs one validated backend package without exposing partial work. */
+  install(
+    manifest: PluginPackageManifest<"backend">,
+    plugin: BackendPluginModule,
+    source: PluginSource,
+  ): void {
+    if (this.#installed.has(manifest.id)) {
+      throw new Error(`Backend plugin is already installed: ${manifest.id}`);
+    }
+    const imports: ImportProvider[] = [];
+    plugin.register({
+      register: (provider, contribution) => {
+        if (!manifest.providers.includes(provider)) {
+          throw new Error(
+            `Backend plugin ${manifest.id} did not declare provider ${provider}`,
+          );
+        }
+        if (provider !== "request.import") {
+          throw new Error(
+            `Unsupported backend plugin provider: ${String(provider)}`,
+          );
+        }
+        imports.push(contribution);
+      },
+    });
+    if (
+      manifest.providers.length !== 1 ||
+      manifest.providers[0] !== "request.import"
+    ) {
+      throw new Error(`Backend plugin ${manifest.id} has invalid providers`);
+    }
+    if (imports.length === 0) {
       throw new Error(
-        `Backend plugin is already installed: ${plugin.manifest.id}`,
+        `Backend plugin ${manifest.id} registered no request.import contribution`,
       );
     }
-    plugin.register({
-      register: (provider, contribution) =>
-        this.#register(provider, contribution),
+    const validation = new ImportProviderRegistry(this.#imports.providers());
+    for (const provider of imports) validation.register(provider);
+    for (const provider of imports) {
+      this.#imports.register(provider, manifest.weight ?? 0);
+    }
+    this.#installed.set(manifest.id, {
+      id: manifest.id,
+      name: manifest.name,
+      version: manifest.version,
+      target: manifest.target,
+      source,
     });
-    this.#installed.add(plugin.manifest.id);
+  }
+
+  /** Returns successfully installed backend packages in installation order. */
+  list(): readonly EnabledPlugin[] {
+    return [...this.#installed.values()];
   }
 
   /** Reports whether one stable plugin ID completed registration. */
@@ -39,16 +79,11 @@ export class BackendPluginHost {
     return this.#installed.has(pluginId);
   }
 
-  /** Routes a type-checked contribution to its backend-owned registry. */
-  #register<TProvider extends keyof BackendPluginProviders>(
-    provider: TProvider,
-    contribution: BackendPluginProviders[TProvider],
-  ): void {
-    if (provider === "request.import") {
-      this.#imports.register(contribution as ImportProvider);
-      return;
+  /** Requires at least one import implementation without naming a package. */
+  validateCapabilities(): void {
+    if (this.#imports.providers().length === 0) {
+      throw new Error("No request import provider is available");
     }
-    throw new Error(`Unsupported backend plugin provider: ${String(provider)}`);
   }
 }
 
@@ -58,38 +93,9 @@ export interface BackendPluginRuntime {
   readonly imports: ImportProviderRegistry;
 }
 
-/** Creates an isolated backend plugin runtime for composition or tests. */
-export function createBackendPluginRuntime(
-  plugins: readonly BackendPlugin[] = [builtinImportPlugin],
-): BackendPluginRuntime {
+/** Creates an empty backend runtime populated only through package discovery. */
+export function createBackendPluginRuntime(): BackendPluginRuntime {
   const imports = new ImportProviderRegistry();
-  const host = new BackendPluginHost(imports);
-  for (const plugin of plugins) host.install(plugin);
-  return { plugins: host, imports };
+  const plugins = new BackendPluginHost(imports);
+  return { plugins, imports };
 }
-
-/** Rejects malformed or cross-runtime plugin packages before registration. */
-function validateBackendManifest(plugin: BackendPlugin): void {
-  const { manifest } = plugin;
-  if (manifest.apiVersion !== 1) {
-    throw new Error(
-      `Unsupported backend plugin API version: ${String(manifest.apiVersion)}`,
-    );
-  }
-  if (manifest.target !== "backend") {
-    throw new Error(
-      `Backend host cannot install a ${String(manifest.target)} plugin`,
-    );
-  }
-  if (!pluginIdPattern.test(manifest.id)) {
-    throw new Error(`Invalid backend plugin ID: ${manifest.id}`);
-  }
-  if (manifest.name.trim() === "") {
-    throw new Error(`Backend plugin name is required: ${manifest.id}`);
-  }
-  if (!semanticVersionPattern.test(manifest.version)) {
-    throw new Error(`Invalid backend plugin version: ${manifest.version}`);
-  }
-}
-
-export const backendPluginRuntime = createBackendPluginRuntime();

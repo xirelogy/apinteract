@@ -76,6 +76,10 @@ function backendConfiguration(origin) {
     frontend: {
       distPath: resolve(repositoryRoot, "apps", "frontend", "dist"),
     },
+    plugins: {
+      builtinPath: resolve(repositoryRoot, "plugins"),
+      userPath: resolve(runtimeRoot, "data", "plugins"),
+    },
   };
 }
 

@@ -1,22 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import type { ImageDimensions } from "@apinteract/plugin-api/frontend";
 
 import {
   RESPONSE_IMAGE_MAX_DIMENSION,
   RESPONSE_IMAGE_MAX_PIXELS,
   RESPONSE_IMAGE_PREVIEW_LIMIT_BYTES,
 } from "@/model/domain/response-content";
-import {
-  readImageDimensions,
-  type ImageDimensions,
-} from "@/model/domain/image-dimensions";
-
 const props = defineProps<{
   executionId: string;
   mediaType: string;
   byteLength: number;
   loadBody: (executionId: string) => Promise<Blob>;
+  inspect: (mediaType: string, bytes: Uint8Array) => ImageDimensions | null;
 }>();
 
 const { t } = useI18n();
@@ -53,7 +50,7 @@ async function load(): Promise<void> {
     }
     const header = await readBlobHeader(body);
     if (!active) return;
-    const parsedDimensions = readImageDimensions(props.mediaType, header);
+    const parsedDimensions = props.inspect(props.mediaType, header);
     if (parsedDimensions === null) {
       state.value = "invalid";
       return;

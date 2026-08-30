@@ -1,0 +1,17 @@
+{
+  "name": "@apinteract/plugin-openapi-import",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@apinteract/plugin-api": "workspace:*",
+    "@apinteract/plugin-sdk": "workspace:*",
+    "@types/node": "24.10.0",
+    "typescript": "5.9.3",
+    "vite": "7.1.10"
+  }
+}

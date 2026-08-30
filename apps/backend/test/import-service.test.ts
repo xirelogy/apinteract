@@ -12,6 +12,7 @@ import { SqliteDatabase } from "../src/persistence/sqlite-database.js";
 import { RequestService } from "../src/requests/request-service.js";
 import { VariableService } from "../src/variables/variable-service.js";
 import { WorkspaceService } from "../src/workspaces/workspace-service.js";
+import { createImportProviderRegistry } from "./plugin-fixtures.js";
 
 describe("ImportService", () => {
   it("rejects a selected HAR WebSocket request before persistence", async () => {
@@ -19,7 +20,10 @@ describe("ImportService", () => {
     const requestService = {
       importRequests,
     } as unknown as RequestService;
-    const imports = new ImportService(requestService);
+    const imports = new ImportService(
+      requestService,
+      createImportProviderRegistry(),
+    );
     const source = {
       name: "websocket.har",
       text: JSON.stringify({
@@ -89,7 +93,10 @@ describe("ImportService", () => {
         variables,
         audit,
       );
-      const imports = new ImportService(requests);
+      const imports = new ImportService(
+        requests,
+        createImportProviderRegistry(),
+      );
       const workspace = await workspaces.create(userId, "Workspace");
       const source = {
         name: "capture.har",
@@ -224,7 +231,10 @@ describe("ImportService", () => {
         variables,
         audit,
       );
-      const imports = new ImportService(requests);
+      const imports = new ImportService(
+        requests,
+        createImportProviderRegistry(),
+      );
       const workspace = await workspaces.create(userId, "Workspace");
       const source = {
         name: "secured-api.json",

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { ref } from "vue";
+import { createPinia } from "pinia";
 import { createI18n } from "vue-i18n";
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -94,7 +95,7 @@ describe("AppHeader", () => {
         navigatorOpen: false,
       },
       global: {
-        plugins: [i18n],
+        plugins: [i18n, createPinia()],
         provide: {
           [translationServiceKey as symbol]: translation,
         },
@@ -131,6 +132,7 @@ describe("AppHeader", () => {
     expect(optionTabs.map((tab) => tab.text())).toEqual([
       "General",
       "Defaults",
+      "Plugins",
     ]);
     expect(optionTabs[0]?.attributes("aria-selected")).toBe("true");
     expect(optionsDialog.findAll("label").map((label) => label.text())).toEqual(

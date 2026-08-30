@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import type { EnabledPlugin } from "@apinteract/plugin-api";
 
 import type {
   CollectionView,
@@ -42,5 +43,7 @@ export const useApplicationStore = defineStore("application", {
     activeWorkbenchTabId: null as string | null,
     busy: false,
     error: null as ApplicationError | null,
+    plugins: [] as EnabledPlugin[],
+    pluginListState: "idle" as "idle" | "loading" | "ready" | "unavailable",
   }),
 });

@@ -1,0 +1,24 @@
+{
+  "name": "@apinteract/plugin-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./backend/import": {
+      "types": "./src/backend/import.ts",
+      "default": "./src/backend/import.ts"
+    },
+    "./frontend/localization": {
+      "types": "./src/frontend/localization.ts",
+      "default": "./src/frontend/localization.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@apinteract/plugin-api": "workspace:*",
+    "@types/node": "24.10.0",
+    "typescript": "5.9.3"
+  }
+}

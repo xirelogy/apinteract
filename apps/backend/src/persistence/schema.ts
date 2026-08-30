@@ -246,7 +246,7 @@ export interface CapturedExchangeTable {
   workspace_id: BinaryId;
   request_id: BinaryId;
   request_revision_id: BinaryId;
-  source_provider_id: "har";
+  source_provider_id: string;
   status: number;
   status_text: string;
   headers_json: string;

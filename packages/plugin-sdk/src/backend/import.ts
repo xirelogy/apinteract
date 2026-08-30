@@ -1,28 +1,38 @@
-import { ImportSourceError, type ImportSource } from "./import-types.js";
+import type { ImportSource } from "@apinteract/plugin-api/backend";
+
+/** Represents an import-provider failure that the host may safely expose. */
+export class ImportProviderError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
 
 /** Reports whether an unknown JSON value is a non-array object. */
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Narrows a JSON array without leaking TypeScript's any-valued Array.isArray type. */
+/** Narrows an unknown JSON array without exposing an any-valued result. */
 export function unknownArray(value: unknown): readonly unknown[] {
   return Array.isArray(value) ? (value as unknown[]) : [];
 }
 
-/** Parses one JSON source and rejects non-object document roots. */
+/** Parses one JSON import source and requires an object document root. */
 export function parseJsonObject(source: ImportSource): Record<string, unknown> {
   let value: unknown;
   try {
     value = JSON.parse(source.text);
   } catch {
-    throw new ImportSourceError(
+    throw new ImportProviderError(
       "import_json_invalid",
       `${source.name} does not contain valid JSON.`,
     );
   }
   if (!isRecord(value)) {
-    throw new ImportSourceError(
+    throw new ImportProviderError(
       "import_json_invalid",
       `${source.name} must contain a JSON object.`,
     );
@@ -49,14 +59,24 @@ export function editableValue(value: unknown): string {
   }
 }
 
-/** Derives a bounded display name from an uploaded source filename. */
-export function sourceStem(name: string): string {
+/** Derives a bounded display name after removing one declared extension. */
+export function sourceStem(
+  name: string,
+  extensions: readonly string[],
+): string {
   const withoutPath = name.split(/[\\/]/).at(-1) ?? name;
-  const stem = withoutPath.replace(/\.(json|har)$/i, "").trim();
+  const extension = extensions.find((candidate) =>
+    withoutPath.toLowerCase().endsWith(candidate.toLowerCase()),
+  );
+  const stem = (
+    extension === undefined
+      ? withoutPath
+      : withoutPath.slice(0, -extension.length)
+  ).trim();
   return (stem || "Imported requests").slice(0, 200);
 }
 
-/** Converts a byte-like string length into its UTF-8 byte count. */
+/** Returns the UTF-8 byte length of one imported text value. */
 export function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, "utf8");
 }

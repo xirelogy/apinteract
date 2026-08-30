@@ -2,6 +2,7 @@
 
 import { createI18n } from "vue-i18n";
 import { flushPromises, mount } from "@vue/test-utils";
+import { EditorView } from "@codemirror/view";
 import { describe, expect, it, vi } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
@@ -11,9 +12,10 @@ import type {
 } from "../src/model/contracts/backend";
 import CodeEditor from "../src/view/presentation/controls/CodeEditor.vue";
 import SelectMenu from "../src/view/presentation/controls/SelectMenu.vue";
-import HtmlResponsePreview from "../src/view/presentation/features/HtmlResponsePreview.vue";
-import ImageResponsePreview from "../src/view/presentation/features/ImageResponsePreview.vue";
 import ResponsePanel from "../src/view/presentation/features/ResponsePanel.vue";
+import { installApplicationTestPlugins } from "./plugin-fixtures";
+
+installApplicationTestPlugins();
 
 describe("ResponsePanel body transfer", () => {
   it("offers compact unified history and emits the selected exchange", async () => {
@@ -84,7 +86,7 @@ describe("ResponsePanel body transfer", () => {
     }).format(new Date(execution.createdAt));
     expect(options[0]?.label).toBe(`201 · Execution · ${dateTime}`);
     expect(options[0]?.label).not.toContain("APInteract");
-    expect(options[1]?.label).toContain("200 · Capture · HAR");
+    expect(options[1]?.label).toContain("200 · Imported response");
     select.vm.$emit("update:modelValue", exchanges[1]!.exchangeId);
     await wrapper.vm.$nextTick();
     expect(wrapper.emitted("selectExchange")).toEqual([
@@ -223,7 +225,7 @@ describe("ResponsePanel body transfer", () => {
     });
 
     expect(wrapper.get(".response-body-state").text()).toContain(
-      "Response content was not included in the imported HAR.",
+      "Response content was not included in the imported response.",
     );
   });
 
@@ -299,6 +301,7 @@ describe("ResponsePanel body transfer", () => {
     expect(wrapper.findAll('[role="tab"]').map((tab) => tab.text())).toEqual([
       "Error",
       "Raw",
+      "Text",
       "Headers 1",
     ]);
     expect(wrapper.get('[role="tab"]').attributes("aria-selected")).toBe(
@@ -499,7 +502,9 @@ describe("ResponsePanel body transfer", () => {
     });
 
     await vi.waitFor(() =>
-      expect(wrapper.findAllComponents(CodeEditor)).toHaveLength(2),
+      expect(
+        wrapper.find('[aria-label="Formatted JSON response body"]').exists(),
+      ).toBe(true),
     );
     expect(wrapper.findAll('[role="tab"]').map((tab) => tab.text())).toEqual([
       "Raw",
@@ -507,25 +512,28 @@ describe("ResponsePanel body transfer", () => {
       "Headers 1",
       "Scripts 0",
     ]);
-    const viewers = wrapper.findAllComponents(CodeEditor);
-    expect(viewers[0]!.props()).toMatchObject({
-      modelValue: source,
-      language: "plain",
-      readOnly: true,
-    });
-    expect(viewers[1]!.props()).toMatchObject({
-      modelValue: '{\n  "large": 9007199254740993,\n  "large": 2\n}',
-      language: "json",
-      readOnly: true,
-      foldable: true,
-    });
+    const raw = wrapper.get<HTMLElement>('[aria-label="Raw response body"]');
+    const structured = wrapper.get<HTMLElement>(
+      '[aria-label="Formatted JSON response body"]',
+    );
+    expect(
+      wrapper.find(".response-body-view > .plugin-view-host").exists(),
+    ).toBe(true);
+    expect(wrapper.find(".code-editor-plugin-view").exists()).toBe(true);
+    expect(
+      wrapper.find(".code-editor-plugin-view > .code-editor-control").exists(),
+    ).toBe(true);
+    expect(EditorView.findFromDOM(raw.element)?.state.doc.toString()).toBe(
+      source,
+    );
+    expect(
+      EditorView.findFromDOM(structured.element)?.state.doc.toString(),
+    ).toBe('{\n  "large": 9007199254740993,\n  "large": 2\n}');
+    expect(structured.attributes("data-language")).toBe("json");
 
-    const rawPanel = (viewers[0]!.element as Element).closest<HTMLElement>(
-      '[role="tabpanel"]',
-    );
-    const jsonPanel = (viewers[1]!.element as Element).closest<HTMLElement>(
-      '[role="tabpanel"]',
-    );
+    const rawPanel = raw.element.closest<HTMLElement>('[role="tabpanel"]');
+    const jsonPanel =
+      structured.element.closest<HTMLElement>('[role="tabpanel"]');
     expect(rawPanel?.hidden).toBe(true);
     expect(jsonPanel?.hidden).toBe(false);
 
@@ -544,7 +552,7 @@ describe("ResponsePanel body transfer", () => {
     expect(jsonPanel?.hidden).toBe(false);
   });
 
-  it("reports invalid structured content without offering a derived tab", () => {
+  it("keeps invalid structured content raw by default and lets its plugin explain the error", async () => {
     const source = '{"broken":}';
     const execution: ExecutionView = {
       executionId: "019fa8be-a510-76b9-b73b-69f4c7af7921",
@@ -572,12 +580,30 @@ describe("ResponsePanel body transfer", () => {
       },
     });
 
-    expect(
-      wrapper.findAll('[role="tab"]').map((tab) => tab.text()),
-    ).not.toContain("JSON");
-    expect(wrapper.get(".response-preview-notice").text()).toContain(
-      "could not be parsed",
+    expect(wrapper.findAll('[role="tab"]').map((tab) => tab.text())).toContain(
+      "JSON",
     );
+    expect(
+      wrapper
+        .findAll('[role="tab"]')
+        .find((tab) => tab.text() === "Raw")
+        ?.attributes("aria-selected"),
+    ).toBe("true");
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text() === "JSON")
+      ?.trigger("click");
+    await vi.waitFor(() =>
+      expect(wrapper.get(".response-preview-notice").text()).toContain(
+        "could not be parsed as JSON",
+      ),
+    );
+    const structured = wrapper.get<HTMLElement>(
+      '[aria-label="Formatted JSON response body"]',
+    );
+    expect(
+      EditorView.findFromDOM(structured.element)?.state.doc.toString(),
+    ).toBe(source);
   });
 
   it("offers isolated HTML and loads raster bytes only after selecting Image", async () => {
@@ -607,9 +633,18 @@ describe("ResponsePanel body transfer", () => {
     expect(
       htmlWrapper.findAll('[role="tab"]').map((tab) => tab.text()),
     ).toContain("Preview");
-    expect(htmlWrapper.getComponent(HtmlResponsePreview).props("source")).toBe(
-      html,
+    await htmlWrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text() === "Preview")
+      ?.trigger("click");
+    await vi.waitFor(() =>
+      expect(htmlWrapper.find("iframe.html-response-preview").exists()).toBe(
+        true,
+      ),
     );
+    expect(
+      htmlWrapper.get("iframe.html-response-preview").attributes("srcdoc"),
+    ).toContain(`<body>${html}</body>`);
 
     const bytes = new Uint8Array(24);
     bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -648,18 +683,14 @@ describe("ResponsePanel body transfer", () => {
         ],
       },
     });
-    expect(imageWrapper.findComponent(ImageResponsePreview).exists()).toBe(
-      false,
-    );
+    expect(imageWrapper.find(".image-response-preview").exists()).toBe(false);
     expect(loadBody).not.toHaveBeenCalled();
     await imageWrapper
       .findAll('[role="tab"]')
       .find((tab) => tab.text() === "Image")
       ?.trigger("click");
     await flushPromises();
-    expect(imageWrapper.findComponent(ImageResponsePreview).exists()).toBe(
-      true,
-    );
+    expect(imageWrapper.find(".image-response-preview").exists()).toBe(true);
     expect(loadBody).toHaveBeenCalledWith(
       "019fa8be-a510-76b9-b73b-69f4c7af7923",
     );

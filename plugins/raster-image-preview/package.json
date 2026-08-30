@@ -1,0 +1,16 @@
+{
+  "name": "@apinteract/plugin-raster-image-preview",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@apinteract/plugin-api": "workspace:*",
+    "typescript": "5.9.3",
+    "vite": "7.1.10"
+  }
+}

@@ -18,17 +18,6 @@ function i18n() {
   });
 }
 
-/** Creates minimal PNG header bytes with declared dimensions. */
-function png(width: number, height: number): Blob {
-  const bytes = new Uint8Array(24);
-  bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
-  bytes.set([73, 72, 68, 82], 12);
-  const view = new DataView(bytes.buffer);
-  view.setUint32(16, width);
-  view.setUint32(20, height);
-  return new Blob([bytes], { type: "application/octet-stream" });
-}
-
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -66,7 +55,7 @@ describe("HTML response preview", () => {
 
 describe("image response preview", () => {
   it("loads lazily supplied bytes, validates decode dimensions, and revokes its URL", async () => {
-    const body = png(640, 480);
+    const body = new Blob([new Uint8Array(24)]);
     const loadBody = vi.fn().mockResolvedValue(body);
     const createObjectUrl = vi
       .spyOn(URL, "createObjectURL")
@@ -80,6 +69,7 @@ describe("image response preview", () => {
         mediaType: "image/png",
         byteLength: body.size,
         loadBody,
+        inspect: () => ({ width: 640, height: 480 }),
       },
       global: { plugins: [i18n()] },
     });
@@ -110,6 +100,7 @@ describe("image response preview", () => {
         mediaType: "image/png",
         byteLength: RESPONSE_IMAGE_PREVIEW_LIMIT_BYTES + 1,
         loadBody: loadOversizedBody,
+        inspect: () => null,
       },
       global: { plugins: [i18n()] },
     });
@@ -119,13 +110,14 @@ describe("image response preview", () => {
     oversized.unmount();
 
     const createObjectUrl = vi.spyOn(URL, "createObjectURL");
-    const largeDimensions = png(10_000, 10_000);
+    const largeDimensions = new Blob([new Uint8Array(24)]);
     const large = mount(ImageResponsePreview, {
       props: {
         executionId: "019fa8be-a510-76b9-b73b-69f4c7af7912",
         mediaType: "image/png",
         byteLength: largeDimensions.size,
         loadBody: vi.fn().mockResolvedValue(largeDimensions),
+        inspect: () => ({ width: 10_000, height: 10_000 }),
       },
       global: { plugins: [i18n()] },
     });

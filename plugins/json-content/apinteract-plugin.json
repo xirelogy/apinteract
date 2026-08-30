@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 2,
+  "id": "apinteract.json-content",
+  "name": "JSON content",
+  "version": "1.0.0",
+  "weight": 0,
+  "target": "frontend",
+  "entrypoint": "dist/index.mjs",
+  "providers": ["request.content", "response.content"]
+}

@@ -1,20 +1,41 @@
 import type {
-  FrontendPlugin,
+  EnabledPlugin,
+  PluginPackageManifest,
+  PluginSource,
+} from "@apinteract/plugin-api";
+import type {
+  FrontendPluginModule,
   FrontendPluginProviders,
+  RequestBodyDefinition,
   RequestContentContribution,
   ResponseContentContribution,
 } from "@apinteract/plugin-api/frontend";
 
-import { builtinContentPlugin } from "@/app/plugins/builtin-content-plugin";
 import { RequestBodyPresetRegistry } from "@/model/domain/request-body-presets";
 import { ResponseContentPresenterRegistry } from "@/model/domain/response-content";
 
-const pluginIdPattern = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u;
-const semanticVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
+const requiredBodies: readonly RequestBodyDefinition[] = [
+  { kind: "none" },
+  { kind: "text", contentType: "text/plain", text: "" },
+  { kind: "urlencoded", contentType: null, fields: [] },
+  { kind: "multipart", contentType: null, boundary: "test", fields: [] },
+  {
+    kind: "file",
+    contentType: null,
+    attachment: {
+      attachmentId: "00000000-0000-7000-8000-000000000000",
+      workspaceId: "00000000-0000-7000-8000-000000000000",
+      fileName: "test.bin",
+      contentType: "application/octet-stream",
+      byteLength: 0,
+      sha256: "0".repeat(64),
+    },
+  },
+];
 
-/** Owns installed frontend plugins and routes their typed contributions. */
+/** Owns installed frontend plugins and commits each registration atomically. */
 export class FrontendPluginHost {
-  readonly #installed = new Set<string>();
+  readonly #installed = new Map<string, EnabledPlugin>();
   readonly #requestContent: RequestBodyPresetRegistry;
   readonly #responseContent: ResponseContentPresenterRegistry;
 
@@ -26,19 +47,37 @@ export class FrontendPluginHost {
     this.#responseContent = responseContent;
   }
 
-  /** Installs one frontend-only plugin during application bootstrap. */
-  install(plugin: FrontendPlugin): void {
-    validateFrontendManifest(plugin);
-    if (this.#installed.has(plugin.manifest.id)) {
-      throw new Error(
-        `Frontend plugin is already installed: ${plugin.manifest.id}`,
-      );
+  /** Installs one validated frontend package without exposing partial work. */
+  install(
+    manifest: PluginPackageManifest<"frontend">,
+    plugin: FrontendPluginModule,
+    source: PluginSource,
+  ): void {
+    if (this.#installed.has(manifest.id)) {
+      throw new Error(`Frontend plugin is already installed: ${manifest.id}`);
     }
+    const contributions: FrontendContribution[] = [];
     plugin.register({
-      register: (provider, contribution) =>
-        this.#register(provider, contribution),
+      register: (provider, contribution) => {
+        if (!manifest.providers.includes(provider)) {
+          throw new Error(
+            `Frontend plugin ${manifest.id} did not declare provider ${provider}`,
+          );
+        }
+        contributions.push({ provider, contribution } as FrontendContribution);
+      },
     });
-    this.#installed.add(plugin.manifest.id);
+    validateDeclaredProviders(manifest, contributions);
+    this.#validateAtomicRegistration(manifest.id, contributions);
+    for (const contribution of contributions) {
+      this.#register(manifest.id, contribution, manifest.weight ?? 0);
+    }
+    this.#installed.set(manifest.id, enabledPlugin(manifest, source));
+  }
+
+  /** Returns successfully installed frontend packages in installation order. */
+  list(): readonly EnabledPlugin[] {
+    return [...this.#installed.values()];
   }
 
   /** Reports whether one stable plugin ID completed registration. */
@@ -46,67 +85,142 @@ export class FrontendPluginHost {
     return this.#installed.has(pluginId);
   }
 
-  /** Routes a type-checked contribution to its runtime-specific registry. */
-  #register<TProvider extends keyof FrontendPluginProviders>(
-    provider: TProvider,
-    contribution: FrontendPluginProviders[TProvider],
+  /** Verifies the host primitives required by every request-body wire kind. */
+  validateCapabilities(): void {
+    for (const body of requiredBodies) {
+      this.#requestContent.resolveBody(body);
+    }
+  }
+
+  /** Validates all contributions against cloned registries before committing. */
+  #validateAtomicRegistration(
+    pluginId: string,
+    contributions: readonly FrontendContribution[],
   ): void {
-    if (provider === "request.content") {
-      this.#requestContent.register(contribution as RequestContentContribution);
-      return;
+    const requestContent = new RequestBodyPresetRegistry();
+    const responseContent = new ResponseContentPresenterRegistry();
+    for (const contribution of this.#requestContent.list()) {
+      const [ownerId, localId] = contributionIdParts(contribution.id);
+      requestContent.register({ ...contribution, id: localId }, ownerId);
     }
-    if (provider === "response.content") {
-      this.#responseContent.register(
-        contribution as ResponseContentContribution,
+    for (const contribution of this.#responseContent.list()) {
+      const [ownerId] = contribution.id.split("/", 1);
+      responseContent.register(
+        { ...contribution, id: contribution.id.slice(ownerId!.length + 1) },
+        ownerId,
       );
-      return;
     }
-    throw new Error(
-      `Unsupported frontend plugin provider: ${String(provider)}`,
+    for (const contribution of contributions) {
+      registerFrontendContribution(
+        pluginId,
+        contribution,
+        requestContent,
+        responseContent,
+        0,
+      );
+    }
+  }
+
+  /** Routes one committed contribution to its host-owned registry. */
+  #register(
+    pluginId: string,
+    contribution: FrontendContribution,
+    pluginWeight: number,
+  ): void {
+    registerFrontendContribution(
+      pluginId,
+      contribution,
+      this.#requestContent,
+      this.#responseContent,
+      pluginWeight,
     );
   }
 }
 
-/** Groups the initialized frontend host with the registries consumed by views. */
+/** Splits one host-qualified contribution ID back into package and local parts. */
+function contributionIdParts(id: string): readonly [string, string] {
+  const separator = id.indexOf("/");
+  if (separator <= 0 || separator === id.length - 1) {
+    throw new Error(`Contribution ID is not host-qualified: ${id}`);
+  }
+  return [id.slice(0, separator), id.slice(separator + 1)];
+}
+
+type FrontendContribution =
+  | {
+      readonly provider: "request.content";
+      readonly contribution: RequestContentContribution;
+    }
+  | {
+      readonly provider: "response.content";
+      readonly contribution: ResponseContentContribution;
+    };
+
+/** Groups the initialized frontend host with registries consumed by views. */
 export interface FrontendPluginRuntime {
   readonly plugins: FrontendPluginHost;
   readonly requestContent: RequestBodyPresetRegistry;
   readonly responseContent: ResponseContentPresenterRegistry;
 }
 
-/** Creates an isolated frontend plugin runtime for bootstrap or tests. */
-export function createFrontendPluginRuntime(
-  plugins: readonly FrontendPlugin[] = [builtinContentPlugin],
-): FrontendPluginRuntime {
+/** Creates an empty frontend runtime populated only through package loading. */
+export function createFrontendPluginRuntime(): FrontendPluginRuntime {
   const requestContent = new RequestBodyPresetRegistry();
   const responseContent = new ResponseContentPresenterRegistry();
-  const host = new FrontendPluginHost(requestContent, responseContent);
-  for (const plugin of plugins) host.install(plugin);
-  return { plugins: host, requestContent, responseContent };
+  const plugins = new FrontendPluginHost(requestContent, responseContent);
+  return { plugins, requestContent, responseContent };
 }
 
-/** Rejects malformed or cross-runtime plugin packages before registration. */
-function validateFrontendManifest(plugin: FrontendPlugin): void {
-  const { manifest } = plugin;
-  if (manifest.apiVersion !== 1) {
-    throw new Error(
-      `Unsupported frontend plugin API version: ${String(manifest.apiVersion)}`,
-    );
+/** Commits one narrowed contribution to the matching host registry. */
+function registerFrontendContribution(
+  pluginId: string,
+  registered: FrontendContribution,
+  requestContent: RequestBodyPresetRegistry,
+  responseContent: ResponseContentPresenterRegistry,
+  pluginWeight = 0,
+): void {
+  if (registered.provider === "request.content") {
+    requestContent.register(registered.contribution, pluginId, pluginWeight);
+    return;
   }
-  if (manifest.target !== "frontend") {
-    throw new Error(
-      `Frontend host cannot install a ${String(manifest.target)} plugin`,
-    );
+  responseContent.register(registered.contribution, pluginId);
+}
+
+/** Requires every declared provider to receive at least one contribution. */
+function validateDeclaredProviders(
+  manifest: PluginPackageManifest<"frontend">,
+  contributions: readonly FrontendContribution[],
+): void {
+  for (const provider of manifest.providers) {
+    if (!Object.hasOwn(frontendProviderNames, provider)) {
+      throw new Error(`Unsupported frontend plugin provider: ${provider}`);
+    }
+    if (
+      !contributions.some((contribution) => contribution.provider === provider)
+    ) {
+      throw new Error(
+        `Frontend plugin ${manifest.id} registered no ${provider} contribution`,
+      );
+    }
   }
-  if (!pluginIdPattern.test(manifest.id)) {
-    throw new Error(`Invalid frontend plugin ID: ${manifest.id}`);
-  }
-  if (manifest.name.trim() === "") {
-    throw new Error(`Frontend plugin name is required: ${manifest.id}`);
-  }
-  if (!semanticVersionPattern.test(manifest.version)) {
-    throw new Error(`Invalid frontend plugin version: ${manifest.version}`);
-  }
+}
+
+const frontendProviderNames: Readonly<
+  Record<keyof FrontendPluginProviders, true>
+> = { "request.content": true, "response.content": true };
+
+/** Converts canonical package metadata into the read-only enabled view. */
+function enabledPlugin(
+  manifest: PluginPackageManifest<"frontend">,
+  source: PluginSource,
+): EnabledPlugin {
+  return {
+    id: manifest.id,
+    name: manifest.name,
+    version: manifest.version,
+    target: manifest.target,
+    source,
+  };
 }
 
 export const frontendPluginRuntime = createFrontendPluginRuntime();

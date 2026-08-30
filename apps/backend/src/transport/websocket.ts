@@ -180,6 +180,8 @@ async function dispatch(
   switch (command.type) {
     case "system.ping":
       return { type: "system.pong", occurredAt: new Date().toISOString() };
+    case "plugin.list":
+      return { plugins: application.plugins.backendPlugins() };
     case "workspace.list":
       return { workspaces: await application.workspaces.list(userId) };
     case "workspace.create":

@@ -1,0 +1,19 @@
+{
+  "name": "@apinteract/plugin-xml-content",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lezer/xml": "1.0.6"
+  },
+  "devDependencies": {
+    "@apinteract/plugin-api": "workspace:*",
+    "@apinteract/plugin-sdk": "workspace:*",
+    "typescript": "5.9.3",
+    "vite": "7.1.10"
+  }
+}

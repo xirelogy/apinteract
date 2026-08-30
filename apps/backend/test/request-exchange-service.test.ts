@@ -14,6 +14,7 @@ import { SqliteDatabase } from "../src/persistence/sqlite-database.js";
 import { RequestService } from "../src/requests/request-service.js";
 import { VariableService } from "../src/variables/variable-service.js";
 import { WorkspaceService } from "../src/workspaces/workspace-service.js";
+import { createImportProviderRegistry } from "./plugin-fixtures.js";
 
 describe("RequestExchangeService", () => {
   it("sorts captures with executions and loads either representation", async () => {
@@ -60,7 +61,10 @@ describe("RequestExchangeService", () => {
         audit,
       );
       const workspace = await workspaces.create(userId, "Workspace");
-      const imports = new ImportService(requests);
+      const imports = new ImportService(
+        requests,
+        createImportProviderRegistry(),
+      );
       const source = {
         name: "capture.har",
         text: JSON.stringify({

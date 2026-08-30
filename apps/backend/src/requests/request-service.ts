@@ -3224,7 +3224,8 @@ function validateCapturedExchange(
   capture: CapturedExchangeView,
 ): CapturedExchangeView {
   if (
-    capture.source !== "har" ||
+    !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(capture.source) ||
+    capture.source.length > 100 ||
     !Number.isInteger(capture.status) ||
     capture.status < 100 ||
     capture.status > 599 ||

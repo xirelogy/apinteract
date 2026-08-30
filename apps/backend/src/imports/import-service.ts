@@ -1,5 +1,4 @@
 import type { EntityId } from "../foundation/id.js";
-import { createBackendPluginRuntime } from "../plugins/backend-plugin-host.js";
 import type { RequestService } from "../requests/request-service.js";
 import type { ImportProviderRegistry } from "./import-provider-registry.js";
 import {
@@ -17,10 +16,7 @@ export class ImportService {
   readonly #registry: ImportProviderRegistry;
   readonly #requests: RequestService;
 
-  constructor(
-    requests: RequestService,
-    registry = createBackendPluginRuntime().imports,
-  ) {
+  constructor(requests: RequestService, registry: ImportProviderRegistry) {
     this.#requests = requests;
     this.#registry = registry;
   }

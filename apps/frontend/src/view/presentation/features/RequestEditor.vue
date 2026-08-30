@@ -20,10 +20,13 @@ import {
   Trash2,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { v7 as uuidV7 } from "uuid";
 
 import { defaultHeaderMergeMode } from "@/app/preferences/header-preferences";
 import { frontendPluginRuntime } from "@/app/plugins/frontend-plugin-host";
+import {
+  localizePluginLabel,
+  useFrontendPluginUi,
+} from "@/app/plugins/frontend-plugin-ui";
 import {
   formatDateTime,
   useDateTimeFormatPreference,
@@ -31,7 +34,6 @@ import {
 import type {
   ExecutionView,
   HttpMethod,
-  MultipartFileField,
   RequestAttachment,
   RequestBodyDefinition,
   RequestField,
@@ -57,14 +59,12 @@ import {
 import { collectTemplateVariableNames } from "@/model/domain/template-variables";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
-import FormValueTypeToggle, {
-  type FormValueType,
-} from "@/view/presentation/controls/FormValueTypeToggle.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import InfoPopover from "@/view/presentation/controls/InfoPopover.vue";
 import HeaderMergeModeToggle from "@/view/presentation/controls/HeaderMergeModeToggle.vue";
 import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
+import PluginViewHost from "@/view/presentation/controls/PluginViewHost.vue";
 import TemplateTextControl from "@/view/presentation/controls/TemplateTextControl.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
 import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
@@ -79,10 +79,6 @@ import DocumentationEditor from "./DocumentationEditor.vue";
 const ScriptEditor = defineAsyncComponent(
   () => import("@/view/presentation/controls/ScriptEditor.vue"),
 );
-const CodeEditor = defineAsyncComponent(
-  () => import("@/view/presentation/controls/CodeEditor.vue"),
-);
-
 const props = withDefaults(
   defineProps<{
     request: RequestView | null;
@@ -127,6 +123,7 @@ const props = withDefaults(
 const i18n = useI18n();
 const { locale, t } = i18n;
 const requestBodyPresets = frontendPluginRuntime.requestContent;
+const pluginUi = useFrontendPluginUi();
 const dateTimeFormatPreference = useDateTimeFormatPreference();
 
 const emit = defineEmits<{
@@ -165,11 +162,7 @@ const targetModeOptions = computed(() => [
 const bodyTypeOptions = computed(() =>
   requestBodyPresets.list().map((preset) => ({
     value: preset.id,
-    label:
-      preset.label.translationKey !== undefined &&
-      i18n.te(preset.label.translationKey)
-        ? t(preset.label.translationKey)
-        : preset.label.default,
+    label: localizePluginLabel(preset.label, locale.value),
   })),
 );
 const requestTabs = [
@@ -190,36 +183,12 @@ const targetMode = ref<"absolute" | "composed">("composed");
 const targetUrl = ref("");
 const query = ref<RequestField[]>([]);
 const headers = ref<RequestField[]>([]);
-const bodyPresetId = ref("none");
+const bodyPresetId = ref(requestBodyPresets.resolveBody({ kind: "none" }).id);
 const bodyPreset = computed(() =>
   requestBodyPresets.require(bodyPresetId.value),
 );
-const bodyKind = computed(() => bodyPreset.value.bodyKind);
-const bodyText = ref("");
-const bodyFormatError = ref("");
-const bodyContentType = ref("");
-const bodyFileAttachment = ref<RequestAttachment | null>(null);
-const bodyFileInput = ref<HTMLInputElement | null>(null);
-const uploadingBodyFile = ref(false);
-interface PendingMultipartFileField {
-  readonly kind: "pending-file";
-  name: string;
-  enabled: boolean;
-  description?: string;
-  readonly textValue: string;
-}
-type MultipartFormField =
-  | RequestField
-  | MultipartFileField
-  | PendingMultipartFileField;
-type PersistedMultipartFormField = RequestField | MultipartFileField;
-const formFields = ref<MultipartFormField[]>([]);
-const multipartBoundary = ref(createMultipartBoundary());
-const attachmentInput = ref<HTMLInputElement | null>(null);
-const attachmentTargetIndex = ref<number | null>(null);
-const uploadingAttachment = ref(false);
+const bodyDefinition = ref<RequestBodyDefinition>({ kind: "none" });
 const expandedFieldDescriptions = ref<string[]>([]);
-const expandedFormDescriptions = ref<number[]>([]);
 const expandedInheritedDescriptions = ref<RequestField[]>([]);
 const bodyTypeControlId = useId();
 const preRequestScript = ref("");
@@ -254,20 +223,7 @@ watch(
     );
     const requestBody = bodyDefinitionFromSource(source);
     bodyPresetId.value = requestBodyPresetId(requestBody);
-    bodyText.value = requestBody.kind === "text" ? requestBody.text : "";
-    bodyFileAttachment.value =
-      requestBody.kind === "file" ? { ...requestBody.attachment } : null;
-    bodyContentType.value =
-      requestBody.kind === "none" ? "" : (requestBody.contentType ?? "");
-    formFields.value = editableFormFields(
-      requestBody.kind === "urlencoded" || requestBody.kind === "multipart"
-        ? requestBody.fields
-        : [],
-    );
-    multipartBoundary.value =
-      requestBody.kind === "multipart"
-        ? requestBody.boundary
-        : createMultipartBoundary();
+    bodyDefinition.value = cloneRequestBody(requestBody);
     preRequestScript.value = source?.preRequestScript ?? "";
     postResponseScript.value = source?.postResponseScript ?? "";
   },
@@ -326,25 +282,8 @@ const bodyHasContent = computed(() => {
   return body.fields.length > 0;
 });
 const generatedContentType = computed(() => {
-  if (bodyKind.value === "none") return null;
-  const override = bodyContentType.value.trim();
-  if (bodyKind.value === "text") {
-    return override || null;
-  }
-  if (bodyKind.value === "file") {
-    return override || bodyFileAttachment.value?.contentType || null;
-  }
-  const contentType = override || bodyPreset.value.defaultContentType || "";
-  if (contentType === "") return null;
-  return bodyKind.value === "multipart"
-    ? `${contentType}; boundary=${multipartBoundary.value}`
-    : contentType;
+  return bodyPreset.value.effectiveContentType(bodyDefinition.value);
 });
-const bodyContentTypePlaceholder = computed(() =>
-  bodyKind.value === "file"
-    ? (bodyFileAttachment.value?.contentType ?? "application/octet-stream")
-    : (bodyPreset.value.defaultContentType ?? ""),
-);
 const overriddenInheritedHeaderNames = computed(() => {
   const names = new Set<string>();
   for (const header of meaningfulRequestFields(headers.value)) {
@@ -362,14 +301,7 @@ const referencedVariableNames = computed(() =>
     ...query.value.map((field) => field.value),
     ...headers.value.map((field) => field.value),
     ...props.inheritedHeaders.map((field) => field.value),
-    bodyKind.value === "text" ? bodyText.value : "",
-    ...(bodyKind.value === "urlencoded" || bodyKind.value === "multipart"
-      ? formFields.value.flatMap((field) =>
-          isMultipartFileValueField(field)
-            ? [field.name]
-            : [field.name, field.value],
-        )
-      : []),
+    ...requestBodyTemplateValues(bodyDefinition.value),
   ]),
 );
 const previewSignature = computed(() =>
@@ -460,8 +392,9 @@ const canSave = computed(
     documentedFieldsHaveNames([
       ...meaningfulRequestFields(query.value),
       ...meaningfulRequestFields(headers.value),
-      ...(bodyKind.value === "urlencoded" || bodyKind.value === "multipart"
-        ? meaningfulMultipartFields()
+      ...(bodyDefinition.value.kind === "urlencoded" ||
+      bodyDefinition.value.kind === "multipart"
+        ? bodyDefinition.value.fields
         : []),
     ]) &&
     (props.temporary || name.value.trim() !== ""),
@@ -527,93 +460,6 @@ const fieldReorder = useRowReorder({
   isDisabled: () => editorDisabled.value,
 });
 
-/** Moves one structured form field while retaining its trailing blank row. */
-function moveFormField(fromIndex: number, toIndex: number): void {
-  const [field] = formFields.value.splice(fromIndex, 1);
-  if (field !== undefined) formFields.value.splice(toIndex, 0, field);
-  expandedFormDescriptions.value = remapMovedIndex(
-    expandedFormDescriptions.value,
-    fromIndex,
-    toIndex,
-  );
-  ensureTrailingFormBlank();
-  emitChange();
-}
-
-const formFieldReorder = useRowReorder({
-  canMove: (index) =>
-    formFields.value[index] !== undefined &&
-    !isBlankFormField(formFields.value[index]),
-  move: moveFormField,
-  isDisabled: () => editorDisabled.value,
-});
-
-/** Publishes a form-field edit unless its file selection is still incomplete. */
-function updateFormField(index: number): void {
-  ensureTrailingFormBlank();
-  if (isPendingMultipartFileField(formFields.value[index])) return;
-  emitChange();
-}
-
-/** Removes one form field without removing the presentation-only blank row. */
-function removeFormField(index: number): void {
-  formFields.value.splice(index, 1);
-  expandedFormDescriptions.value = expandedFormDescriptions.value.flatMap(
-    (expandedIndex) =>
-      expandedIndex === index
-        ? []
-        : [expandedIndex > index ? expandedIndex - 1 : expandedIndex],
-  );
-  ensureTrailingFormBlank();
-  emitChange();
-}
-
-/** Reports whether one multipart row owns immutable uploaded file bytes. */
-function isMultipartFileField(
-  field: MultipartFormField,
-): field is MultipartFileField {
-  return "kind" in field && field.kind === "file";
-}
-
-/** Reports whether one row is waiting for the user to select file bytes. */
-function isPendingMultipartFileField(
-  field: MultipartFormField | undefined,
-): field is PendingMultipartFileField {
-  return (
-    field !== undefined && "kind" in field && field.kind === "pending-file"
-  );
-}
-
-/** Reports whether one multipart row currently uses the file value type. */
-function isMultipartFileValueField(
-  field: MultipartFormField,
-): field is MultipartFileField | PendingMultipartFileField {
-  return isMultipartFileField(field) || isPendingMultipartFileField(field);
-}
-
-/** Reports whether a row's current value type can be changed. */
-function formValueTypeDisabled(field: MultipartFormField): boolean {
-  return (
-    editorDisabled.value ||
-    uploadingAttachment.value ||
-    (!isMultipartFileValueField(field) && props.uploadAttachment === null)
-  );
-}
-
-/** Reports whether the picker can assign or replace attachment bytes. */
-function attachmentSelectionDisabled(): boolean {
-  return (
-    editorDisabled.value ||
-    uploadingAttachment.value ||
-    props.uploadAttachment === null
-  );
-}
-
-/** Reports whether one presentation-only multipart text row is untouched. */
-function isBlankFormField(field: MultipartFormField): boolean {
-  return !isMultipartFileValueField(field) && isBlankRequestField(field);
-}
-
 /** Requires a name whenever a meaningful row owns documentation metadata. */
 function documentedFieldsHaveNames(
   fields: readonly { readonly name: string; readonly description?: string }[],
@@ -638,34 +484,7 @@ function toggleFieldDescription(index: number): void {
     : [...expandedFieldDescriptions.value, key];
 }
 
-/** Toggles one form row's description while preserving expansion on cloning. */
-function toggleFormDescription(index: number): void {
-  expandedFormDescriptions.value = expandedFormDescriptions.value.includes(
-    index,
-  )
-    ? expandedFormDescriptions.value.filter((candidate) => candidate !== index)
-    : [...expandedFormDescriptions.value, index];
-}
-
-/** Remaps expanded numeric positions after moving one row. */
-function remapMovedIndex(
-  expanded: readonly number[],
-  fromIndex: number,
-  toIndex: number,
-): number[] {
-  return expanded.map((index) => {
-    if (index === fromIndex) return toIndex;
-    if (fromIndex < toIndex && index > fromIndex && index <= toIndex) {
-      return index - 1;
-    }
-    if (fromIndex > toIndex && index >= toIndex && index < fromIndex) {
-      return index + 1;
-    }
-    return index;
-  });
-}
-
-/** Remaps one request-field section's expansion keys after moving a row. */
+/** Remaps one request-field section's expansion keys after moving one row. */
 function remapMovedDescriptionIndex(
   expanded: readonly string[],
   kind: "query" | "headers",
@@ -675,12 +494,15 @@ function remapMovedDescriptionIndex(
   const prefix = `${kind}:`;
   return expanded.map((key) => {
     if (!key.startsWith(prefix)) return key;
-    const [remapped] = remapMovedIndex(
-      [Number(key.slice(prefix.length))],
-      fromIndex,
-      toIndex,
-    );
-    return `${prefix}${remapped}`;
+    const index = Number(key.slice(prefix.length));
+    if (index === fromIndex) return `${prefix}${toIndex}`;
+    if (fromIndex < toIndex && index > fromIndex && index <= toIndex) {
+      return `${prefix}${index - 1}`;
+    }
+    if (fromIndex > toIndex && index >= toIndex && index < fromIndex) {
+      return `${prefix}${index + 1}`;
+    }
+    return key;
   });
 }
 
@@ -707,133 +529,6 @@ function toggleInheritedDescription(field: RequestField): void {
           (candidate) => candidate !== field,
         )
       : [...expandedInheritedDescriptions.value, field];
-}
-
-/** Deep-copies persisted multipart rows and appends one text-entry row. */
-function editableFormFields(
-  fields: readonly MultipartFormField[],
-): MultipartFormField[] {
-  const editable = fields.map((field) =>
-    isMultipartFileField(field)
-      ? { ...field, attachment: { ...field.attachment } }
-      : { ...field },
-  );
-  if (editable.length === 0 || !isBlankFormField(editable.at(-1)!)) {
-    editable.push({ name: "", value: "", enabled: true });
-  }
-  return editable;
-}
-
-/** Maintains one trailing text row after edits, uploads, and reordering. */
-function ensureTrailingFormBlank(): void {
-  if (
-    formFields.value.length === 0 ||
-    !isBlankFormField(formFields.value.at(-1)!)
-  ) {
-    formFields.value.push({ name: "", value: "", enabled: true });
-  }
-}
-
-/** Returns meaningful text rows for URL encoding without retained file parts. */
-function meaningfulUrlEncodedFields(): RequestField[] {
-  return formFields.value.flatMap((field) =>
-    isMultipartFileValueField(field) || isBlankFormField(field)
-      ? []
-      : [{ ...field }],
-  );
-}
-
-/** Returns ordered multipart text/file rows without the trailing blank entry. */
-function meaningfulMultipartFields(): PersistedMultipartFormField[] {
-  const fields: PersistedMultipartFormField[] = [];
-  for (const field of formFields.value) {
-    if (isBlankFormField(field) || isPendingMultipartFileField(field)) continue;
-    fields.push(
-      isMultipartFileField(field)
-        ? { ...field, attachment: { ...field.attachment } }
-        : { ...field },
-    );
-  }
-  return fields;
-}
-
-const visibleFormFields = computed(() =>
-  formFields.value.flatMap((field, index) =>
-    bodyKind.value === "urlencoded" && isMultipartFileValueField(field)
-      ? []
-      : [{ field, index }],
-  ),
-);
-
-/** Opens the native file picker for one multipart name-value row. */
-function chooseAttachment(index: number): void {
-  attachmentTargetIndex.value = index;
-  attachmentInput.value?.click();
-}
-
-/** Uploads a selected file and assigns it as the targeted row's value. */
-async function attachFile(event: Event): Promise<void> {
-  const input = event.currentTarget;
-  if (!(input instanceof HTMLInputElement) || props.uploadAttachment === null) {
-    return;
-  }
-  const file = input.files?.[0];
-  const targetIndex = attachmentTargetIndex.value;
-  input.value = "";
-  attachmentTargetIndex.value = null;
-  if (file === undefined || targetIndex === null) return;
-  uploadingAttachment.value = true;
-  try {
-    const attachment = await props.uploadAttachment(file);
-    const field = formFields.value[targetIndex];
-    if (field === undefined || bodyKind.value !== "multipart") return;
-    formFields.value.splice(targetIndex, 1, {
-      kind: "file",
-      name: field.name,
-      enabled: field.enabled,
-      ...(field.description === undefined
-        ? {}
-        : { description: field.description }),
-      attachment,
-    });
-    ensureTrailingFormBlank();
-    emitChange();
-  } catch {
-    // The controller publishes the safe application error; keep the picker usable.
-  } finally {
-    uploadingAttachment.value = false;
-  }
-}
-
-/** Applies one multipart row's value type without uploading until requested. */
-function selectFormValueType(index: number, valueType: FormValueType): void {
-  const field = formFields.value[index];
-  if (field === undefined) return;
-  if (valueType === "file") {
-    if (isMultipartFileValueField(field)) return;
-    formFields.value.splice(index, 1, {
-      kind: "pending-file",
-      name: field.name,
-      enabled: field.enabled,
-      ...(field.description === undefined
-        ? {}
-        : { description: field.description }),
-      textValue: field.value,
-    });
-    ensureTrailingFormBlank();
-    return;
-  }
-  if (!isMultipartFileValueField(field)) return;
-  formFields.value.splice(index, 1, {
-    name: field.name,
-    value: isPendingMultipartFileField(field) ? field.textValue : "",
-    enabled: field.enabled,
-    ...(field.description === undefined
-      ? {}
-      : { description: field.description }),
-  });
-  ensureTrailingFormBlank();
-  emitChange();
 }
 
 /** Publishes a field edit and materializes the next trailing blank row. */
@@ -871,17 +566,6 @@ function requestBodyPresetId(body: RequestBodyDefinition): string {
   return requestBodyPresets.resolveBody(body).id;
 }
 
-/** Formats compact attachment sizes without implying transformed wire bytes. */
-function formatAttachmentSize(byteLength: number): string {
-  if (byteLength < 1024) return `${byteLength} B`;
-  return `${(byteLength / 1024).toFixed(byteLength < 10_240 ? 1 : 0)} KiB`;
-}
-
-/** Creates a stable, persisted multipart boundary for one editable body. */
-function createMultipartBoundary(): string {
-  return `----APInteractBoundary${uuidV7().replaceAll("-", "")}`;
-}
-
 /** Normalizes a legacy or semantic request view into the editable body model. */
 function bodyDefinitionFromSource(
   source: RequestDraftInput | RequestView | null | undefined,
@@ -893,42 +577,64 @@ function bodyDefinitionFromSource(
     : { kind: "none" };
 }
 
-/** Builds the semantic body represented by the body controls. */
-function currentRequestBody(): RequestBodyDefinition {
-  if (bodyKind.value === "none") return { kind: "none" };
-  const contentType = bodyContentType.value.trim() || null;
-  if (bodyKind.value === "text") {
+/** Deep-copies request body values across plugin lifecycle boundaries. */
+function cloneRequestBody(body: RequestBodyDefinition): RequestBodyDefinition {
+  if (body.kind === "file") {
+    return { ...body, attachment: { ...body.attachment } };
+  }
+  if (body.kind === "urlencoded") {
+    return { ...body, fields: body.fields.map((field) => ({ ...field })) };
+  }
+  if (body.kind === "multipart") {
     return {
-      kind: "text",
-      contentType,
-      text: bodyText.value,
+      ...body,
+      fields: body.fields.map((field) =>
+        "kind" in field && field.kind === "file"
+          ? { ...field, attachment: { ...field.attachment } }
+          : { ...field },
+      ),
     };
   }
-  if (bodyKind.value === "file") {
-    return bodyFileAttachment.value === null
-      ? { kind: "none" }
-      : {
-          kind: "file",
-          contentType,
-          attachment: { ...bodyFileAttachment.value },
-        };
+  return { ...body };
+}
+
+/** Extracts variable-bearing text from the canonical HTTP body. */
+function requestBodyTemplateValues(body: RequestBodyDefinition): string[] {
+  if (body.kind === "text") return [body.text];
+  if (body.kind === "urlencoded" || body.kind === "multipart") {
+    return body.fields.flatMap((field) =>
+      "kind" in field ? [field.name] : [field.name, field.value],
+    );
   }
-  return bodyKind.value === "urlencoded"
-    ? {
-        kind: "urlencoded",
-        contentType,
-        fields: meaningfulUrlEncodedFields(),
-      }
-    : {
-        kind: "multipart",
-        contentType,
-        boundary: multipartBoundary.value,
-        fields: meaningfulMultipartFields(),
-      };
+  return [];
+}
+
+/** Returns the current canonical body without sharing mutable nested values. */
+function currentRequestBody(): RequestBodyDefinition {
+  return cloneRequestBody(bodyDefinition.value);
+}
+
+const bodyEditorContext = computed(() => ({
+  body: currentRequestBody(),
+  disabled: editorDisabled.value,
+  locale: locale.value,
+  variablePreviews: props.variablePreviews,
+  ...(props.uploadAttachment === null
+    ? {}
+    : { uploadAttachment: props.uploadAttachment }),
+  updateBody: updatePluginBody,
+  ui: pluginUi,
+}));
+
+/** Accepts one canonical body emitted by the selected executable plugin editor. */
+function updatePluginBody(body: RequestBodyDefinition): void {
+  bodyDefinition.value = cloneRequestBody(body);
+  emitChange();
 }
 
 /** Builds an immutable draft payload from the current editor controls. */
 function currentDraft(): RequestDraftInput {
+  const body = currentRequestBody();
   return {
     name: name.value,
     description: description.value,
@@ -938,8 +644,8 @@ function currentDraft(): RequestDraftInput {
     targetUrl: targetUrl.value,
     query: meaningfulRequestFields(query.value),
     headers: meaningfulRequestFields(headers.value),
-    requestBody: currentRequestBody(),
-    body: bodyKind.value === "text" ? bodyText.value : "",
+    requestBody: body,
+    body: body.kind === "text" ? body.text : "",
     preRequestScript: preRequestScript.value,
     postResponseScript: postResponseScript.value,
   };
@@ -947,20 +653,7 @@ function currentDraft(): RequestDraftInput {
 
 /** Publishes current editor content to its owning request tab. */
 function emitChange(): void {
-  emit("change", {
-    name: name.value,
-    description: description.value,
-    notes: notes.value,
-    method: method.value,
-    targetMode: targetMode.value,
-    targetUrl: targetUrl.value,
-    query: meaningfulRequestFields(query.value),
-    headers: meaningfulRequestFields(headers.value),
-    requestBody: currentRequestBody(),
-    body: bodyKind.value === "text" ? bodyText.value : "",
-    preRequestScript: preRequestScript.value,
-    postResponseScript: postResponseScript.value,
-  });
+  emit("change", currentDraft());
 }
 
 /** Applies a method selected from the shared option menu. */
@@ -977,86 +670,16 @@ function selectTargetMode(value: string): void {
   }
 }
 
-/** Applies a frontend body preset without changing the current text. */
+/** Activates one executable content plugin and lets it initialize wire state. */
 function selectBodyKind(value: string): void {
   const preset = requestBodyPresets.get(value);
   if (preset === undefined) return;
-  bodyFormatError.value = "";
-  if (preset.bodyKind === "file" && bodyKind.value !== "file") {
-    bodyPresetId.value = preset.id;
-    bodyContentType.value = "";
-    bodyFileAttachment.value = null;
-    return;
-  }
-  if (bodyPresetId.value !== preset.id && preset.bodyKind !== "none") {
-    bodyContentType.value =
-      preset.bodyKind === "text" ? (preset.defaultContentType ?? "") : "";
-  }
-  bodyPresetId.value = preset.id;
-  if (preset.bodyKind !== "file") bodyFileAttachment.value = null;
-  emitChange();
-}
-
-/** Formats request text through its plugin contribution without changing invalid input. */
-function formatRequestBody(): void {
-  const result = requestBodyPresets.format(bodyPresetId.value, bodyText.value);
-  if (result === undefined) return;
-  if (!result.valid) {
-    bodyFormatError.value = result.error;
-    return;
-  }
-  bodyFormatError.value = "";
-  bodyText.value = result.value;
-  emitChange();
-}
-
-/** Clears stale parser feedback before publishing an edited request body. */
-function updateBodyText(): void {
-  bodyFormatError.value = "";
-  emitChange();
-}
-
-/** Publishes a media-type override once the selected body has actual bytes. */
-function updateBodyContentType(): void {
-  if (bodyKind.value === "file" && bodyFileAttachment.value === null) return;
-  emitChange();
-}
-
-/** Reports whether complete-body file selection is currently unavailable. */
-function bodyFileSelectionDisabled(): boolean {
-  return (
-    editorDisabled.value ||
-    uploadingBodyFile.value ||
-    props.uploadAttachment === null
+  bodyDefinition.value = cloneRequestBody(
+    preset.createBody(currentRequestBody()),
   );
+  bodyPresetId.value = preset.id;
+  emitChange();
 }
-
-/** Opens the native picker for the complete binary request body. */
-function chooseBodyFile(): void {
-  bodyFileInput.value?.click();
-}
-
-/** Uploads one file and assigns its immutable bytes as the complete body. */
-async function attachBodyFile(event: Event): Promise<void> {
-  const input = event.currentTarget;
-  if (!(input instanceof HTMLInputElement) || props.uploadAttachment === null) {
-    return;
-  }
-  const file = input.files?.[0];
-  input.value = "";
-  if (file === undefined) return;
-  uploadingBodyFile.value = true;
-  try {
-    bodyFileAttachment.value = await props.uploadAttachment(file);
-    bodyPresetId.value = requestBodyPresets.defaultFor("file").id;
-    emitChange();
-  } catch {
-    // The controller publishes the safe application error; keep replacement usable.
-  } finally {
-    uploadingBodyFile.value = false;
-  }
-}
-
 /** Returns the translated label for a request settings tab. */
 function requestTabLabel(tab: (typeof requestTabs)[number]): string {
   if (tab === "query") {
@@ -1715,291 +1338,11 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 :disabled="editorDisabled"
                 @update:model-value="selectBodyKind"
               />
-              <TextInput
-                v-if="bodyKind !== 'none'"
-                v-model="bodyContentType"
-                class="body-content-type-input"
-                density="compact"
-                font="mono"
-                :aria-label="t('request.contentTypeOverride')"
-                :placeholder="bodyContentTypePlaceholder"
-                autocomplete="off"
-                spellcheck="false"
-                :disabled="editorDisabled"
-                @input="updateBodyContentType"
-              />
-              <ButtonControl
-                v-if="bodyKind === 'text' && bodyPreset.format !== undefined"
-                size="compact"
-                variant="secondary"
-                :disabled="editorDisabled"
-                @click="formatRequestBody"
-              >
-                {{ t("request.formatBody") }}
-              </ButtonControl>
-              <p
-                v-if="bodyFormatError !== ''"
-                class="request-body-format-error"
-                role="status"
-              >
-                {{ bodyFormatError }}
-              </p>
             </div>
-            <p v-if="bodyKind === 'none'" class="request-body-empty">
-              {{ t("request.noBodyDescription") }}
-            </p>
-            <CodeEditor
-              v-else-if="bodyKind === 'text'"
-              v-model="bodyText"
-              class="body-code-editor"
-              :language="bodyPreset.textLanguage ?? 'plain'"
-              :label="t('request.rawBody')"
-              :disabled="editorDisabled"
-              @input="updateBodyText"
+            <PluginViewHost
+              :mount="bodyPreset.mountEditor"
+              :context="bodyEditorContext"
             />
-            <div v-else-if="bodyKind === 'file'" class="request-body-file">
-              <input
-                ref="bodyFileInput"
-                class="visually-hidden"
-                type="file"
-                tabindex="-1"
-                aria-hidden="true"
-                :disabled="bodyFileSelectionDisabled()"
-                @change="attachBodyFile"
-              />
-              <ButtonControl
-                v-if="bodyFileAttachment === null"
-                size="compact"
-                variant="secondary"
-                :busy="uploadingBodyFile"
-                :disabled="bodyFileSelectionDisabled()"
-                @click="chooseBodyFile"
-              >
-                {{ t("request.chooseBodyFile") }}
-              </ButtonControl>
-              <button
-                v-else
-                type="button"
-                class="request-file-part"
-                :aria-label="
-                  t('request.replaceBodyFile', {
-                    fileName: bodyFileAttachment.fileName,
-                  })
-                "
-                :title="bodyFileAttachment.fileName"
-                :disabled="bodyFileSelectionDisabled()"
-                @click="chooseBodyFile"
-              >
-                <span class="request-file-name">
-                  {{ bodyFileAttachment.fileName }}
-                </span>
-                <span class="request-file-metadata">
-                  {{ bodyFileAttachment.contentType }} ·
-                  {{ formatAttachmentSize(bodyFileAttachment.byteLength) }}
-                </span>
-              </button>
-            </div>
-            <div v-else class="request-form-fields">
-              <input
-                v-if="bodyKind === 'multipart'"
-                ref="attachmentInput"
-                class="visually-hidden"
-                type="file"
-                tabindex="-1"
-                aria-hidden="true"
-                :disabled="attachmentSelectionDisabled()"
-                @change="attachFile"
-              />
-              <div class="request-field-heading" aria-hidden="true">
-                <span></span>
-                <span>{{ t("common.fields.name") }}</span>
-                <span>{{ t("common.fields.value") }}</span>
-                <span></span>
-              </div>
-              <template v-for="entry in visibleFormFields" :key="entry.index">
-                <div
-                  class="request-field-row"
-                  :class="formFieldReorder.classes(entry.index)"
-                  @dragover.stop="
-                    formFieldReorder.updateDropTarget($event, entry.index)
-                  "
-                  @drop.stop="formFieldReorder.finishDrop($event)"
-                >
-                  <CheckboxControl
-                    v-model="entry.field.enabled"
-                    visually-hidden-label
-                    :label="
-                      t('request.enableField', {
-                        kind: t('request.formField'),
-                        index: entry.index + 1,
-                      })
-                    "
-                    :disabled="editorDisabled"
-                    @change="updateFormField(entry.index)"
-                  />
-                  <div class="field-key-cell">
-                    <TemplateTextControl
-                      v-model="entry.field.name"
-                      class="field-template-input"
-                      density="compact"
-                      font="mono"
-                      :previews="variablePreviews"
-                      :aria-label="
-                        t('request.formName', { index: entry.index + 1 })
-                      "
-                      :placeholder="
-                        isBlankFormField(entry.field)
-                          ? t('request.addFormField')
-                          : t('common.fields.name')
-                      "
-                      autocomplete="off"
-                      spellcheck="false"
-                      :disabled="editorDisabled"
-                      @input="updateFormField(entry.index)"
-                    />
-                    <IconButton
-                      class="field-description-action"
-                      size="compact"
-                      :class="{
-                        'has-content': entry.field.description?.trim() !== '',
-                      }"
-                      :label="t('documentation.editFieldDescription')"
-                      :disabled="
-                        editorDisabled || isBlankFormField(entry.field)
-                      "
-                      @click="toggleFormDescription(entry.index)"
-                    >
-                      <FilePenLine :size="15" aria-hidden="true" />
-                    </IconButton>
-                  </div>
-                  <div
-                    class="form-value-field"
-                    :class="{
-                      'has-value-type-toggle': bodyKind === 'multipart',
-                    }"
-                  >
-                    <FormValueTypeToggle
-                      v-if="bodyKind === 'multipart'"
-                      :model-value="
-                        isMultipartFileValueField(entry.field) ? 'file' : 'text'
-                      "
-                      :disabled="formValueTypeDisabled(entry.field)"
-                      @update:model-value="
-                        selectFormValueType(entry.index, $event)
-                      "
-                    />
-                    <TemplateTextControl
-                      v-if="!isMultipartFileValueField(entry.field)"
-                      v-model="entry.field.value"
-                      class="field-template-input"
-                      density="compact"
-                      font="mono"
-                      :previews="variablePreviews"
-                      :aria-label="
-                        t('request.formValue', { index: entry.index + 1 })
-                      "
-                      :placeholder="t('common.fields.value')"
-                      autocomplete="off"
-                      spellcheck="false"
-                      :disabled="editorDisabled || uploadingAttachment"
-                      @input="updateFormField(entry.index)"
-                    />
-                    <button
-                      v-else-if="isPendingMultipartFileField(entry.field)"
-                      type="button"
-                      class="request-file-part request-file-part-empty"
-                      :disabled="attachmentSelectionDisabled()"
-                      @click="chooseAttachment(entry.index)"
-                    >
-                      {{ t("request.attachFile") }}
-                    </button>
-                    <button
-                      v-else-if="isMultipartFileField(entry.field)"
-                      type="button"
-                      class="request-file-part"
-                      :aria-label="
-                        t('request.replaceAttachedFile', {
-                          fileName: entry.field.attachment.fileName,
-                        })
-                      "
-                      :title="entry.field.attachment.fileName"
-                      :disabled="attachmentSelectionDisabled()"
-                      @click="chooseAttachment(entry.index)"
-                    >
-                      <span class="request-file-name">
-                        {{ entry.field.attachment.fileName }}
-                      </span>
-                      <span class="request-file-metadata">
-                        {{ entry.field.attachment.contentType }} ·
-                        {{
-                          formatAttachmentSize(
-                            entry.field.attachment.byteLength,
-                          )
-                        }}
-                      </span>
-                    </button>
-                  </div>
-                  <div class="row-actions">
-                    <RowReorderHandle
-                      v-if="!isBlankFormField(entry.field)"
-                      :label="
-                        t('common.actions.reorderRow', {
-                          item: t('request.formField'),
-                          index: entry.index + 1,
-                        })
-                      "
-                      :disabled="editorDisabled"
-                      @drag-start="
-                        formFieldReorder.startDrag($event, entry.index)
-                      "
-                      @drag-end="formFieldReorder.cancelDrag"
-                      @move="
-                        formFieldReorder.moveByKeyboard(entry.index, $event)
-                      "
-                    />
-                    <IconButton
-                      v-if="!isBlankFormField(entry.field)"
-                      class="compact-icon-button"
-                      size="compact"
-                      :label="
-                        t('request.removeField', {
-                          kind: t('request.formField'),
-                          index: entry.index + 1,
-                        })
-                      "
-                      :title="
-                        t('request.removeFieldTitle', {
-                          kind: t('request.formField'),
-                        })
-                      "
-                      :disabled="editorDisabled"
-                      @click="removeFormField(entry.index)"
-                    >
-                      <Trash2 :size="15" aria-hidden="true" />
-                    </IconButton>
-                    <span v-else class="new-row-marker" aria-hidden="true">
-                      <Asterisk :size="15" />
-                    </span>
-                  </div>
-                </div>
-                <div
-                  v-if="expandedFormDescriptions.includes(entry.index)"
-                  class="field-description-row"
-                >
-                  <TextInput
-                    :model-value="entry.field.description ?? ''"
-                    :aria-label="t('documentation.fieldDescription')"
-                    :placeholder="
-                      t('documentation.fieldDescriptionPlaceholder')
-                    "
-                    :maxlength="4096"
-                    :disabled="editorDisabled"
-                    @update:model-value="entry.field.description = $event"
-                    @input="emitChange"
-                  />
-                </div>
-              </template>
-            </div>
           </TabsPanel>
 
           <TabsPanel

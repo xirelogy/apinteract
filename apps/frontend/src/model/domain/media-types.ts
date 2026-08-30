@@ -88,6 +88,11 @@ export class MediaTypeRegistry<T> {
     return this.match(value)?.value;
   }
 
+  /** Returns all registered values in stable installation order. */
+  values(): readonly T[] {
+    return this.#registrations.map((registration) => registration.value);
+  }
+
   /** Returns matching metadata for diagnostics and precedence tests. */
   match(value: string | null): MediaTypeMatch<T> | undefined {
     const mediaType = normalizeMediaType(value);

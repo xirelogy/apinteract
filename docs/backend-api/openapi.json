@@ -40,6 +40,10 @@
     {
       "name": "WebSocket",
       "description": "Frontend control-channel establishment and message contracts."
+    },
+    {
+      "name": "Plugins",
+      "description": "Discovered frontend packages and read-only enabled metadata."
     }
   ],
   "paths": {
@@ -298,6 +302,66 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
+        }
+      }
+    },
+    "/plugins/catalog.json": {
+      "get": {
+        "tags": ["Plugins"],
+        "operationId": "listFrontendPluginCatalog",
+        "summary": "List validated frontend plugin packages",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Content-addressed frontend plugin catalog.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FrontendPluginCatalog"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/plugins/{pluginId}/{hash}/{assetPath}": {
+      "get": {
+        "tags": ["Plugins"],
+        "operationId": "getFrontendPluginAsset",
+        "summary": "Load one asset from a content-addressed frontend plugin package",
+        "security": [],
+        "parameters": [
+          {
+            "name": "pluginId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "hash",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          },
+          {
+            "name": "assetPath",
+            "in": "path",
+            "required": true,
+            "description": "Package-relative path below dist/. Runtime routing accepts nested path segments.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable package asset with a media type selected from its extension.",
+            "content": {
+              "application/octet-stream": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
@@ -630,6 +694,9 @@
             "$ref": "#/components/schemas/SystemPingCommand"
           },
           {
+            "$ref": "#/components/schemas/PluginListCommand"
+          },
+          {
             "$ref": "#/components/schemas/WorkspaceListCommand"
           },
           {
@@ -820,6 +887,18 @@
                 "type": "object",
                 "additionalProperties": false
               }
+            }
+          }
+        ]
+      },
+      "PluginListCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "plugin.list" },
+              "payload": { "type": "object", "additionalProperties": false }
             }
           }
         ]
@@ -1699,6 +1778,87 @@
         "maxLength": 100,
         "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
       },
+      "PluginPackageManifest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "apiVersion",
+          "id",
+          "name",
+          "version",
+          "target",
+          "entrypoint",
+          "providers"
+        ],
+        "properties": {
+          "schemaVersion": { "type": "integer", "const": 1 },
+          "apiVersion": { "type": "integer", "const": 2 },
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "version": { "type": "string" },
+          "weight": {
+            "type": "integer",
+            "minimum": -10000,
+            "maximum": 10000,
+            "description": "Higher weights are presented before lower-weight plugin contributions."
+          },
+          "target": { "type": "string", "enum": ["frontend", "backend"] },
+          "entrypoint": { "type": "string" },
+          "providers": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "uniqueItems": true
+          }
+        }
+      },
+      "EnabledPlugin": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "version", "target", "source"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "version": { "type": "string" },
+          "target": { "type": "string", "enum": ["frontend", "backend"] },
+          "source": { "type": "string", "enum": ["built-in", "user"] }
+        }
+      },
+      "PluginListView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["plugins"],
+        "properties": {
+          "plugins": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EnabledPlugin" }
+          }
+        }
+      },
+      "FrontendPluginCatalogEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["manifest", "source", "moduleUrl"],
+        "properties": {
+          "manifest": { "$ref": "#/components/schemas/PluginPackageManifest" },
+          "source": { "type": "string", "enum": ["built-in", "user"] },
+          "moduleUrl": { "type": "string" }
+        }
+      },
+      "FrontendPluginCatalog": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["plugins"],
+        "properties": {
+          "plugins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FrontendPluginCatalogEntry"
+            }
+          }
+        }
+      },
       "ImportProviderManifest": {
         "description": "Declarative capabilities for one installed source adapter.",
         "type": "object",
@@ -1804,7 +1964,7 @@
         ],
         "properties": {
           "capturedExchangeId": { "$ref": "#/components/schemas/UuidV7" },
-          "source": { "type": "string", "const": "har" },
+          "source": { "$ref": "#/components/schemas/ImportProviderId" },
           "status": { "type": "integer", "minimum": 100, "maximum": 599 },
           "statusText": { "type": "string", "maxLength": 1024 },
           "headers": {
@@ -2662,6 +2822,7 @@
           { "$ref": "#/components/schemas/VariablePreviewResult" },
           { "$ref": "#/components/schemas/CollectionDeleteResult" },
           { "$ref": "#/components/schemas/ImportProvidersView" },
+          { "$ref": "#/components/schemas/PluginListView" },
           { "$ref": "#/components/schemas/ImportPlan" },
           { "$ref": "#/components/schemas/ImportApplyResult" },
           { "$ref": "#/components/schemas/RequestExchangeListView" },
@@ -3585,7 +3746,7 @@
           },
           "source": {
             "type": "string",
-            "enum": ["apinteract", "har"]
+            "description": "APInteract for executions, otherwise the import-provider ID that supplied the capture."
           },
           "state": {
             "type": "string",

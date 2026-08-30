@@ -11,6 +11,7 @@ const backendProxy = {
   "/auth": backendOrigin,
   "/api": backendOrigin,
   "/health": backendOrigin,
+  "/plugins": backendOrigin,
   "/ws": {
     target: backendOrigin.replace("http:", "ws:"),
     ws: true,
@@ -57,7 +58,18 @@ export const pwaOptions = {
     navigateFallback: "/web-ui/index.html",
     navigateFallbackAllowlist: [/^\/web-ui\/(?:index\.html)?$/u],
     navigateFallbackDenylist: [/^\/(?:auth|api|ws)(?:\/|$)/u],
-    runtimeCaching: [],
+    runtimeCaching: [
+      {
+        urlPattern: /\/plugins\/[^/]+\/[a-f0-9]{64}\/.+$/u,
+        handler: "CacheFirst",
+        options: { cacheName: "apinteract-frontend-plugins" },
+      },
+      {
+        urlPattern: /\/plugins\/catalog\.json$/u,
+        handler: "NetworkFirst",
+        options: { cacheName: "apinteract-plugin-catalog" },
+      },
+    ],
   },
 } satisfies Parameters<typeof VitePWA>[0];
 

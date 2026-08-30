@@ -31,7 +31,9 @@ describe("PWA installation and cache policy", () => {
   });
 
   it("precaches only static files and denies backend navigation fallbacks", () => {
-    expect(pwaOptions.workbox.runtimeCaching).toEqual([]);
+    expect(pwaOptions.workbox.runtimeCaching).toHaveLength(2);
+    expect(pwaOptions.workbox.runtimeCaching[0]?.handler).toBe("CacheFirst");
+    expect(pwaOptions.workbox.runtimeCaching[1]?.handler).toBe("NetworkFirst");
     expect(pwaOptions.workbox.globPatterns).toEqual([
       "**/*.{js,css,html,ico,png,svg,json}",
     ]);

@@ -30,6 +30,18 @@ describe("backend static frontend hosting", () => {
         pendingCount: () => Promise.resolve(0),
         publishPending: () => Promise.resolve(0),
       },
+      plugins: {
+        frontendCatalog: () => [],
+        frontendAsset: (id: string, hash: string, assetPath: string) =>
+          id === "example.frontend" &&
+          hash === "a".repeat(64) &&
+          assetPath === "chunks/presenter.js"
+            ? {
+                bytes: Buffer.from("export {};"),
+                contentType: "text/javascript; charset=utf-8",
+              }
+            : undefined,
+      },
       close: () => Promise.resolve(),
     } as unknown as Application;
     const configuration: BackendConfiguration = {
@@ -94,6 +106,24 @@ describe("backend static frontend hosting", () => {
       expect(serviceWorker.statusCode).toBe(200);
       expect(serviceWorker.headers["content-type"]).toContain("javascript");
       expect(serviceWorker.headers["cache-control"]).toBe("no-cache");
+
+      const pluginAsset = await server.inject({
+        method: "GET",
+        url: `/plugins/example.frontend/${"a".repeat(64)}/chunks/presenter.js`,
+      });
+      expect(pluginAsset.statusCode).toBe(200);
+      expect(pluginAsset.body).toBe("export {};");
+      expect(pluginAsset.headers["content-type"]).toContain("javascript");
+      expect(pluginAsset.headers["cache-control"]).toBe(
+        "public, max-age=31536000, immutable",
+      );
+      expect(pluginAsset.headers["x-content-type-options"]).toBe("nosniff");
+
+      const stalePluginAsset = await server.inject({
+        method: "GET",
+        url: `/plugins/example.frontend/${"b".repeat(64)}/chunks/presenter.js`,
+      });
+      expect(stalePluginAsset.statusCode).toBe(404);
 
       const redirect = await server.inject({
         method: "GET",

@@ -1,29 +1,27 @@
 import { createHash } from "node:crypto";
 
 import type {
-  RequestBodyDefinition,
-  RequestField,
-} from "../requests/request-service.js";
-import type { VariableWrite } from "../variables/variable-profile-store.js";
-import {
-  type ImportDiagnostic,
-  type ImportedCollection,
-  type ImportedRequest,
-  type ImportPlan,
-  type ImportProbeResult,
-  type ImportProvider,
-  type ImportProviderManifest,
-  type ImportSource,
-  ImportSourceError,
-} from "./import-types.js";
+  ImportedRequestBodyDefinition as RequestBodyDefinition,
+  ImportedRequestField as RequestField,
+  ImportedVariableWrite as VariableWrite,
+  ImportDiagnostic,
+  ImportedCollection,
+  ImportedRequest,
+  ImportPlan,
+  ImportProbeResult,
+  ImportProvider,
+  ImportProviderManifest,
+  ImportSource,
+} from "@apinteract/plugin-api/backend";
 import {
   editableValue,
   isRecord,
   parseJsonObject,
+  ImportProviderError,
   sourceStem,
   stringValue,
   unknownArray,
-} from "./provider-utils.js";
+} from "@apinteract/plugin-sdk/backend/import";
 
 const HTTP_METHODS = [
   "GET",
@@ -75,7 +73,7 @@ export class OpenApiJsonImportProvider implements ImportProvider {
     const document = parseJsonObject(source);
     const version = stringValue(document.openapi);
     if (!version.startsWith("3.0.") && !version.startsWith("3.1.")) {
-      throw new ImportSourceError(
+      throw new ImportProviderError(
         "openapi_version_unsupported",
         "Only OpenAPI 3.0 and 3.1 JSON documents are supported.",
       );
@@ -84,7 +82,7 @@ export class OpenApiJsonImportProvider implements ImportProvider {
     const requests: ImportedRequest[] = [];
     const info = isRecord(document.info) ? document.info : {};
     const suggestedName = (
-      stringValue(info.title).trim() || sourceStem(source.name)
+      stringValue(info.title).trim() || sourceStem(source.name, [".json"])
     ).slice(0, 200);
     const rootDescription = importShortDescription(
       info.summary,

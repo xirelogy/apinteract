@@ -1,18 +1,38 @@
 import type { RequestView } from "../requests/request-service.js";
 
 export type {
-  CapturedExchangeView,
   ImportDiagnostic,
   ImportDiagnosticSeverity,
   ImportedCollection,
-  ImportedRequest,
-  ImportPlan,
   ImportProvider,
   ImportProviderId,
   ImportProviderManifest,
   ImportProbeResult,
   ImportSource,
 } from "@apinteract/plugin-api/backend";
+import type {
+  ImportedCapturedExchange,
+  ImportedRequest as ProviderImportedRequest,
+  ImportPlan as ProviderImportPlan,
+} from "@apinteract/plugin-api/backend";
+
+/** Adds host-owned import-provider provenance to one recorded response. */
+export interface CapturedExchangeView extends ImportedCapturedExchange {
+  readonly source: string;
+}
+
+/** Represents one provider request after provenance has been host-stamped. */
+export type ImportedRequest = Omit<
+  ProviderImportedRequest,
+  "capturedExchange"
+> & {
+  readonly capturedExchange?: CapturedExchangeView;
+};
+
+/** Represents one validated provider plan ready for API or persistence use. */
+export type ImportPlan = Omit<ProviderImportPlan, "requests"> & {
+  readonly requests: readonly ImportedRequest[];
+};
 
 /** Applies selected normalized requests under one newly created collection. */
 export interface ImportApplyInput {

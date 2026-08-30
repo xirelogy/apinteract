@@ -1,16 +1,20 @@
 import { describe, expect, it } from "vitest";
-import type { BackendPlugin } from "@apinteract/plugin-api/backend";
+import type { PluginPackageManifest } from "@apinteract/plugin-api";
+import type { BackendPluginModule } from "@apinteract/plugin-api/backend";
 
 import { createBackendPluginRuntime } from "../src/plugins/backend-plugin-host.js";
 
-const exampleImportPlugin: BackendPlugin = {
-  manifest: {
-    apiVersion: 1,
-    id: "example.single-request",
-    name: "Single request import",
-    version: "1.0.0",
-    target: "backend",
-  },
+const exampleManifest: PluginPackageManifest<"backend"> = {
+  schemaVersion: 1,
+  apiVersion: 2,
+  id: "example.single-request",
+  name: "Single request import",
+  version: "1.0.0",
+  target: "backend",
+  entrypoint: "dist/index.mjs",
+  providers: ["request.import"],
+};
+const exampleImportPlugin: BackendPluginModule = {
   /** Registers one minimal provider used to exercise backend plugin routing. */
   register(context) {
     context.register("request.import", {
@@ -70,8 +74,8 @@ const exampleImportPlugin: BackendPlugin = {
 
 describe("backend plugin host", () => {
   it("installs a backend import plugin through the shared package signature", async () => {
-    const runtime = createBackendPluginRuntime([]);
-    runtime.plugins.install(exampleImportPlugin);
+    const runtime = createBackendPluginRuntime();
+    runtime.plugins.install(exampleManifest, exampleImportPlugin, "user");
 
     expect(runtime.plugins.has("example.single-request")).toBe(true);
     expect(runtime.imports.manifests().map((provider) => provider.id)).toEqual([
@@ -89,10 +93,27 @@ describe("backend plugin host", () => {
   });
 
   it("rejects duplicate plugin packages before re-registration", () => {
-    const runtime = createBackendPluginRuntime([]);
-    runtime.plugins.install(exampleImportPlugin);
-    expect(() => runtime.plugins.install(exampleImportPlugin)).toThrow(
-      /already installed/u,
-    );
+    const runtime = createBackendPluginRuntime();
+    runtime.plugins.install(exampleManifest, exampleImportPlugin, "user");
+    expect(() =>
+      runtime.plugins.install(exampleManifest, exampleImportPlugin, "user"),
+    ).toThrow(/already installed/u);
+  });
+
+  it("does not expose partial contributions when package validation fails", () => {
+    const runtime = createBackendPluginRuntime();
+    const invalidPlugin: BackendPluginModule = {
+      /** Registers a duplicate provider to exercise package rollback. */
+      register(context) {
+        exampleImportPlugin.register(context);
+        exampleImportPlugin.register(context);
+      },
+    };
+
+    expect(() =>
+      runtime.plugins.install(exampleManifest, invalidPlugin, "user"),
+    ).toThrow(/Duplicate import provider/u);
+    expect(runtime.imports.manifests()).toEqual([]);
+    expect(runtime.plugins.list()).toEqual([]);
   });
 });

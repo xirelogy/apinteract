@@ -209,6 +209,57 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.getByRole("tooltip")).toContainText("Secret value stored");
   await expect(page.getByRole("tooltip")).not.toContainText(`secret-${suffix}`);
   await page.getByRole("tab", { name: "Body" }).click();
+  if (!mobile) {
+    await selectMenuOption(page, "Content type", "JSON");
+    const bodyPanel = page.locator(".request-body-editor");
+    const bodyType = page.getByRole("combobox", {
+      name: "Content type",
+      exact: true,
+    });
+    const mediaType = page.getByLabel("Content type override");
+    const formatBody = page.getByRole("button", { name: "Format body" });
+    await expect(formatBody).toBeVisible();
+    const bodyContent = page.locator(".wire-request-body-content");
+    const [
+      panelBox,
+      bodyTypeBox,
+      mediaTypeBox,
+      formatBox,
+      contentBox,
+      editorBox,
+      panelPaddingBottom,
+    ] = await Promise.all([
+      bodyPanel.boundingBox(),
+      bodyType.boundingBox(),
+      mediaType.boundingBox(),
+      formatBody.boundingBox(),
+      bodyContent.boundingBox(),
+      page.locator(".body-code-editor").boundingBox(),
+      bodyPanel.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).paddingBottom),
+      ),
+    ]);
+    expect(panelBox).not.toBeNull();
+    expect(bodyTypeBox).not.toBeNull();
+    expect(mediaTypeBox).not.toBeNull();
+    expect(formatBox).not.toBeNull();
+    expect(contentBox).not.toBeNull();
+    expect(editorBox).not.toBeNull();
+    expect(Math.abs(bodyTypeBox!.y - mediaTypeBox!.y)).toBeLessThan(3);
+    expect(Math.abs(bodyTypeBox!.y - formatBox!.y)).toBeLessThan(3);
+    expect(Math.abs(editorBox!.height - contentBox!.height)).toBeLessThan(3);
+    expect(
+      Math.abs(
+        editorBox!.y +
+          editorBox!.height -
+          (panelBox!.y + panelBox!.height - panelPaddingBottom),
+      ),
+    ).toBeLessThan(3);
+    await expect(page.locator(".body-code-editor .cm-scroller")).toHaveCSS(
+      "overflow-y",
+      "auto",
+    );
+  }
   await selectMenuOption(page, "Content type", "Plain text");
   await page
     .getByLabel("Raw request body")

@@ -1,28 +1,26 @@
 import type {
-  HttpMethod,
-  RequestBodyDefinition,
-  RequestField,
-} from "../requests/request-service.js";
-import type { VariableWrite } from "../variables/variable-profile-store.js";
+  ImportedCapturedExchange,
+  ImportedHttpMethod as HttpMethod,
+  ImportedRequestBodyDefinition as RequestBodyDefinition,
+  ImportedRequestField as RequestField,
+  ImportedVariableWrite as VariableWrite,
+  ImportDiagnostic,
+  ImportedRequest,
+  ImportPlan,
+  ImportProbeResult,
+  ImportProvider,
+  ImportProviderManifest,
+  ImportSource,
+} from "@apinteract/plugin-api/backend";
 import {
-  type CapturedExchangeView,
-  type ImportDiagnostic,
-  type ImportedRequest,
-  type ImportPlan,
-  type ImportProbeResult,
-  type ImportProvider,
-  type ImportProviderManifest,
-  type ImportSource,
-  ImportSourceError,
-} from "./import-types.js";
-import {
+  ImportProviderError,
   isRecord,
   optionalTimestamp,
   parseJsonObject,
   sourceStem,
   stringValue,
   utf8Bytes,
-} from "./provider-utils.js";
+} from "@apinteract/plugin-sdk/backend/import";
 
 const SUPPORTED_METHODS = new Set<HttpMethod>([
   "GET",
@@ -94,7 +92,7 @@ export class HarImportProvider implements ImportProvider {
     const document = parseJsonObject(source);
     const log = isRecord(document.log) ? document.log : null;
     if (log === null || !Array.isArray(log.entries)) {
-      throw new ImportSourceError(
+      throw new ImportProviderError(
         "har_invalid",
         "The source does not contain a HAR log entry array.",
       );
@@ -203,7 +201,7 @@ export class HarImportProvider implements ImportProvider {
       providerId: this.manifest.id,
       providerVersion: this.manifest.version,
       sourceName: source.name,
-      suggestedName: sourceStem(source.name),
+      suggestedName: sourceStem(source.name, [".har", ".json"]),
       description: "",
       notes: stringValue(log.comment),
       pathPrefix: "",
@@ -472,7 +470,7 @@ function mapHarResponse(
   itemId: string,
   diagnostics: ImportDiagnostic[],
   omissions: HarHeaderOmissions,
-): CapturedExchangeView | undefined {
+): ImportedCapturedExchange | undefined {
   const status = response.status;
   if (
     typeof status !== "number" ||
@@ -521,7 +519,6 @@ function mapHarResponse(
     });
   }
   return {
-    source: "har",
     status,
     statusText: stringValue(response.statusText),
     headers: Array.isArray(response.headers)

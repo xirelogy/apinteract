@@ -14,6 +14,12 @@ import { RequestAttachmentService } from "../requests/request-attachment-service
 import { SessionService } from "../sessions/session-service.js";
 import { VariableService } from "../variables/variable-service.js";
 import { WorkspaceService } from "../workspaces/workspace-service.js";
+import { createBackendPluginRuntime } from "../plugins/backend-plugin-host.js";
+import {
+  discoverPluginPackages,
+  loadBackendPluginModule,
+} from "../plugins/plugin-discovery.js";
+import { PluginService } from "../plugins/plugin-service.js";
 
 export interface Application {
   readonly database: SqliteDatabase;
@@ -31,6 +37,7 @@ export interface Application {
   readonly requestExchanges: RequestExchangeService;
   readonly proxy: ProxyClient;
   readonly scripts: ScriptService;
+  readonly plugins: PluginService;
   close(): Promise<void>;
 }
 
@@ -38,6 +45,10 @@ export interface Application {
 export async function createApplication(
   configuration: BackendConfiguration,
 ): Promise<Application> {
+  const pluginPaths = configuration.plugins ?? {
+    builtinPath: "/opt/apinteract/plugins",
+    userPath: "/data/plugins",
+  };
   const database = await SqliteDatabase.open(
     configuration.persistence.databasePath,
     configuration.persistence.migrationBackupDirectory,
@@ -78,7 +89,35 @@ export async function createApplication(
     audit,
     requestAttachments,
   );
-  const imports = new ImportService(requests);
+  const discoveredPlugins = await discoverPluginPackages(
+    [
+      { path: pluginPaths.builtinPath, source: "built-in" },
+      { path: pluginPaths.userPath, source: "user" },
+    ],
+    (path, cause) => {
+      process.stderr.write(
+        `Ignoring invalid plugin package ${path}: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+      );
+    },
+  );
+  const pluginRuntime = createBackendPluginRuntime();
+  for (const plugin of discoveredPlugins) {
+    if (plugin.manifest.target !== "backend") continue;
+    try {
+      pluginRuntime.plugins.install(
+        plugin.manifest as typeof plugin.manifest & { target: "backend" },
+        await loadBackendPluginModule(plugin),
+        plugin.source,
+      );
+    } catch (cause) {
+      process.stderr.write(
+        `Ignoring backend plugin ${plugin.manifest.id}: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+      );
+    }
+  }
+  pluginRuntime.plugins.validateCapabilities();
+  const plugins = new PluginService(pluginRuntime.plugins, discoveredPlugins);
+  const imports = new ImportService(requests, pluginRuntime.imports);
   const proxy = new ProxyClient(
     configuration.proxy.endpoint,
     configuration.proxy.bearerToken,
@@ -115,6 +154,7 @@ export async function createApplication(
     requestExchanges,
     proxy,
     scripts,
+    plugins,
     close: async () => {
       await executions.close();
       await scripts.close();

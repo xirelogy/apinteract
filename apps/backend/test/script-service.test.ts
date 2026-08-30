@@ -44,6 +44,9 @@ const variables = [
   },
 ];
 
+/** Allows CPU-bound QuickJS teardown to finish during concurrent workspace tests. */
+const QUICKJS_TEST_TIMEOUT_MILLISECONDS = 20_000;
+
 /** Creates one safe pre-request fixture. */
 function preInput(): PreRequestScriptInput {
   return {
@@ -77,18 +80,21 @@ function postInput(): PostResponseScriptInput {
   };
 }
 
-describe("ScriptService", () => {
-  let service: ScriptService;
+describe(
+  "ScriptService",
+  { timeout: QUICKJS_TEST_TIMEOUT_MILLISECONDS },
+  () => {
+    let service: ScriptService;
 
-  afterEach(async () => {
-    await service.close();
-  });
+    afterEach(async () => {
+      await service.close();
+    });
 
-  it("runs a pre-request script with safe variable and request access", async () => {
-    service = new ScriptService();
+    it("runs a pre-request script with safe variable and request access", async () => {
+      service = new ScriptService();
 
-    const result = await service.runPreRequest(
-      `
+      const result = await service.runPreRequest(
+        `
         const id = asdk.variables.require("customerId");
         asdk.request.setMethod("POST");
         asdk.request.setUrl("https://example.test/customers/" + id);
@@ -101,59 +107,59 @@ describe("ScriptService", () => {
         asdk.local.set("started", asdk.time.now());
         asdk.log.info("prepared", { phase: asdk.phase });
       `,
-      preInput(),
-    );
+        preInput(),
+      );
 
-    expect(result.request.headers).toEqual([
-      ...baseRequest.headers,
-      {
-        name: "X-Customer-Id",
-        value: "customer-42",
+      expect(result.request.headers).toEqual([
+        ...baseRequest.headers,
+        {
+          name: "X-Customer-Id",
+          value: "customer-42",
+          readable: true,
+          sensitive: false,
+        },
+        {
+          name: "Authorization",
+          value: "Bearer <<accessToken>>",
+          readable: true,
+          sensitive: true,
+        },
+      ]);
+      expect(result.request.method).toBe("POST");
+      expect(result.request.url.value).toBe(
+        "https://example.test/customers/customer-42",
+      );
+      expect(result.request.body).toEqual({
+        kind: "text",
+        text: '{"id":"customer-42"}',
         readable: true,
         sensitive: false,
-      },
-      {
-        name: "Authorization",
-        value: "Bearer <<accessToken>>",
-        readable: true,
-        sensitive: true,
-      },
-    ]);
-    expect(result.request.method).toBe("POST");
-    expect(result.request.url.value).toBe(
-      "https://example.test/customers/customer-42",
-    );
-    expect(result.request.body).toEqual({
-      kind: "text",
-      text: '{"id":"customer-42"}',
-      readable: true,
-      sensitive: false,
-    });
-    expect(result.local).toEqual({ started: "2026-08-10T00:00:00.000Z" });
-    expect(result.logs).toEqual([
-      {
-        sequence: 1,
-        level: "info",
-        message: "prepared",
-        fields: { phase: "pre-request" },
-      },
-    ]);
-  });
-
-  it("does not expose secret values and supports post-response tests", async () => {
-    service = new ScriptService();
-
-    await expect(
-      service.runPreRequest(
-        'asdk.variables.require("accessToken");',
-        preInput(),
-      ),
-    ).rejects.toMatchObject({
-      code: "sensitive_value_unavailable",
+      });
+      expect(result.local).toEqual({ started: "2026-08-10T00:00:00.000Z" });
+      expect(result.logs).toEqual([
+        {
+          sequence: 1,
+          level: "info",
+          message: "prepared",
+          fields: { phase: "pre-request" },
+        },
+      ]);
     });
 
-    const result = await service.runPostResponse(
-      `
+    it("does not expose secret values and supports post-response tests", async () => {
+      service = new ScriptService();
+
+      await expect(
+        service.runPreRequest(
+          'asdk.variables.require("accessToken");',
+          preInput(),
+        ),
+      ).rejects.toMatchObject({
+        code: "sensitive_value_unavailable",
+      });
+
+      const result = await service.runPostResponse(
+        `
         asdk.test("created", () => {
           asdk.assert.equal(asdk.response.status, 201);
           asdk.assert.ok(asdk.response.body.text().includes("item-1"));
@@ -162,20 +168,20 @@ describe("ScriptService", () => {
         });
         asdk.local.set("result", "ok");
       `,
-      postInput(),
-    );
+        postInput(),
+      );
 
-    expect(result.tests).toEqual([
-      { sequence: 1, name: "created", status: "passed" },
-    ]);
-    expect(result.local).toEqual({ result: "ok" });
-  });
+      expect(result.tests).toEqual([
+        { sequence: 1, name: "created", status: "passed" },
+      ]);
+      expect(result.local).toEqual({ result: "ok" });
+    });
 
-  it("does not provide ambient host capabilities", async () => {
-    service = new ScriptService();
+    it("does not provide ambient host capabilities", async () => {
+      service = new ScriptService();
 
-    const result = await service.runPreRequest(
-      `
+      const result = await service.runPreRequest(
+        `
         asdk.local.set(
           "capabilities",
           [
@@ -188,21 +194,21 @@ describe("ScriptService", () => {
           ].join(","),
         );
       `,
-      preInput(),
-    );
+        preInput(),
+      );
 
-    expect(result.local).toEqual({
-      capabilities:
-        "undefined,undefined,undefined,undefined,undefined,undefined",
+      expect(result.local).toEqual({
+        capabilities:
+          "undefined,undefined,undefined,undefined,undefined,undefined",
+      });
     });
-  });
 
-  it("redacts secret-derived request fields from post-response scripts", async () => {
-    service = new ScriptService();
-    const input = postInput();
+    it("redacts secret-derived request fields from post-response scripts", async () => {
+      service = new ScriptService();
+      const input = postInput();
 
-    const result = await service.runPostResponse(
-      `
+      const result = await service.runPostResponse(
+        `
         for (const [name, read] of [
           ["url", () => asdk.request.url.get()],
           ["header", () => asdk.request.headers.get("Authorization")],
@@ -216,161 +222,163 @@ describe("ScriptService", () => {
           }
         }
       `,
-      {
-        ...input,
-        request: {
-          ...input.request,
-          url: {
-            value: "https://secret.test",
-            readable: true,
-            sensitive: true,
-          },
-          headers: [
-            {
-              name: "Authorization",
-              value: "Bearer plaintext-secret",
+        {
+          ...input,
+          request: {
+            ...input.request,
+            url: {
+              value: "https://secret.test",
               readable: true,
               sensitive: true,
             },
-          ],
-          body: {
-            kind: "text",
-            text: "plaintext-secret",
-            readable: true,
-            sensitive: true,
+            headers: [
+              {
+                name: "Authorization",
+                value: "Bearer plaintext-secret",
+                readable: true,
+                sensitive: true,
+              },
+            ],
+            body: {
+              kind: "text",
+              text: "plaintext-secret",
+              readable: true,
+              sensitive: true,
+            },
           },
         },
-      },
-    );
+      );
 
-    expect(result.local).toEqual({
-      url: "AsdkError",
-      header: "AsdkError",
-      body: "AsdkError",
+      expect(result.local).toEqual({
+        url: "AsdkError",
+        header: "AsdkError",
+        body: "AsdkError",
+      });
     });
-  });
 
-  it("supports binary encodings and isolates globals between invocations", async () => {
-    service = new ScriptService();
+    it("supports binary encodings and isolates globals between invocations", async () => {
+      service = new ScriptService();
 
-    const first = await service.runPreRequest(
-      `
+      const first = await service.runPreRequest(
+        `
         globalThis.invocationLeak = "present";
         const bytes = asdk.encoding.utf8Encode("hello");
         asdk.request.body.setBytes(asdk.encoding.base64Decode(asdk.encoding.base64Encode(bytes)));
       `,
-      preInput(),
-    );
-    const second = await service.runPreRequest(
-      'asdk.local.set("leak", typeof invocationLeak);',
-      preInput(),
-    );
+        preInput(),
+      );
+      const second = await service.runPreRequest(
+        'asdk.local.set("leak", typeof invocationLeak);',
+        preInput(),
+      );
 
-    expect(first.request.body).toMatchObject({
-      kind: "binary",
-      readable: true,
-      sensitive: false,
+      expect(first.request.body).toMatchObject({
+        kind: "binary",
+        readable: true,
+        sensitive: false,
+      });
+      expect(
+        first.request.body.kind === "binary"
+          ? new TextDecoder().decode(first.request.body.bytes)
+          : undefined,
+      ).toBe("hello");
+      expect(second.local).toEqual({ leak: "undefined" });
     });
-    expect(
-      first.request.body.kind === "binary"
-        ? new TextDecoder().decode(first.request.body.bytes)
-        : undefined,
-    ).toBe("hello");
-    expect(second.local).toEqual({ leak: "undefined" });
-  });
 
-  it("keeps quotas effective when scripts try to replace built-ins", async () => {
-    service = new ScriptService();
+    it("keeps quotas effective when scripts try to replace built-ins", async () => {
+      service = new ScriptService();
 
-    await expect(
-      service.runPreRequest(
-        `
+      await expect(
+        service.runPreRequest(
+          `
           JSON.stringify = () => "";
           Object.keys = () => [];
           Array.prototype.map = () => [];
           asdk.log.info("first");
           asdk.log.info("second");
         `,
-        { ...preInput(), limits: { logEntries: 1 } },
-      ),
-    ).rejects.toMatchObject({ code: "output_limit_exceeded" });
-  });
+          { ...preInput(), limits: { logEntries: 1 } },
+        ),
+      ).rejects.toMatchObject({ code: "output_limit_exceeded" });
+    });
 
-  it("reports unavailable response bodies as errored tests", async () => {
-    service = new ScriptService();
-    const input = postInput();
+    it("reports unavailable response bodies as errored tests", async () => {
+      service = new ScriptService();
+      const input = postInput();
 
-    const result = await service.runPostResponse(
-      `
+      const result = await service.runPostResponse(
+        `
         asdk.test("body", () => asdk.response.body.text());
         asdk.test("status", () => asdk.assert.equal(asdk.response.status, 200));
         asdk.test("truthy", () => asdk.assert.ok(false));
       `,
-      {
-        ...input,
-        response: {
-          ...input.response,
-          body: {
-            size: 20_000_000,
-            sha256: "digest",
-            available: false,
-            unavailableReason: "too_large",
+        {
+          ...input,
+          response: {
+            ...input.response,
+            body: {
+              size: 20_000_000,
+              sha256: "digest",
+              available: false,
+              unavailableReason: "too_large",
+            },
           },
         },
-      },
-    );
+      );
 
-    expect(result.tests).toEqual([
-      {
-        sequence: 1,
-        name: "body",
-        status: "errored",
-        message: "Response body is unavailable",
-      },
-      {
-        sequence: 2,
-        name: "status",
-        status: "failed",
-        message: "Values are not equal",
-        messageCode: "assertion_values_not_equal",
-      },
-      {
-        sequence: 3,
-        name: "truthy",
-        status: "failed",
-        message: "Expected a truthy value",
-        messageCode: "assertion_expected_truthy",
-      },
-    ]);
-  });
-
-  it("interrupts non-terminating scripts", async () => {
-    service = new ScriptService();
-
-    await expect(
-      service.runPreRequest("while (true) {}", {
-        ...preInput(),
-        limits: { wallTimeMilliseconds: 100 },
-      }),
-    ).rejects.toMatchObject({
-      code: "time_limit_exceeded",
-    });
-  });
-
-  it("enforces the QuickJS heap limit", async () => {
-    service = new ScriptService();
-
-    await expect(
-      service.runPreRequest(
-        `
-          const values = [];
-          while (true) values.push(new Uint8Array(1_000_000));
-        `,
+      expect(result.tests).toEqual([
         {
-          ...preInput(),
-          limits: { memoryBytes: 4_194_304, wallTimeMilliseconds: 2000 },
+          sequence: 1,
+          name: "body",
+          status: "errored",
+          message: "Response body is unavailable",
         },
-      ),
-    ).rejects.toMatchObject({ code: "memory_limit_exceeded" });
-  });
-});
+        {
+          sequence: 2,
+          name: "status",
+          status: "failed",
+          message: "Values are not equal",
+          messageCode: "assertion_values_not_equal",
+        },
+        {
+          sequence: 3,
+          name: "truthy",
+          status: "failed",
+          message: "Expected a truthy value",
+          messageCode: "assertion_expected_truthy",
+        },
+      ]);
+    });
+
+    it("interrupts non-terminating scripts", async () => {
+      service = new ScriptService();
+
+      await expect(
+        service.runPreRequest("while (true) {}", {
+          ...preInput(),
+          limits: { wallTimeMilliseconds: 100 },
+        }),
+      ).rejects.toMatchObject({
+        code: "time_limit_exceeded",
+      });
+    });
+
+    it("enforces the QuickJS heap limit", async () => {
+      service = new ScriptService();
+
+      await expect(
+        service.runPreRequest(
+          `
+          new Uint8Array(16_000_000);
+        `,
+          {
+            ...preInput(),
+            // This assertion isolates the memory quota. The larger wall budget
+            // also absorbs cold QuickJS startup under parallel workspace tests.
+            limits: { memoryBytes: 4_194_304, wallTimeMilliseconds: 8000 },
+          },
+        ),
+      ).rejects.toMatchObject({ code: "memory_limit_exceeded" });
+    });
+  },
+);

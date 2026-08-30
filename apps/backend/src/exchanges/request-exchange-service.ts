@@ -2,7 +2,7 @@ import type { Kysely } from "kysely";
 
 import type { LocalBlobStore } from "../blobs/local-blob-store.js";
 import {
-  safeTextPreview,
+  safeUtf8Preview,
   type ExecutionView,
 } from "../executions/execution-service.js";
 import { bytesToId, idToBytes, type EntityId } from "../foundation/id.js";
@@ -22,7 +22,7 @@ export interface RequestExchangeSummary {
   readonly requestId: EntityId;
   readonly requestRevisionId: EntityId | null;
   readonly kind: RequestExchangeKind;
-  readonly source: "apinteract" | "har";
+  readonly source: string;
   readonly state: "created" | "running" | "completed" | "failed";
   readonly status?: number;
   readonly bodyAvailability: "complete" | "truncated" | "unavailable";
@@ -85,6 +85,7 @@ export class RequestExchangeService {
           "body_text",
           "body_complete",
           "body_bytes",
+          "source_provider_id",
           "recorded_at",
           "imported_at",
         ])
@@ -121,7 +122,7 @@ export class RequestExchangeService {
           requestId,
           requestRevisionId: bytesToId(row.request_revision_id),
           kind: "capture",
-          source: "har",
+          source: row.source_provider_id,
           state: "completed",
           status: row.status,
           bodyAvailability: captureBodyAvailability(
@@ -193,7 +194,7 @@ export class RequestExchangeService {
       requestId,
       requestRevisionId: bytesToId(row.request_revision_id),
       kind: "capture",
-      source: "har",
+      source: row.source_provider_id,
       state: "completed",
       status: row.status,
       bodyAvailability: captureBodyAvailability(
@@ -259,7 +260,6 @@ export class RequestExchangeService {
     const preview = await this.#executionPreview(
       row.storage_key,
       row.byte_length,
-      headers,
     );
     const scripts = parseScriptSummary(row.script_result_json);
     const occurredAt = new Date(row.created_at).toISOString();
@@ -312,7 +312,6 @@ export class RequestExchangeService {
   async #executionPreview(
     storageKey: string | null,
     byteLength: number | null,
-    headers: readonly { readonly name: string; readonly value: string }[],
   ): Promise<string | undefined> {
     if (storageKey === null || byteLength === null) return undefined;
     try {
@@ -321,7 +320,7 @@ export class RequestExchangeService {
         byteLength,
         BODY_PREVIEW_LIMIT_BYTES,
       );
-      return bytes === undefined ? undefined : safeTextPreview(headers, bytes);
+      return bytes === undefined ? undefined : safeUtf8Preview(bytes);
     } catch {
       return undefined;
     }

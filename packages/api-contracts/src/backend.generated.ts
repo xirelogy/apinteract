@@ -127,6 +127,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/plugins/catalog.json": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List validated frontend plugin packages */
+    get: operations["listFrontendPluginCatalog"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/plugins/{pluginId}/{hash}/{assetPath}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Load one asset from a content-addressed frontend plugin package */
+    get: operations["getFrontendPluginAsset"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/ws": {
     parameters: {
       query?: never;
@@ -221,6 +255,7 @@ export interface components {
     WebSocketCommand:
       | components["schemas"]["SessionAuthenticateCommand"]
       | components["schemas"]["SystemPingCommand"]
+      | components["schemas"]["PluginListCommand"]
       | components["schemas"]["WorkspaceListCommand"]
       | components["schemas"]["WorkspaceCreateCommand"]
       | components["schemas"]["WorkspaceGetCommand"]
@@ -294,6 +329,17 @@ export interface components {
        * @enum {string}
        */
       type: "SystemPingCommand";
+    };
+    PluginListCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "plugin.list";
+      payload?: Record<string, never>;
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "PluginListCommand";
     };
     WorkspaceListCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
@@ -678,6 +724,42 @@ export interface components {
     };
     /** @description Stable identifier of an import provider installed in the backend plugin host. */
     ImportProviderId: string;
+    PluginPackageManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      /** @constant */
+      apiVersion: 2;
+      id: string;
+      name: string;
+      version: string;
+      /** @description Higher weights are presented before lower-weight plugin contributions. */
+      weight?: number;
+      /** @enum {string} */
+      target: "frontend" | "backend";
+      entrypoint: string;
+      providers: string[];
+    };
+    EnabledPlugin: {
+      id: string;
+      name: string;
+      version: string;
+      /** @enum {string} */
+      target: "frontend" | "backend";
+      /** @enum {string} */
+      source: "built-in" | "user";
+    };
+    PluginListView: {
+      plugins: components["schemas"]["EnabledPlugin"][];
+    };
+    FrontendPluginCatalogEntry: {
+      manifest: components["schemas"]["PluginPackageManifest"];
+      /** @enum {string} */
+      source: "built-in" | "user";
+      moduleUrl: string;
+    };
+    FrontendPluginCatalog: {
+      plugins: components["schemas"]["FrontendPluginCatalogEntry"][];
+    };
     /** @description Declarative capabilities for one installed source adapter. */
     ImportProviderManifest: {
       id: components["schemas"]["ImportProviderId"];
@@ -711,8 +793,7 @@ export interface components {
     /** @description An imported HTTP response capture that was not executed by APInteract. */
     CapturedExchangeView: {
       capturedExchangeId?: components["schemas"]["UuidV7"];
-      /** @constant */
-      source: "har";
+      source: components["schemas"]["ImportProviderId"];
       status: number;
       statusText: string;
       headers: components["schemas"]["HeaderField"][];
@@ -1079,6 +1160,7 @@ export interface components {
       | components["schemas"]["VariablePreviewResult"]
       | components["schemas"]["CollectionDeleteResult"]
       | components["schemas"]["ImportProvidersView"]
+      | components["schemas"]["PluginListView"]
       | components["schemas"]["ImportPlan"]
       | components["schemas"]["ImportApplyResult"]
       | components["schemas"]["RequestExchangeListView"]
@@ -1413,8 +1495,8 @@ export interface components {
       requestRevisionId: components["schemas"]["UuidV7"] | null;
       /** @enum {string} */
       kind: "execution" | "capture";
-      /** @enum {string} */
-      source: "apinteract" | "har";
+      /** @description APInteract for executions, otherwise the import-provider ID that supplied the capture. */
+      source: string;
       /** @enum {string} */
       state: "created" | "running" | "completed" | "failed";
       status?: number;
@@ -1777,6 +1859,52 @@ export interface operations {
       };
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  listFrontendPluginCatalog: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Content-addressed frontend plugin catalog. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FrontendPluginCatalog"];
+        };
+      };
+    };
+  };
+  getFrontendPluginAsset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        pluginId: string;
+        hash: string;
+        /** @description Package-relative path below dist/. Runtime routing accepts nested path segments. */
+        assetPath: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Immutable package asset with a media type selected from its extension. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/octet-stream": string;
+        };
+      };
       404: components["responses"]["NotFound"];
     };
   };

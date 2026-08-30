@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, inject, ref, watch } from "vue";
 import { CalendarClock, Monitor, Moon, Sun, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
@@ -28,6 +28,8 @@ import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
 import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
 import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 import LocaleSelector from "@/view/presentation/features/LocaleSelector.vue";
+import { applicationControllerKey } from "@/app/dependencies";
+import { useApplicationStore } from "@/control/state/application-store";
 
 const props = defineProps<{
   open: boolean;
@@ -37,10 +39,12 @@ const emit = defineEmits<{
   "update:open": [open: boolean];
 }>();
 const { locale, t } = useI18n();
+const controller = inject(applicationControllerKey, null);
+const store = useApplicationStore();
 const headerPreferences = useHeaderPreferences();
 const displayStylePreference = useDisplayStylePreference();
 const dateTimeFormatPreference = useDateTimeFormatPreference();
-const activeSection = ref<"general" | "defaults">("general");
+const activeSection = ref<"general" | "defaults" | "plugins">("general");
 const displayStyle = ref<DisplayStyle>("system");
 const dateTimeFormat = ref<DateTimeFormat>("locale");
 const appendingHeaders = ref("");
@@ -78,6 +82,9 @@ const appendingHeadersError = computed(() =>
     ? undefined
     : t("header.appendingHeadersInvalid"),
 );
+const pluginsEmpty = computed(
+  () => store.plugins.length === 0 && store.pluginListState !== "loading",
+);
 
 watch(
   () => props.open,
@@ -88,6 +95,7 @@ watch(
       dateTimeFormat.value = dateTimeFormatPreference.dateTimeFormat.value;
       appendingHeaders.value =
         headerPreferences.appendingHeaderNames.value.join("\n");
+      void controller?.loadPlugins();
     }
   },
   { immediate: true },
@@ -142,6 +150,9 @@ function selectDateTimeFormat(value: string): void {
             </TabsTrigger>
             <TabsTrigger class="tab-button" value="defaults">
               {{ t("header.optionsSections.defaults") }}
+            </TabsTrigger>
+            <TabsTrigger class="tab-button" value="plugins">
+              {{ t("header.optionsSections.plugins") }}
             </TabsTrigger>
           </TabsList>
           <TabsPanel value="general" class="account-options-section">
@@ -228,6 +239,41 @@ function selectDateTimeFormat(value: string): void {
                 spellcheck="false"
               />
             </FormField>
+          </TabsPanel>
+          <TabsPanel value="plugins" class="account-options-section">
+            <p v-if="store.pluginListState === 'loading'" role="status">
+              {{ t("header.plugins.loading") }}
+            </p>
+            <p
+              v-else-if="store.pluginListState === 'unavailable'"
+              class="plugin-list-notice"
+              role="status"
+            >
+              {{ t("header.plugins.unavailable") }}
+            </p>
+            <p v-if="pluginsEmpty">
+              {{ t("header.plugins.empty") }}
+            </p>
+            <ul
+              v-else
+              class="plugin-list"
+              :aria-label="t('header.plugins.label')"
+            >
+              <li
+                v-for="plugin in store.plugins"
+                :key="plugin.id"
+                class="plugin-list-item"
+              >
+                <span class="plugin-list-name">{{ plugin.name }}</span>
+                <span class="plugin-list-version">v{{ plugin.version }}</span>
+                <span class="plugin-badge">{{
+                  t(`header.plugins.targets.${plugin.target}`)
+                }}</span>
+                <span class="plugin-badge">{{
+                  t(`header.plugins.sources.${plugin.source}`)
+                }}</span>
+              </li>
+            </ul>
           </TabsPanel>
         </TabsRoot>
         <footer class="resource-dialog-actions">

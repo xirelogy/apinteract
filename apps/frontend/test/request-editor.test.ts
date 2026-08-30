@@ -2,14 +2,17 @@
 
 import { createI18n } from "vue-i18n";
 import { flushPromises, mount } from "@vue/test-utils";
+import { EditorView } from "@codemirror/view";
 import { describe, expect, it, vi } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
 import type { RequestDraftInput } from "../src/model/domain/application";
-import CodeEditor from "../src/view/presentation/controls/CodeEditor.vue";
 import SelectMenu from "../src/view/presentation/controls/SelectMenu.vue";
 import ScriptEditor from "../src/view/presentation/controls/ScriptEditor.vue";
 import RequestEditor from "../src/view/presentation/features/RequestEditor.vue";
+import { installApplicationTestPlugins } from "./plugin-fixtures";
+
+installApplicationTestPlugins();
 
 Object.defineProperty(Range.prototype, "getClientRects", {
   configurable: true,
@@ -341,15 +344,34 @@ describe("RequestEditor", () => {
     const bodyType = wrapper
       .findAllComponents(SelectMenu)
       .find((select) => select.props("label") === "Content type");
-    bodyType?.vm.$emit("update:modelValue", "json");
+    bodyType?.vm.$emit("update:modelValue", "apinteract.json-content/json");
     await flushPromises();
     await vi.waitFor(() => {
       expect(wrapper.find(".body-code-editor").exists()).toBe(true);
     });
-    const editor = wrapper.getComponent(CodeEditor);
-    expect(editor.props("language")).toBe("json");
-    editor.vm.$emit("update:modelValue", "{");
-    editor.vm.$emit("input");
+    expect(wrapper.get(".plugin-view-host").classes()).toContain(
+      "wire-body-plugin-view",
+    );
+    expect(
+      wrapper.find(".wire-request-body-content > .body-code-editor").exists(),
+    ).toBe(true);
+    /** Replaces the document through the host-owned CodeMirror mechanism. */
+    const replaceDocument = (document: string): void => {
+      const content = wrapper.get<HTMLElement>(
+        '[aria-label="Raw request body"]',
+      );
+      const editor = EditorView.findFromDOM(content.element);
+      if (editor === null) throw new Error("Missing request CodeMirror view");
+      editor.dispatch({
+        changes: { from: 0, to: editor.state.doc.length, insert: document },
+      });
+    };
+    expect(
+      wrapper
+        .get('[aria-label="Raw request body"]')
+        .attributes("data-language"),
+    ).toBe("json");
+    replaceDocument("{");
     await wrapper.vm.$nextTick();
     expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
       body: "{",
@@ -369,7 +391,7 @@ describe("RequestEditor", () => {
       .find((button) => button.text() === "Format body")
       ?.trigger("click");
     expect(wrapper.get('[role="status"]').text()).toContain("not valid JSON");
-    editor.vm.$emit("update:modelValue", '{"value":true}');
+    replaceDocument('{"value":true}');
     await wrapper.vm.$nextTick();
     await wrapper
       .findAll("button")
@@ -379,9 +401,16 @@ describe("RequestEditor", () => {
       body: '{\n  "value": true\n}',
       requestBody: { text: '{\n  "value": true\n}' },
     });
-    bodyType?.vm.$emit("update:modelValue", "text");
+    bodyType?.vm.$emit(
+      "update:modelValue",
+      "apinteract.basic-http-content/text",
+    );
     await wrapper.vm.$nextTick();
-    expect(editor.props("language")).toBe("plain");
+    expect(
+      wrapper
+        .get('[aria-label="Raw request body"]')
+        .attributes("data-language") ?? "plain",
+    ).toBe("plain");
     expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
       body: '{\n  "value": true\n}',
       requestBody: {
@@ -389,9 +418,13 @@ describe("RequestEditor", () => {
         text: '{\n  "value": true\n}',
       },
     });
-    bodyType?.vm.$emit("update:modelValue", "json");
+    bodyType?.vm.$emit("update:modelValue", "apinteract.json-content/json");
     await wrapper.vm.$nextTick();
-    expect(editor.props("language")).toBe("json");
+    expect(
+      wrapper
+        .get('[aria-label="Raw request body"]')
+        .attributes("data-language"),
+    ).toBe("json");
     expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
       body: '{\n  "value": true\n}',
       requestBody: {
@@ -473,14 +506,23 @@ describe("RequestEditor", () => {
       | Array<{ value: string; label: string }>
       | undefined;
     expect(bodyTypeOptions).toEqual([
-      { value: "none", label: "None" },
-      { value: "text", label: "Plain text" },
-      { value: "json", label: "JSON" },
-      { value: "urlencoded", label: "Form (URL-encoded)" },
-      { value: "multipart", label: "Multipart Form" },
-      { value: "file", label: "Binary File" },
+      { value: "apinteract.basic-http-content/none", label: "None" },
+      { value: "apinteract.basic-http-content/text", label: "Plain text" },
+      { value: "apinteract.json-content/json", label: "JSON" },
+      {
+        value: "apinteract.basic-http-content/urlencoded",
+        label: "Form (URL-encoded)",
+      },
+      {
+        value: "apinteract.basic-http-content/multipart",
+        label: "Multipart Form",
+      },
+      { value: "apinteract.basic-http-content/file", label: "Binary File" },
     ]);
-    bodyType?.vm.$emit("update:modelValue", "file");
+    bodyType?.vm.$emit(
+      "update:modelValue",
+      "apinteract.basic-http-content/file",
+    );
     await wrapper.vm.$nextTick();
     expect(wrapper.text()).toContain("Choose file");
     await wrapper
@@ -580,7 +622,9 @@ describe("RequestEditor", () => {
     const bodyType = wrapper
       .findAllComponents(SelectMenu)
       .find((select) => select.props("label") === "Content type");
-    expect(bodyType?.props("modelValue")).toBe("urlencoded");
+    expect(bodyType?.props("modelValue")).toBe(
+      "apinteract.basic-http-content/urlencoded",
+    );
     expect(wrapper.find(".request-form-fields").exists()).toBe(true);
     expect(
       wrapper.get<HTMLInputElement>('input[aria-label="Form field name 1"]')
@@ -635,7 +679,10 @@ describe("RequestEditor", () => {
       },
     });
 
-    bodyType?.vm.$emit("update:modelValue", "multipart");
+    bodyType?.vm.$emit(
+      "update:modelValue",
+      "apinteract.basic-http-content/multipart",
+    );
     await wrapper.vm.$nextTick();
     const multipartDraft = wrapper.emitted("change")?.at(-1)?.[0] as
       | RequestDraftInput

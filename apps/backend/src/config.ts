@@ -33,6 +33,10 @@ export interface BackendConfiguration {
   readonly frontend: {
     readonly distPath: string;
   };
+  readonly plugins?: {
+    readonly builtinPath: string;
+    readonly userPath: string;
+  };
 }
 
 /** Requires a configuration value to be a non-array object. */
@@ -90,6 +94,7 @@ export async function loadBackendConfiguration(
   const proxy = record(document.proxy, "config.proxy");
   const sessions = record(document.sessions ?? {}, "config.sessions");
   const frontend = record(document.frontend ?? {}, "config.frontend");
+  const plugins = record(document.plugins ?? {}, "config.plugins");
 
   const secureCookie =
     sessions.secureCookie === undefined ? true : sessions.secureCookie;
@@ -158,6 +163,18 @@ export async function loadBackendConfiguration(
         frontend.distPath,
         "config.frontend.distPath",
         "/opt/apinteract/frontend",
+      ),
+    },
+    plugins: {
+      builtinPath: text(
+        plugins.builtinPath,
+        "config.plugins.builtinPath",
+        "/opt/apinteract/plugins",
+      ),
+      userPath: text(
+        plugins.userPath,
+        "config.plugins.userPath",
+        "/data/plugins",
       ),
     },
   };

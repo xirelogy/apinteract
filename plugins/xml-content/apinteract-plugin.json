@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 2,
+  "id": "apinteract.xml-content",
+  "name": "XML content",
+  "version": "1.0.0",
+  "weight": 0,
+  "target": "frontend",
+  "entrypoint": "dist/index.mjs",
+  "providers": ["response.content"]
+}

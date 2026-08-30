@@ -22,6 +22,28 @@ test("displays structured, isolated, image, and binary responses", async ({
   ).toHaveAttribute("aria-selected", "true");
   await expect(rawJson).toBeHidden();
   await expect(structuredJson).toBeVisible();
+  const structuredPanel = page.locator(".response-body-view:not([hidden])");
+  const structuredHost = structuredPanel.locator(":scope > .plugin-view-host");
+  const [structuredHostBox, structuredEditorBox] = await Promise.all([
+    structuredHost.boundingBox(),
+    structuredPanel.locator(".code-editor-control").boundingBox(),
+  ]);
+  expect(structuredHostBox).not.toBeNull();
+  expect(structuredEditorBox).not.toBeNull();
+  expect(
+    Math.abs(structuredEditorBox!.height - structuredHostBox!.height),
+  ).toBeLessThan(3);
+  expect(
+    Math.abs(
+      structuredEditorBox!.y +
+        structuredEditorBox!.height -
+        (structuredHostBox!.y + structuredHostBox!.height),
+    ),
+  ).toBeLessThan(3);
+  await expect(structuredPanel.locator(".cm-scroller")).toHaveCSS(
+    "overflow-y",
+    "auto",
+  );
   await page
     .getByRole("tablist", { name: "Response details" })
     .getByRole("tab", { name: "JSON", exact: true })
@@ -61,6 +83,16 @@ test("displays structured, isolated, image, and binary responses", async ({
   await expect(html).toHaveAttribute("sandbox", "");
   await expect(html).toHaveAttribute("srcdoc", /default-src 'none'/u);
   await expect(html).not.toHaveAttribute("srcdoc", /preview-probe/u);
+  const htmlHost = page.locator(
+    ".response-body-view:not([hidden]) > .plugin-view-host",
+  );
+  const [htmlHostBox, htmlBox] = await Promise.all([
+    htmlHost.boundingBox(),
+    html.boundingBox(),
+  ]);
+  expect(htmlHostBox).not.toBeNull();
+  expect(htmlBox).not.toBeNull();
+  expect(Math.abs(htmlBox!.height - htmlHostBox!.height)).toBeLessThan(3);
   await expect(
     page
       .frameLocator('iframe[title="Isolated HTML response preview"]')
@@ -96,12 +128,11 @@ test("displays structured, isolated, image, and binary responses", async ({
   );
 
   await sendFixtureRequest(page, "/response/large-image");
-  await expect(
-    page
-      .getByRole("tablist", { name: "Response details" })
-      .getByRole("tab", { name: "Image", exact: true }),
-  ).toHaveCount(0);
-  await expect(page.locator(".response-body-state")).toContainText(
+  await page
+    .getByRole("tablist", { name: "Response details" })
+    .getByRole("tab", { name: "Image", exact: true })
+    .click();
+  await expect(page.locator(".image-response-preview")).toContainText(
     "exceeds the safe preview limits",
   );
 

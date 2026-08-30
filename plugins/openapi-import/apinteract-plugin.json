@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 2,
+  "id": "apinteract.openapi-import",
+  "name": "OpenAPI import",
+  "version": "1.0.0",
+  "weight": 10,
+  "target": "backend",
+  "entrypoint": "dist/index.mjs",
+  "providers": ["request.import"]
+}

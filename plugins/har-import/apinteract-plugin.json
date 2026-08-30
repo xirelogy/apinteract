@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 2,
+  "id": "apinteract.har-import",
+  "name": "HAR import",
+  "version": "1.0.0",
+  "weight": 0,
+  "target": "backend",
+  "entrypoint": "dist/index.mjs",
+  "providers": ["request.import"]
+}

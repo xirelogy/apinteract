@@ -92,29 +92,27 @@ const previewMetadata = computed<
     { label: t("import.metadata.format"), value: providerLabel },
     { label: t("import.metadata.source"), value: currentPlan.sourceName },
   ];
-  if (currentPlan.providerId === "openapi-json") {
-    return [
-      ...common,
-      ...(currentPlan.pathPrefix === ""
-        ? []
-        : [
-            {
-              label: t("import.metadata.serverUrl"),
-              value: currentPlan.pathPrefix,
-            },
-          ]),
-    ];
-  }
+  const capturedResponses = currentPlan.requests.filter(
+    (request) => request.capturedExchange !== undefined,
+  ).length;
   return [
     ...common,
-    {
-      label: t("import.metadata.capturedResponses"),
-      value: String(
-        currentPlan.requests.filter(
-          (request) => request.capturedExchange !== undefined,
-        ).length,
-      ),
-    },
+    ...(currentPlan.pathPrefix === ""
+      ? []
+      : [
+          {
+            label: t("import.metadata.serverUrl"),
+            value: currentPlan.pathPrefix,
+          },
+        ]),
+    ...(capturedResponses === 0
+      ? []
+      : [
+          {
+            label: t("import.metadata.capturedResponses"),
+            value: String(capturedResponses),
+          },
+        ]),
   ];
 });
 const sourceAccept = computed(() =>
@@ -224,7 +222,7 @@ function close(): void {
   open.value = false;
 }
 
-/** Reads one user-selected JSON source without retaining the browser File. */
+/** Reads one bounded textual import source without retaining the browser File. */
 async function selectSource(event: Event): Promise<void> {
   const input = event.currentTarget;
   if (!(input instanceof HTMLInputElement)) return;

@@ -1,8 +1,10 @@
 import type { components } from "@apinteract/api-contracts/backend";
 
-import type { APInteractPlugin } from "./core.js";
+import type { APInteractPluginModule } from "./core.js";
 
 export type ImportProviderId = string;
+export type ImportedHttpMethod = components["schemas"]["HttpMethod"];
+export type ImportedVariableWrite = components["schemas"]["VariableWrite"];
 
 /** Declares one source adapter and the normalized features it may produce. */
 export interface ImportProviderManifest {
@@ -111,10 +113,9 @@ export interface ImportedCollection {
   readonly variables: readonly components["schemas"]["VariableWrite"][];
 }
 
-/** Preserves one recorded HTTP response without claiming it was executed here. */
-export interface CapturedExchangeView {
+/** Preserves one recorded HTTP response without provider-controlled provenance. */
+export interface ImportedCapturedExchange {
   readonly capturedExchangeId?: string;
-  readonly source: "har";
   readonly status: number;
   readonly statusText: string;
   readonly headers: readonly {
@@ -138,7 +139,7 @@ export interface ImportedRequest {
   readonly name: string;
   readonly description: string;
   readonly notes: string;
-  readonly method: components["schemas"]["HttpMethod"];
+  readonly method: ImportedHttpMethod;
   readonly targetMode: "absolute" | "composed";
   readonly targetUrl: string;
   readonly query: readonly ImportedRequestField[];
@@ -148,7 +149,7 @@ export interface ImportedRequest {
   readonly preRequestScript: string;
   readonly postResponseScript: string;
   readonly variables: readonly components["schemas"]["VariableWrite"][];
-  readonly capturedExchange?: CapturedExchangeView;
+  readonly capturedExchange?: ImportedCapturedExchange;
 }
 
 /** Describes a mutation-free canonical request and collection import preview. */
@@ -184,4 +185,5 @@ export interface BackendPluginProviders {
   readonly "request.import": ImportProvider;
 }
 
-export type BackendPlugin = APInteractPlugin<"backend", BackendPluginProviders>;
+export type BackendPluginModule =
+  APInteractPluginModule<BackendPluginProviders>;

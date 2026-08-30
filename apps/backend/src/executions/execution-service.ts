@@ -710,7 +710,7 @@ export class ExecutionService {
     const preview =
       blob === undefined || head === undefined
         ? undefined
-        : safeTextPreview(head.headers, blob.previewBytes);
+        : safeUtf8Preview(blob.previewBytes);
     return {
       executionId: prepared.executionId,
       ...(prepared.request.requestId === undefined
@@ -867,27 +867,29 @@ function toExecutionError(cause: unknown): {
   };
 }
 
-/** Decodes a bounded preview only when headers identify valid UTF-8 text. */
-export function safeTextPreview(
-  headers: readonly { readonly name: string; readonly value: string }[],
-  bytes: Buffer,
-): string | undefined {
-  // Preview only media types that are conventionally textual. Invalid UTF-8
-  // remains available as raw blob bytes and is not replaced or decoded loosely.
-  const contentType = headers
-    .find((header) => header.name.toLowerCase() === "content-type")
-    ?.value.toLowerCase();
-  const textLike =
-    contentType?.startsWith("text/") === true ||
-    contentType?.includes("json") === true ||
-    contentType?.includes("xml") === true ||
-    contentType?.includes("javascript") === true;
-  if (!textLike) {
-    return undefined;
-  }
+/** Decodes bounded valid UTF-8 evidence without interpreting its media type. */
+export function safeUtf8Preview(bytes: Buffer): string | undefined {
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const value = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return hasDisallowedTextControls(value) ? undefined : value;
   } catch {
     return undefined;
   }
+}
+
+/** Detects controls that make otherwise valid UTF-8 unsafe as textual evidence. */
+function hasDisallowedTextControls(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0)!;
+    if (
+      codePoint === 0x7f ||
+      codePoint <= 0x08 ||
+      codePoint === 0x0b ||
+      codePoint === 0x0c ||
+      (codePoint >= 0x0e && codePoint <= 0x1f)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }

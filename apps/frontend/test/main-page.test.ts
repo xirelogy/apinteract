@@ -13,6 +13,9 @@ import { useApplicationStore } from "../src/control/state/application-store";
 import EnvironmentManager from "../src/view/presentation/features/EnvironmentManager.vue";
 import CloseTabsDialog from "../src/view/presentation/features/CloseTabsDialog.vue";
 import RequestEditor from "../src/view/presentation/features/RequestEditor.vue";
+import { installApplicationTestPlugins } from "./plugin-fixtures";
+
+installApplicationTestPlugins();
 import RequestTabs from "../src/view/presentation/features/RequestTabs.vue";
 import MainPage from "../src/view/presentation/pages/MainPage.vue";
 

@@ -24,6 +24,7 @@ process.once("SIGINT", () => void stop());
 process.once("SIGTERM", () => void stop());
 
 try {
+  await runProcess("plugin build", ["plugins:build"]);
   await prepareRuntime();
   await initializeAdministrator();
   if (productionFrontend) {
@@ -144,6 +145,10 @@ async function prepareRuntime() {
         },
         sessions: { secureCookie: false },
         frontend: { distPath: resolve(runtimeRoot, "missing-frontend-dist") },
+        plugins: {
+          builtinPath: resolve(repositoryRoot, "plugins"),
+          userPath: resolve(runtimeRoot, "plugins"),
+        },
       }),
       { encoding: "utf8", mode: 0o600 },
     ),

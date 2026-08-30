@@ -10,6 +10,7 @@ import { EnvironmentService } from "../src/environments/environment-service.js";
 import { LocalBlobStore } from "../src/blobs/local-blob-store.js";
 import {
   ExecutionService,
+  safeUtf8Preview,
   type ExecutionEvent,
 } from "../src/executions/execution-service.js";
 import { createEntityId, idToBytes } from "../src/foundation/id.js";
@@ -19,6 +20,18 @@ import { RequestService } from "../src/requests/request-service.js";
 import { ScriptService } from "../src/scripting/script-service.js";
 import { WorkspaceService } from "../src/workspaces/workspace-service.js";
 import { VariableService } from "../src/variables/variable-service.js";
+
+describe("response preview evidence", () => {
+  it("retains format-neutral UTF-8 and rejects malformed or unsafe text", () => {
+    expect(safeUtf8Preview(Buffer.from("value: true", "utf8"))).toBe(
+      "value: true",
+    );
+    expect(safeUtf8Preview(Buffer.from([0xc3, 0x28]))).toBeUndefined();
+    expect(
+      safeUtf8Preview(Buffer.from("value\u0000true", "utf8")),
+    ).toBeUndefined();
+  });
+});
 
 describe("ExecutionService shutdown", () => {
   it("drains active proxy work and rejects new starts", async () => {

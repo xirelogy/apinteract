@@ -44,7 +44,13 @@ test("exposes install metadata and recovers an authenticated online session", as
   for (const value of cachedUrls) {
     const url = new URL(value);
     expect(url.origin).toBe("http://127.0.0.1:5173");
-    expect(url.pathname.startsWith("/web-ui/")).toBe(true);
+    expect(
+      url.pathname.startsWith("/web-ui/") ||
+        url.pathname === "/plugins/catalog.json" ||
+        /^\/plugins\/[a-z0-9]+(?:[.-][a-z0-9]+)*\/[a-f0-9]{64}\/.+$/u.test(
+          url.pathname,
+        ),
+    ).toBe(true);
     expect(url.pathname).not.toMatch(/^\/(?:auth|api|ws)(?:\/|$)/u);
   }
 

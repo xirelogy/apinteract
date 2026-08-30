@@ -44,6 +44,13 @@ The frontend does not execute target requests directly and does not own
 authorization, secret resolution, inheritance, scripting, or persistence
 rules.
 
+Frontend and backend extension packages share one discovery format but always
+target a single runtime. Built-in packages are discovered from the installation
+plugin directory; user packages are discovered from the data plugin directory.
+The core components depend on typed provider contracts rather than importing
+format-specific implementations. The public [plugin guide](../plugins/README.md)
+documents packaging, discovery, registration, and trust boundaries.
+
 ### Proxy
 
 The proxy is the outbound request execution and data-plane component. It

@@ -9,9 +9,10 @@ import {
 } from "@/app/preferences/date-time-format";
 import { frontendPluginRuntime } from "@/app/plugins/frontend-plugin-host";
 import {
-  analyzeResponseContent,
-  RESPONSE_IMAGE_PREVIEW_LIMIT_BYTES,
-} from "@/model/domain/response-content";
+  localizePluginLabel,
+  useFrontendPluginUi,
+} from "@/app/plugins/frontend-plugin-ui";
+import { analyzeResponseContent } from "@/model/domain/response-content";
 import type {
   ExecutionView,
   RequestExchangeSummary,
@@ -25,8 +26,7 @@ import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
 import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
 import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
 import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
-import HtmlResponsePreview from "@/view/presentation/features/HtmlResponsePreview.vue";
-import ImageResponsePreview from "@/view/presentation/features/ImageResponsePreview.vue";
+import PluginViewHost from "@/view/presentation/controls/PluginViewHost.vue";
 
 const CodeEditor = defineAsyncComponent(
   () => import("@/view/presentation/controls/CodeEditor.vue"),
@@ -43,19 +43,18 @@ const emit = defineEmits<{
   download: [executionId: string];
   selectExchange: [exchangeId: string];
 }>();
-const { locale, t } = useI18n();
+const i18n = useI18n();
+const { locale, t } = i18n;
+const pluginUi = useFrontendPluginUi();
 const dateTimeFormatPreference = useDateTimeFormatPreference();
 
-type ResponseDetailTab =
+type CoreResponseDetailTab =
   | "error"
   | "request"
   | "raw"
-  | "json"
-  | "xml"
-  | "html"
-  | "image"
   | "headers"
   | "scripts";
+type ResponseDetailTab = CoreResponseDetailTab | `viewer:${string}`;
 const selectedTab = ref<ResponseDetailTab>("raw");
 
 type ScriptLog = ExecutionView["scriptLogs"][number];
@@ -157,68 +156,42 @@ const content = computed(() =>
         props.execution,
         props.capturedResponse,
         frontendPluginRuntime.responseContent,
+        props.loadBody ?? undefined,
+        locale.value,
       ),
 );
 
-/** Exposes only successfully prepared or safely loadable derived body tabs. */
+/** Exposes the selected executable plugin viewer as one generic detail tab. */
 const derivedDetailTabs = computed<readonly ResponseDetailTab[]>(() => {
-  const analysis = content.value;
-  const execution = props.execution;
-  if (analysis === null || execution === null) return [];
-  if (analysis.kind === "json" && analysis.structured?.valid === true) {
-    return ["json"];
-  }
-  if (analysis.kind === "xml" && analysis.structured?.valid === true) {
-    return ["xml"];
-  }
-  if (analysis.kind === "html" && analysis.previewComplete) {
-    return [
-      ...(analysis.structured?.valid === true ? (["xml"] as const) : []),
-      "html",
-    ];
-  }
-  if (
-    analysis.kind === "image" &&
-    execution.bodyBlobId !== undefined &&
-    props.loadBody != null &&
-    (execution.bodyBytes ?? 0) <= RESPONSE_IMAGE_PREVIEW_LIMIT_BYTES
-  ) {
-    return ["image"];
-  }
-  return [];
+  const viewer = content.value?.viewer;
+  return viewer === undefined ? [] : [`viewer:${viewer.id}`];
 });
 
-/** Reports a declared structured body that could not produce a parsed view. */
-const hasInvalidStructuredBody = computed(
-  () => content.value?.structured?.valid === false,
-);
+/** Localizes one plugin label while retaining its package-provided fallback. */
+function viewerLabel(): string {
+  const label = content.value?.viewer?.label;
+  if (label === undefined) return "";
+  return localizePluginLabel(label, locale.value);
+}
 
-/** Reports an image that is retained but intentionally too large to preview. */
-const imageExceedsPreviewLimit = computed(
-  () =>
-    content.value?.kind === "image" &&
-    (props.execution?.bodyBytes ?? 0) > RESPONSE_IMAGE_PREVIEW_LIMIT_BYTES,
-);
-
-/** Binds complete guarded image metadata to the lazy preview component. */
-const imagePreview = computed(() => {
+const viewerContext = computed(() => {
   const analysis = content.value;
   const execution = props.execution;
-  const loadBody = props.loadBody;
   if (
-    analysis?.kind !== "image" ||
-    analysis.mediaType === null ||
+    analysis?.viewer === undefined ||
     execution === null ||
-    execution.bodyBytes === undefined ||
-    loadBody == null
+    analysis.mediaType === null
   ) {
     return null;
   }
   return {
-    executionId: execution.executionId,
+    execution,
     mediaType: analysis.mediaType,
-    byteLength: execution.bodyBytes,
-    loadBody,
+    locale: locale.value,
+    previewComplete: analysis.previewComplete,
+    previewTruncated: analysis.previewTruncated,
+    ...(props.loadBody == null ? {} : { loadBody: props.loadBody }),
+    ui: pluginUi,
   };
 });
 
@@ -267,8 +240,10 @@ const visibleDetailTabs = computed<readonly ResponseDetailTab[]>(() => [
 /** Chooses a parsed structured body view before falling back to the raw body. */
 const defaultDetailTab = computed<ResponseDetailTab>(() => {
   if (props.execution?.error !== undefined) return "error";
-  const structured = content.value?.structured;
-  return structured?.valid === true ? structured.language : "raw";
+  const viewer = content.value?.viewer;
+  return viewer !== undefined && content.value?.viewerIsDefault === true
+    ? `viewer:${viewer.id}`
+    : "raw";
 });
 
 /** Keeps an error-only execution in the compact tabless presentation. */
@@ -283,9 +258,6 @@ const exchangeOptions = computed<readonly SelectMenuOption[]>(() =>
     label: [
       exchangeStatusLabel(summary),
       t(`response.exchange.kind.${summary.kind}`),
-      ...(summary.source === "apinteract"
-        ? []
-        : [t(`response.exchange.source.${summary.source}`)]),
       formatExchangeDateTime(summary.occurredAt),
     ].join(" · "),
   })),
@@ -465,32 +437,11 @@ function formatScriptLocation(error: ScriptError): string {
           {{ t("response.raw") }}
         </TabsTrigger>
         <TabsTrigger
-          v-if="visibleDetailTabs.includes('json')"
+          v-if="content?.viewer !== undefined"
           class="tab-button"
-          value="json"
+          :value="`viewer:${content.viewer.id}`"
         >
-          {{ t("response.json") }}
-        </TabsTrigger>
-        <TabsTrigger
-          v-if="visibleDetailTabs.includes('xml')"
-          class="tab-button"
-          value="xml"
-        >
-          {{ t("response.xml") }}
-        </TabsTrigger>
-        <TabsTrigger
-          v-if="visibleDetailTabs.includes('html')"
-          class="tab-button"
-          value="html"
-        >
-          {{ t("response.preview") }}
-        </TabsTrigger>
-        <TabsTrigger
-          v-if="visibleDetailTabs.includes('image')"
-          class="tab-button"
-          value="image"
-        >
-          {{ t("response.image") }}
+          {{ viewerLabel() }}
         </TabsTrigger>
         <TabsTrigger
           v-if="visibleDetailTabs.includes('headers')"
@@ -618,19 +569,6 @@ function formatScriptLocation(error: ScriptError): string {
           >
             {{ t("response.previewTruncated") }}
           </p>
-          <p
-            v-if="hasInvalidStructuredBody"
-            class="response-preview-notice"
-            role="status"
-          >
-            {{
-              t(
-                content?.kind === "json"
-                  ? "response.invalidJson"
-                  : "response.invalidXml",
-              )
-            }}
-          </p>
           <CodeEditor
             class="response-code-viewer"
             :model-value="execution.bodyPreview"
@@ -642,16 +580,13 @@ function formatScriptLocation(error: ScriptError): string {
           <strong v-if="execution.state === 'running'">
             {{ t("response.waitingBody") }}
           </strong>
-          <strong v-else-if="content?.kind === 'empty'">
+          <strong v-else-if="content?.state === 'empty'">
             {{ t("response.emptyResponseBody") }}
           </strong>
-          <strong v-else-if="content?.kind === 'unavailable'">
+          <strong v-else-if="content?.state === 'unavailable'">
             {{ t("response.capturedBodyUnavailable") }}
           </strong>
           <strong v-else>{{ t("response.binaryBody") }}</strong>
-          <p v-if="imageExceedsPreviewLimit">
-            {{ t("response.imageTooLarge") }}
-          </p>
           <dl
             v-if="execution.state !== 'running'"
             class="response-body-metadata"
@@ -676,57 +611,14 @@ function formatScriptLocation(error: ScriptError): string {
         </div>
       </TabsPanel>
       <TabsPanel
-        v-if="visibleDetailTabs.includes('json')"
-        value="json"
+        v-if="content?.viewer !== undefined && viewerContext !== null"
+        :value="`viewer:${content.viewer.id}`"
         class="response-content response-body-view"
       >
-        <CodeEditor
-          v-if="content?.structured?.value !== undefined"
-          class="response-code-viewer"
-          :model-value="content.structured.value"
-          :label="t('response.jsonBody')"
-          language="json"
-          read-only
-          foldable
-        />
-      </TabsPanel>
-      <TabsPanel
-        v-if="visibleDetailTabs.includes('xml')"
-        value="xml"
-        class="response-content response-body-view"
-      >
-        <CodeEditor
-          v-if="content?.structured?.value !== undefined"
-          class="response-code-viewer"
-          :model-value="content.structured.value"
-          :label="t('response.xmlBody')"
-          language="xml"
-          read-only
-          foldable
-        />
-      </TabsPanel>
-      <TabsPanel
-        v-if="visibleDetailTabs.includes('html')"
-        value="html"
-        class="response-content response-body-view"
-      >
-        <HtmlResponsePreview
-          v-if="execution.bodyPreview !== undefined"
-          :source="execution.bodyPreview"
-          :title="t('response.htmlPreviewTitle')"
-        />
-      </TabsPanel>
-      <TabsPanel
-        v-if="visibleDetailTabs.includes('image')"
-        value="image"
-        class="response-content response-body-view"
-      >
-        <ImageResponsePreview
-          v-if="activeTab === 'image' && imagePreview !== null"
-          :execution-id="imagePreview.executionId"
-          :media-type="imagePreview.mediaType"
-          :byte-length="imagePreview.byteLength"
-          :load-body="imagePreview.loadBody"
+        <PluginViewHost
+          v-if="activeTab === `viewer:${content.viewer.id}`"
+          :mount="content.viewer.mountView"
+          :context="viewerContext"
         />
       </TabsPanel>
       <TabsPanel

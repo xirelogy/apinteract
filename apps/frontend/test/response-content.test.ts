@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
-import type { FrontendPlugin } from "@apinteract/plugin-api/frontend";
+import type { PluginPackageManifest } from "@apinteract/plugin-api";
+import type { FrontendPluginModule } from "@apinteract/plugin-api/frontend";
 
 import { createFrontendPluginRuntime } from "../src/app/plugins/frontend-plugin-host";
+import { createTestFrontendPluginRuntime } from "./plugin-fixtures";
 import type { ExecutionView } from "../src/model/contracts/backend";
 import {
   analyzeResponseContent as analyzeWithPresenters,
-  isRasterImageMediaType,
   isResponsePreviewComplete,
   ResponseContentPresenterRegistry,
   responseMediaType,
 } from "../src/model/domain/response-content";
 
-const builtinPresenters = createFrontendPluginRuntime().responseContent;
+const builtinPresenters = createTestFrontendPluginRuntime().responseContent;
 
 /** Analyzes through built-ins unless a test supplies an isolated registry. */
 function analyzeResponseContent(
@@ -67,7 +68,7 @@ describe("response content analysis", () => {
     ).toBe(false);
   });
 
-  it("formats valid JSON without changing duplicate members or number lexemes", () => {
+  it("selects an executable JSON viewer and makes valid complete content default", () => {
     const source = '{"value":9007199254740993,"value":2,"items":[true,null]}';
     const analysis = analyzeResponseContent(
       execution({
@@ -77,16 +78,12 @@ describe("response content analysis", () => {
       }),
     );
 
-    expect(analysis.kind).toBe("json");
-    expect(analysis.structured).toEqual({
-      language: "json",
-      valid: true,
-      value:
-        '{\n  "value": 9007199254740993,\n  "value": 2,\n  "items": [\n    true,\n    null\n  ]\n}',
-    });
+    expect(analysis.state).toBe("text");
+    expect(analysis.viewer?.id).toMatch(/\/json$/u);
+    expect(analysis.viewerIsDefault).toBe(true);
   });
 
-  it("does not create a parsed JSON view for invalid or truncated content", () => {
+  it("keeps invalid or truncated JSON viewers available without selecting them", () => {
     const invalid = '{"value":}';
     expect(
       analyzeResponseContent(
@@ -95,8 +92,8 @@ describe("response content analysis", () => {
           bodyBytes: invalid.length,
           bodyPreview: invalid,
         }),
-      ).structured,
-    ).toEqual({ language: "json", valid: false });
+      ).viewerIsDefault,
+    ).toBe(false);
 
     const truncated = '{"value":';
     expect(
@@ -106,8 +103,8 @@ describe("response content analysis", () => {
           bodyBytes: 2000,
           bodyPreview: truncated,
         }),
-      ).structured,
-    ).toBeUndefined();
+      ).viewerIsDefault,
+    ).toBe(false);
   });
 
   it("parses XML without treating SVG as a directly renderable image", () => {
@@ -120,16 +117,11 @@ describe("response content analysis", () => {
       }),
     );
 
-    expect(analysis.kind).toBe("xml");
-    expect(analysis.structured).toEqual({
-      language: "xml",
-      valid: true,
-      value: source,
-    });
-    expect(isRasterImageMediaType("image/svg+xml")).toBe(false);
+    expect(analysis.viewer?.id).toMatch(/\/xml$/u);
+    expect(analysis.viewerIsDefault).toBe(true);
   });
 
-  it("offers both XML structure and HTML capability for valid XHTML", () => {
+  it("prefers the exact executable HTML viewer over the XML suffix viewer", () => {
     const source =
       '<html xmlns="http://www.w3.org/1999/xhtml"><p>OK</p></html>';
     const analysis = analyzeResponseContent(
@@ -140,30 +132,39 @@ describe("response content analysis", () => {
       }),
     );
 
-    expect(analysis.kind).toBe("html");
-    expect(analysis.structured?.valid).toBe(true);
+    expect(analysis.viewer?.id).toMatch(/\/html$/u);
+    expect(analysis.viewerIsDefault).toBe(false);
   });
 
   it("allows a contributed presenter to override a built-in deliberately", () => {
-    const yamlPlugin: FrontendPlugin = {
-      manifest: {
-        apiVersion: 1,
-        id: "example.yaml-response",
-        name: "YAML response support",
-        version: "1.0.0",
-        target: "frontend",
-      },
+    const yamlManifest: PluginPackageManifest<"frontend"> = {
+      schemaVersion: 1,
+      apiVersion: 2,
+      id: "example.yaml-response",
+      name: "YAML response support",
+      version: "1.0.0",
+      target: "frontend",
+      entrypoint: "dist/index.mjs",
+      providers: ["response.content"],
+    };
+    const yamlPlugin: FrontendPluginModule = {
       /** Registers one response presenter through the frontend plugin host. */
       register(context) {
         context.register("response.content", {
           id: "yaml",
+          label: { default: "YAML" },
           mediaTypes: ["application/yaml", "*+yaml"],
-          present: () => ({ kind: "text" }),
+          mountView: () => ({
+            /** Accepts lifecycle updates for the executable test view. */
+            update() {},
+            /** Releases the executable test view. */
+            destroy() {},
+          }),
         });
       },
     };
-    const runtime = createFrontendPluginRuntime();
-    runtime.plugins.install(yamlPlugin);
+    const runtime = createTestFrontendPluginRuntime();
+    runtime.plugins.install(yamlManifest, yamlPlugin, "user");
     const source = "value: true";
     expect(
       analyzeResponseContent(
@@ -176,8 +177,8 @@ describe("response content analysis", () => {
         }),
         false,
         runtime.responseContent,
-      ).kind,
-    ).toBe("text");
+      ).viewer?.id,
+    ).toMatch(/\/yaml$/u);
     expect(runtime.plugins.has("example.yaml-response")).toBe(true);
 
     expect(createFrontendPluginRuntime().responseContent).toBeInstanceOf(
@@ -187,25 +188,75 @@ describe("response content analysis", () => {
 
   it("distinguishes raster, textual, binary, empty, and unavailable bodies", () => {
     expect(
-      analyzeResponseContent(
+      analyzeWithPresenters(
         execution({
           headers: [{ name: "content-type", value: "image/png" }],
           bodyBytes: 24,
           bodyBlobId: "019fa8be-a510-76b9-b73b-69f4c7af7902",
         }),
-      ).kind,
-    ).toBe("image");
+        false,
+        builtinPresenters,
+        () => Promise.resolve(new Blob()),
+      ).viewer?.id,
+    ).toMatch(/\/raster-image$/u);
     expect(
       analyzeResponseContent(execution({ bodyBytes: 4, bodyPreview: "text" }))
-        .kind,
+        .state,
     ).toBe("text");
     expect(
       analyzeResponseContent(execution({ bodyBytes: 4, bodyBlobId: "blob" }))
-        .kind,
+        .state,
     ).toBe("binary");
-    expect(analyzeResponseContent(execution()).kind).toBe("empty");
-    expect(analyzeResponseContent(execution({ bodyBytes: 4 }), true).kind).toBe(
-      "unavailable",
+    expect(analyzeResponseContent(execution()).state).toBe("empty");
+    expect(
+      analyzeResponseContent(execution({ bodyBytes: 4 }), true).state,
+    ).toBe("unavailable");
+  });
+
+  it("does not expose partial frontend contributions after a conflict", () => {
+    const runtime = createFrontendPluginRuntime();
+    const manifest: PluginPackageManifest<"frontend"> = {
+      schemaVersion: 1,
+      apiVersion: 2,
+      id: "example.atomic",
+      name: "Atomic example",
+      version: "1.0.0",
+      target: "frontend",
+      entrypoint: "dist/index.mjs",
+      providers: ["response.content"],
+    };
+    const plugin: FrontendPluginModule = {
+      /** Registers conflicting presenters to exercise package rollback. */
+      register(context) {
+        context.register("response.content", {
+          id: "first",
+          label: { default: "First" },
+          mediaTypes: ["application/example"],
+          mountView: () => ({
+            /** Accepts lifecycle updates for the executable test view. */
+            update() {},
+            /** Releases the executable test view. */
+            destroy() {},
+          }),
+        });
+        context.register("response.content", {
+          id: "second",
+          label: { default: "Second" },
+          mediaTypes: ["application/example"],
+          mountView: () => ({
+            /** Accepts lifecycle updates for the executable test view. */
+            update() {},
+            /** Releases the executable test view. */
+            destroy() {},
+          }),
+        });
+      },
+    };
+
+    expect(() => runtime.plugins.install(manifest, plugin, "user")).toThrow(
+      /conflicts/u,
     );
+    expect(runtime.responseContent.list()).toEqual([]);
+    expect(runtime.plugins.list()).toEqual([]);
   });
 });

@@ -33,18 +33,34 @@ COPY apps/frontend/package.json apps/frontend/package.json
 COPY apps/proxy/package.json apps/proxy/package.json
 COPY packages/api-contracts/package.json packages/api-contracts/package.json
 COPY packages/plugin-api/package.json packages/plugin-api/package.json
+COPY packages/plugin-sdk/package.json packages/plugin-sdk/package.json
+COPY plugins/basic-http-content/package.json plugins/basic-http-content/package.json
+COPY plugins/json-content/package.json plugins/json-content/package.json
+COPY plugins/xml-content/package.json plugins/xml-content/package.json
+COPY plugins/html-preview/package.json plugins/html-preview/package.json
+COPY plugins/raster-image-preview/package.json plugins/raster-image-preview/package.json
+COPY plugins/openapi-import/package.json plugins/openapi-import/package.json
+COPY plugins/har-import/package.json plugins/har-import/package.json
 
 RUN --mount=type=cache,id=apinteract-pnpm-store,target=/opt/pnpm/store \
     pnpm install --frozen-lockfile
 
 COPY apps apps
 COPY packages packages
+COPY plugins plugins
 COPY docs docs
 COPY tooling tooling
 COPY logo.png ./logo.png
 
 RUN --mount=type=cache,id=apinteract-pnpm-store,target=/opt/pnpm/store \
     pnpm build \
+    && mkdir -p /artifacts/plugins \
+    && for plugin in plugins/*; do \
+      target="/artifacts/plugins/$(basename "${plugin}")"; \
+      mkdir -p "${target}"; \
+      cp "${plugin}/package.json" "${plugin}/apinteract-plugin.json" "${target}/"; \
+      cp -R "${plugin}/dist" "${target}/dist"; \
+    done \
     && pnpm --offline --filter @apinteract/backend deploy --prod --no-optional /artifacts/backend \
     && pnpm --offline --filter @apinteract/proxy deploy --prod --no-optional /artifacts/proxy
 
@@ -105,6 +121,7 @@ RUN mkdir -p /etc/ssl/certs \
 COPY --from=build --chown=apinteract:apinteract /artifacts/backend /opt/apinteract/backend
 COPY --from=build --chown=apinteract:apinteract /artifacts/proxy /opt/apinteract/proxy
 COPY --from=build --chown=apinteract:apinteract /workspace/apps/frontend/dist /opt/apinteract/frontend
+COPY --from=build --chown=apinteract:apinteract /artifacts/plugins /opt/apinteract/plugins
 COPY --chown=root:root LICENSE /opt/apinteract/LICENSE
 COPY --chown=apinteract:apinteract deploy/aio/runtime /opt/apinteract/runtime
 COPY deploy/aio/s6-rc.d /etc/s6-overlay/s6-rc.d

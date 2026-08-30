@@ -1,177 +1,319 @@
 # APInteract Plugins
 
-APInteract plugins extend explicitly registered frontend or backend providers.
-The shared TypeScript contract is published by `@apinteract/plugin-api`; each
-provider retains its own data, lifecycle, and security boundary.
+APInteract plugins are independently compiled packages discovered at startup.
+Each package targets exactly one runtime—frontend or backend—and registers one
+or more implementations through typed providers from `@apinteract/plugin-api`.
 
-The registration API and the first content/import providers are implemented.
-Automatic package discovery, administrator configuration, integrity checks,
-and external runtime loading remain planned. Installed source plugins are
-currently selected by the application composition root.
+Frontend plugins and backend plugins execute in different environments and
+cannot contribute across that boundary. They use the same package format.
 
-## One Package, One Target
+## Package Format
 
-One plugin package targets exactly one runtime:
+Every discovery-root child is one self-contained package:
 
-```ts
-type PluginTarget = "frontend" | "backend";
+```text
+example-plugin/
+  package.json
+  apinteract-plugin.json
+  dist/
+    index.mjs
+    optional-support-files.js
 ```
 
-A frontend plugin cannot register backend providers, and a backend plugin
-cannot register frontend providers. Both use the same package signature:
+`package.json` must have a non-empty package name, use `"type": "module"`,
+and repeat the same version as the plugin manifest. Dependencies needed at
+runtime must be bundled into `dist/` or emitted there as package-relative
+assets; a plugin package cannot import application source files, sibling
+plugins, or unresolved workspace packages. `@apinteract/plugin-sdk` provides
+optional authoring helpers that plugin builds bundle into their own artifacts.
 
-```ts
-interface APInteractPlugin<TTarget, TProviders> {
-  manifest: {
-    apiVersion: 1;
-    id: string;
-    name: string;
-    version: string;
-    target: TTarget;
-  };
-  register(context: PluginRegistrationContext<TProviders>): void;
+`apinteract-plugin.json` is the canonical package metadata:
+
+```json
+{
+  "schemaVersion": 1,
+  "apiVersion": 2,
+  "id": "example.yaml-content",
+  "name": "YAML content",
+  "version": "1.0.0",
+  "weight": 10,
+  "target": "frontend",
+  "entrypoint": "dist/index.mjs",
+  "providers": ["request.content", "response.content"]
 }
 ```
 
-The package root convention is to export one `plugin` value. A package can
-register several contributions, but all contributions must belong to its one
-target runtime.
+IDs use lowercase alphanumeric segments separated by dots or hyphens. Versions
+use semantic `major.minor.patch` form. Entrypoints must remain below `dist/` and
+cannot escape the package through traversal or symbolic links. Symbolic links
+anywhere in `dist/` are rejected. Each distribution asset is limited to 8 MiB,
+and the complete distribution is limited to 32 MiB. `weight` is an optional
+safe integer from -10000 to 10000; higher weights are presented first, with
+discovery order as the stable tie-breaker.
+
+An entrypoint exports registration, not another copy of its manifest:
 
 ```ts
-import type { FrontendPlugin } from "@apinteract/plugin-api/frontend";
+import type { PluginRegistrationContext } from "@apinteract/plugin-api";
+import type { FrontendPluginProviders } from "@apinteract/plugin-api/frontend";
 
-export const plugin: FrontendPlugin = {
-  manifest: {
-    apiVersion: 1,
-    id: "example.yaml",
-    name: "YAML content support",
-    version: "1.0.0",
-    target: "frontend",
-  },
-  register(context) {
-    // Typed frontend contributions belong here.
-  },
-};
-
-export default plugin;
+export function register(
+  context: PluginRegistrationContext<FrontendPluginProviders>,
+): void {
+  // Register typed frontend contributions here.
+}
 ```
 
-Plugin IDs use lowercase alphanumeric segments separated by dots or hyphens.
-Versions use semantic `major.minor.patch` form. The target host validates the
-manifest and rejects duplicate package IDs before completing startup.
+A package can register multiple implementations, including several
+implementations for the same provider. Every used provider must be declared in
+the manifest, and every declared provider must receive a contribution.
+Registration is atomic: conflict or validation failure excludes the whole
+package rather than leaving some contributions installed.
+
+## Discovery And Trust
+
+The backend scans two roots with the same validator:
+
+| Default root              | Source shown in Options |
+| ------------------------- | ----------------------- |
+| `/opt/apinteract/plugins` | Built-in                |
+| `/data/plugins`           | User                    |
+
+The directory is the only built-in/user distinction. Duplicate package IDs
+across roots are rejected. Invalid optional packages are logged and excluded.
+After loading, hosts validate required provider capabilities without depending
+on specific package IDs.
+
+Backend entrypoints are trusted code in the backend process. Frontend
+entrypoints are trusted browser code. Frontend packages are listed through a
+same-origin catalog and loaded from SHA-256 content-addressed immutable URLs
+before the Vue application mounts. The hash covers every path and byte below
+`dist/`, and the backend serves relative JavaScript, CSS, JSON, WASM, and image
+assets below the same immutable package URL. Provider result types constrain
+coupling; they are not a security sandbox.
+
+Successfully loaded packages are considered enabled. The read-only
+**Options → Plugins** view lists their name, version, target, and source.
 
 ## Implemented Providers
 
-| Target   | Provider ID        | Contribution role                           |
-| -------- | ------------------ | ------------------------------------------- |
-| Frontend | `request.content`  | Request body recognition, editor, formatter |
-| Frontend | `response.content` | Response classification and safe projection |
-| Backend  | `request.import`   | Request and collection import plans         |
+| Target   | Provider ID        | Contribution role                          |
+| -------- | ------------------ | ------------------------------------------ |
+| Frontend | `request.content`  | Request recognition and executable editing |
+| Frontend | `response.content` | Response recognition, parsing, and display |
+| Backend  | `request.import`   | Request and collection import plans        |
 
-Built-in JSON/XML/HTML/image/text support and built-in OpenAPI/HAR importers
-register through these same contracts.
+The built-in packages use the same public contracts as user packages:
+
+- Basic HTTP content, JSON content, XML content, HTML response preview, and
+  raster image preview are frontend packages.
+- OpenAPI import and HAR import are backend packages.
+
+Core application modules know provider contracts, canonical HTTP wire bodies,
+and host-owned mechanisms, not content implementations such as JSON parsing or
+HAR document structure.
 
 ### Request Content
 
-`request.content` maps media types to an existing wire-level request body kind
-and a host-owned editor primitive. A text contribution may also provide an
-explicit formatter:
+`request.content` owns recognition, initialization, editing, validation, and
+formatting for one content option. The core retains only the canonical HTTP
+wire body needed to save and execute the request. A contribution mounts an
+executable, framework-neutral editor into an `HTMLElement` and publishes wire
+body changes through its context:
 
 ```ts
+import { localize } from "@apinteract/plugin-sdk/frontend/localization";
+
 context.register("request.content", {
   id: "yaml",
-  label: { default: "YAML" },
-  bodyKind: "text",
-  defaultContentType: "application/yaml",
+  label: {
+    default: "YAML",
+    translations: { "zh-CN": "YAML", "zh-TW": "YAML" },
+  },
   mediaTypes: ["application/yaml", "*+yaml"],
-  textLanguage: "plain",
-  format(source) {
-    try {
-      return { valid: true, value: formatYaml(source) };
-    } catch {
-      return { valid: false, error: "The request body is not valid YAML." };
-    }
+  order: 25,
+  createBody(previous) {
+    return {
+      kind: "text",
+      contentType: "application/yaml",
+      text: previous.kind === "text" ? previous.text : "",
+    };
+  },
+  isDefaultFor() {
+    return false;
+  },
+  effectiveContentType(body) {
+    return body.kind === "text" ? body.contentType : null;
+  },
+  mountEditor(container, initial) {
+    const optionsFor = (current: typeof initial) => ({
+      body: current.body,
+      wireKind: "text" as const,
+      label: localize(
+        "YAML request body",
+        { "zh-CN": "YAML 请求体", "zh-TW": "YAML 請求本文" },
+        current.locale,
+      ),
+      disabled: current.disabled,
+      variablePreviews: current.variablePreviews,
+      codeLanguage: "plain" as const,
+      contentTypePlaceholder: "application/yaml",
+      format(source: string) {
+        try {
+          return { valid: true as const, value: formatYaml(source) };
+        } catch {
+          return {
+            valid: false as const,
+            error: localize(
+              "The request body is not valid YAML.",
+              {
+                "zh-CN": "请求体不是有效的 YAML。",
+                "zh-TW": "請求本文不是有效的 YAML。",
+              },
+              current.locale,
+            ),
+          };
+        }
+      },
+      onChange: current.updateBody,
+    });
+    const editor = initial.ui.mountWireBodyEditor(
+      container,
+      optionsFor(initial),
+    );
+    return {
+      update(current) {
+        editor.update(optionsFor(current));
+      },
+      destroy() {
+        editor.destroy();
+      },
+    };
   },
 });
 ```
 
-Formatting runs only after the user activates **Format body**. Invalid input is
-left unchanged and the returned error is rendered as text. A formatter never
-changes the canonical request body kind or sends bytes by itself.
+`kind` in this example is the canonical HTTP wire representation, not a
+content implementation selected by core. A plugin may instead own its DOM or
+use `mountCodeEditor` directly. Plugins do not import Vue components or
+application source. The host currently supplies generic CodeMirror, canonical
+wire-body, sandboxed-document, and bounded-image mechanisms.
 
-The current host editor languages are `plain` and `json`. Adding YAML syntax
-highlighting requires a new host-supported language primitive; plugins cannot
-inject arbitrary Vue components or markup through this provider.
+Contribution IDs are local to their package. The host qualifies them as
+`<plugin-id>/<contribution-id>` before exposing them to UI state, so two
+packages may both register an implementation named `json` without an identity
+collision. Labels and other content-specific messages belong to the package.
+Contexts include the active locale, and labels may provide package-owned
+translations with a stable `default` fallback.
+
+The mount returns an `update()`/`destroy()` handle. The host can update the
+canonical body, disabled state, variable previews, attachment service, or
+response evidence without recreating the contribution. A plugin must release
+listeners, object URLs, and other resources from `destroy()`.
+
+Request options are presented by descending package `weight`, then ascending
+contribution `order`, with registration order as the stable final tie-breaker.
+Formatting invoked through the wire-body mechanism runs only when the user
+activates **Format body**; invalid input remains unchanged.
 
 Media-type patterns support exact values (`application/json`), structured
 suffixes (`*+json`), type wildcards (`text/*`), and the universal wildcard
-(`*/*`). Exact, suffix, type, and universal matches are considered in that
-order; an explicit numeric priority resolves deliberate overrides.
+(`*/*`). Selection prefers exact, suffix, type, then universal matches. Numeric
+`priority` resolves deliberate matches at the same specificity; an unresolved
+tie is rejected. Parameters and case are normalized, so
+`Application/Problem+JSON; charset=utf-8` matches `*+json`. The host uses the
+declared Content-Type and does not sniff body bytes.
+
+Editor language identifiers are open strings. A plugin may request a language
+that a newer host supports without changing the plugin API; a host that does
+not recognize the identifier renders plain text. Plugins that need their own
+parser or editor may render their own DOM instead of using the shared editor.
 
 ### Response Content
 
-`response.content` receives bounded response evidence after deterministic
-media-type selection. It returns only host-recognized presentation kinds and
-optional structured JSON/XML text. It does not return HTML components.
+`response.content` receives bounded response evidence after media-type
+selection. The contribution decides availability, whether its view should be
+selected by default, how to parse the content, and what to mount:
 
-HTML preview remains network-inert and sandboxed by the host. Raster images
-remain subject to host-owned byte and dimension limits. SVG is parsed as XML
-and is not rendered as an image.
+```ts
+import { localize } from "@apinteract/plugin-sdk/frontend/localization";
 
-The current API is suitable for built-in or trusted source plugins. Future
-externally loaded frontend plugins need an explicit trust and integrity model;
-registration itself is not a JavaScript sandbox.
+context.register("response.content", {
+  id: "yaml",
+  label: {
+    default: "YAML",
+    translations: { "zh-CN": "YAML", "zh-TW": "YAML" },
+  },
+  mediaTypes: ["application/yaml", "*+yaml"],
+  isAvailable: ({ execution }) => execution.bodyPreview !== undefined,
+  isDefault: ({ execution, previewComplete }) =>
+    previewComplete &&
+    execution.bodyPreview !== undefined &&
+    isValidYaml(execution.bodyPreview),
+  mountView(container, initial) {
+    const optionsFor = (current: typeof initial) => ({
+      document: formatYaml(current.execution.bodyPreview ?? ""),
+      label: localize(
+        "Structured YAML response body",
+        { "zh-CN": "结构化 YAML 响应体", "zh-TW": "結構化 YAML 回應本文" },
+        current.locale,
+      ),
+      readOnly: true,
+    });
+    const viewer = initial.ui.mountCodeEditor(container, optionsFor(initial));
+    return {
+      update(current) {
+        viewer.update(optionsFor(current));
+      },
+      destroy() {
+        viewer.destroy();
+      },
+    };
+  },
+});
+```
+
+JSON, XML, YAML, CSV, GraphQL, PDF, or another content implementation therefore
+belongs in its plugin package. Adding one does not require a core enum, Vue
+branch, or parser switch. A package may register several contributions,
+including several for one provider. Local contribution IDs must be unique
+inside that package; overlapping media patterns require explicit priorities so
+selection is deterministic.
+
+Frontend plugins are trusted executable browser code, but request and response
+content is untrusted input. A plugin must not insert response markup into the
+application document. HTML display uses the host's network-inert sandbox.
+Raster images remain subject to host-owned byte, dimension, and pixel limits.
+The raster plugin owns supported media types and header parsing, then supplies
+an `inspect(mediaType, boundedHeaderBytes)` callback to the generic image
+mechanism. The host verifies the plugin-reported dimensions against the browser
+decoder before display. SVG is parsed as XML and is not rendered as an image.
+The host owns response byte retention, download, bounded previews, and lazy
+blob retrieval.
 
 ### Request And Collection Imports
 
-`request.import` is backend-only. A provider receives one bounded text source,
-probes it without mutation, and parses it into a canonical import plan:
+`request.import` is backend-only. A provider probes one bounded text source and
+parses it into a canonical, mutation-free import plan. The backend owns source
+limits, selection, plan validation, authorization, attachment policy, and the
+atomic persistence transaction.
 
-```text
-source
-  -> provider probe
-  -> requests, collection hierarchy, variables, diagnostics
-  -> host validation
-  -> user preview and selection
-  -> atomic persistence
-```
+Recorded responses returned by a provider do not contain provenance. The host
+stamps the selected provider ID after parsing, so one plugin cannot claim that
+another provider produced a capture.
 
-The backend owns source size limits, provider selection, plan validation,
-authorization, attachment policy, and the persistence transaction. Provider
-IDs are stable validated strings rather than a closed built-in enum, so an
-installed provider can be selected through the existing component API.
+JSON import helpers shared by the built-in HAR and OpenAPI packages live in
+`@apinteract/plugin-sdk/backend/import`. Their library builds include those
+helpers in each plugin artifact, leaving no runtime dependency on the workspace
+SDK package. Format-specific mapping remains in the individual plugin.
 
-Imported captured responses currently retain HAR-specific persistence rules.
-The general extension boundary in this iteration covers requests and
-collections; generalizing capture provenance is a separate contract change.
+## Lifecycle Rules
 
-## Registration Lifecycle
-
-The implemented lifecycle is intentionally small:
-
-```text
-manifest validation
-registration against typed providers
-provider-specific conflict validation
-service/UI consumption
-```
-
-Registration happens during component bootstrap. Plugins must not start
-network connections, background work, or persistent mutation from their
-registration function. Discovery, configuration, initialization, health, and
-shutdown hooks will be added when external package loading is implemented.
-
-Frontend and backend plugins are trusted code in their respective processes.
-Provider contracts constrain coupling and output shape; they do not sandbox a
-plugin.
-
-## Planned Provider Contracts
+Registration occurs during startup and must not start background work, mutate
+persistent state, or open network connections. Package discovery and
+registration complete before services or views consume contributions.
 
 Authentication providers, blob stores, delivery providers, persistence
 adapters, script runtimes, secret stores, logging sinks, and proxy selectors
-remain planned extension points. They should reuse the same single-target
-package signature while defining their own typed provider contracts.
-
-[Authentication provider plugins](authentication-providers.md) describe the
-planned authentication boundary. [Translation packs](translations.md) remain
-data-only frontend extensions rather than executable plugins.
+remain future extension points. They can reuse the same single-target package
+format while defining their own typed provider contracts.
