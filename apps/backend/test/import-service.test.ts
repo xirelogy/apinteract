@@ -278,7 +278,36 @@ describe("ImportService", () => {
                     schema: { type: "string" },
                   },
                 ],
-                responses: {},
+                requestBody: {
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: { name: { type: "string" } },
+                      },
+                      example: { name: "Mochi" },
+                    },
+                    "text/plain": {
+                      schema: { type: "string" },
+                      example: "Mochi",
+                    },
+                  },
+                },
+                responses: {
+                  "200": {
+                    description: "Profile",
+                    content: {
+                      "application/json": {
+                        examples: {
+                          compact: { value: { name: "Mochi" } },
+                          detailed: {
+                            value: { name: "Mochi", active: true },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
               },
             },
             "/admin": {
@@ -292,12 +321,24 @@ describe("ImportService", () => {
         }),
       };
       const plan = await imports.preview("openapi-json", source);
+      const textBodyOption = plan.requests[0]?.requestBodyOptions?.find(
+        (option) => option.label === "text/plain",
+      );
+      if (textBodyOption === undefined) {
+        throw new Error("Expected an imported text request body option");
+      }
 
       const result = await imports.apply(userId, "openapi-json", source, {
         workspaceId: workspace.workspaceId,
         parentCollectionId: null,
         collectionName: "Secured API",
         selectedItemIds: [plan.requests[0]!.itemId],
+        requestBodySelections: [
+          {
+            itemId: plan.requests[0]!.itemId,
+            optionId: textBodyOption.optionId,
+          },
+        ],
         expectedSourceFingerprint: plan.sourceFingerprint,
       });
 
@@ -345,8 +386,13 @@ describe("ImportService", () => {
         ),
       ).resolves.toMatchObject({ notes: "Primary production endpoint." });
       expect(result.requests[0]).toMatchObject({
+        name: "getProfile",
         description: "Get profile",
-        notes: "Returns the active profile.",
+        requestBody: {
+          kind: "text",
+          contentType: "text/plain",
+          text: "Mochi",
+        },
         query: [
           expect.objectContaining({
             name: "expand",
@@ -354,6 +400,20 @@ describe("ImportService", () => {
           }),
         ],
       });
+      expect(result.requests[0]?.notes).toContain(
+        "Returns the active profile.",
+      );
+      expect(result.requests[0]?.notes).toContain("## Security");
+      expect(result.requests[0]?.notes).toContain("## OpenAPI request body");
+      expect(result.requests[0]?.notes).toContain("Content type: `text/plain`");
+      expect(result.requests[0]?.notes).not.toContain("`name`");
+      expect(
+        await database.db
+          .selectFrom("captured_exchanges")
+          .select("label")
+          .orderBy("label")
+          .execute(),
+      ).toEqual([{ label: "compact" }, { label: "detailed" }]);
       const profile = await variables.get(
         userId,
         "collection",

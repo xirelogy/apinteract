@@ -5,6 +5,14 @@ import { ImportProviderRegistry } from "../src/imports/import-provider-registry.
 import { OpenApiJsonImportProvider } from "../../../plugins/openapi-import/src/openapi-json-provider.js";
 
 describe("import providers", () => {
+  it("advertises OpenAPI response-example capture support", () => {
+    expect(new OpenApiJsonImportProvider().manifest.capabilities).toMatchObject(
+      {
+        capturedResponses: true,
+        responseExamples: true,
+      },
+    );
+  });
   it("lists providers by plugin weight with registration order as the tie-breaker", () => {
     const registry = new ImportProviderRegistry();
     registry.register(new HarImportProvider(), 0);
@@ -112,7 +120,6 @@ describe("import providers", () => {
     expect(plan.requests[0]).toMatchObject({
       name: "Get pet",
       description: "Get pet",
-      notes: "Returns one pet.",
       method: "GET",
       targetMode: "composed",
       targetUrl: "",
@@ -132,6 +139,8 @@ describe("import providers", () => {
         },
       ],
     });
+    expect(plan.requests[0]?.notes).toContain("Returns one pet.");
+    expect(plan.requests[0]?.notes).toContain("## Security");
     expect(plan.requests[0]?.collectionKey).toBe(
       plan.collections[0]?.collectionKey,
     );
@@ -144,9 +153,18 @@ describe("import providers", () => {
       contentType: "application/json",
       text: '{\n  "name": "Mochi"\n}',
     });
-    expect(plan.requests[1]?.notes).toBe("Complete replacement payload.");
+    expect(plan.requests[1]?.name).toBe("replacePet");
+    expect(plan.requests[1]?.requestBodyOptions).toHaveLength(2);
+    expect(plan.requests[1]?.notes).toContain("Complete replacement payload.");
+    expect(plan.requests[1]?.notes).not.toContain("## OpenAPI request body");
+    expect(plan.requests[1]?.requestBodyOptions?.[0]?.documentation).toContain(
+      "| Field | Type | Required | Description | Constraints |",
+    );
+    expect(plan.requests[1]?.requestBodyOptions?.[0]?.documentation).toContain(
+      "`name`",
+    );
     expect(plan.diagnostics).toContainEqual(
-      expect.objectContaining({ code: "openapi_body_media_type_selected" }),
+      expect.objectContaining({ code: "openapi_body_option_defaulted" }),
     );
     expect(plan.diagnostics).toContainEqual(
       expect.objectContaining({
@@ -221,6 +239,238 @@ describe("import providers", () => {
       expect.objectContaining({
         code: "openapi_server_selected",
         itemId: "operation:POST:/path",
+      }),
+    );
+  });
+
+  it("offers body variants and captures documented OpenAPI response examples", async () => {
+    const plan = await new ImportProviderRegistry([
+      new OpenApiJsonImportProvider(),
+    ]).preview("openapi-json", {
+      name: "variants.json",
+      text: JSON.stringify({
+        openapi: "3.1.0",
+        info: { title: "Variants", version: "1" },
+        components: {
+          schemas: {
+            Cat: {
+              title: "Cat",
+              type: "object",
+              properties: { kind: { const: "cat" } },
+            },
+            Dog: {
+              title: "Dog",
+              type: "object",
+              properties: { kind: { const: "dog" } },
+            },
+          },
+          securitySchemes: {
+            oauth: { type: "oauth2", flows: {} },
+            clientKey: {
+              type: "apiKey",
+              in: "header",
+              name: "X-Client-Key",
+              description: "Client credential",
+            },
+          },
+        },
+        paths: {
+          "/animals": {
+            post: {
+              operationId: "createAnimal",
+              summary: "Create an animal",
+              security: [{ oauth: ["animals:write"] }, { clientKey: [] }],
+              requestBody: {
+                required: true,
+                content: {
+                  "application/json": {
+                    schema: {
+                      oneOf: [
+                        { $ref: "#/components/schemas/Cat" },
+                        { $ref: "#/components/schemas/Dog" },
+                      ],
+                    },
+                  },
+                  "application/x-www-form-urlencoded": {
+                    schema: {
+                      type: "object",
+                      properties: {
+                        kind: {
+                          type: "string",
+                          description: "Animal discriminator",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+              responses: {
+                "200": {
+                  description: "Created",
+                  content: {
+                    "application/json": {
+                      examples: {
+                        cat: { value: { kind: "cat" } },
+                        dog: { value: { kind: "dog" } },
+                      },
+                    },
+                  },
+                },
+                "201": {
+                  description: "Constructed",
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        required: ["id"],
+                        properties: {
+                          id: { type: "integer", default: 42 },
+                          accepted: { type: "boolean" },
+                        },
+                      },
+                    },
+                  },
+                },
+                default: {
+                  description: "Failure",
+                  content: {
+                    "application/json": { example: { error: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    });
+
+    const request = plan.requests[0]!;
+    expect(request.name).toBe("createAnimal");
+    expect(request.description).toBe("Create an animal");
+    expect(request.requestBodyOptions?.map((option) => option.label)).toEqual([
+      "application/json — Cat",
+      "application/json — Dog",
+      "application/x-www-form-urlencoded",
+    ]);
+    expect(request.requestBodyOptions?.[2]?.requestBody).toMatchObject({
+      kind: "urlencoded",
+      fields: [{ name: "kind", description: "Animal discriminator" }],
+    });
+    expect(request.defaultRequestBodyOptionId).toBe("body:0:0");
+    expect(request.notes).not.toContain("## OpenAPI request body");
+    expect(request.notes).toContain("OAuth 2.0 scopes: animals:write");
+    expect(request.notes).toContain("API key in header `X-Client-Key`");
+    const catDocumentation = request.requestBodyOptions?.[0]?.documentation;
+    const dogDocumentation = request.requestBodyOptions?.[1]?.documentation;
+    const formDocumentation = request.requestBodyOptions?.[2]?.documentation;
+    expect(catDocumentation).toContain("Content type: `application/json`");
+    expect(catDocumentation).toContain("Schema: Cat");
+    expect(catDocumentation).not.toContain("Schema: Dog");
+    expect(dogDocumentation).toContain("Schema: Dog");
+    expect(dogDocumentation).not.toContain("Schema: Cat");
+    expect(formDocumentation).toContain("Animal discriminator");
+    expect(request.headers).toContainEqual(
+      expect.objectContaining({
+        name: "X-Client-Key",
+        value: "<<clientKey>>",
+      }),
+    );
+    expect(request.capturedExchanges).toHaveLength(3);
+    expect(request.capturedExchanges?.map((capture) => capture.label)).toEqual([
+      "cat",
+      "dog",
+      "example",
+    ]);
+    expect(request.capturedExchanges?.[0]).toMatchObject({
+      status: 200,
+      statusText: "OK",
+      contentType: "application/json",
+      body: '{\n  "kind": "cat"\n}',
+    });
+    expect(request.capturedExchanges?.[2]).toMatchObject({
+      status: 201,
+      statusText: "Created",
+      contentType: "application/json",
+      body: '{\n  "id": 42,\n  "accepted": false\n}',
+    });
+    expect(plan.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "openapi_response_status_not_captured" }),
+    );
+  });
+
+  it("preserves textual XML examples without serializing object examples as JSON", async () => {
+    const plan = await new ImportProviderRegistry([
+      new OpenApiJsonImportProvider(),
+    ]).preview("openapi-json", {
+      name: "xml.json",
+      text: JSON.stringify({
+        openapi: "3.1.0",
+        info: { title: "XML", version: "1" },
+        paths: {
+          "/animals": {
+            post: {
+              requestBody: {
+                content: {
+                  "application/xml": {
+                    schema: {
+                      type: "object",
+                      properties: { kind: { type: "string" } },
+                    },
+                    examples: {
+                      markup: { value: '<animal kind="cat" />' },
+                      object: { value: { kind: "cat" } },
+                    },
+                  },
+                },
+              },
+              responses: {
+                "200": {
+                  description: "Animal",
+                  content: {
+                    "application/xml": {
+                      schema: {
+                        type: "object",
+                        properties: { kind: { type: "string" } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    });
+
+    expect(plan.requests[0]?.requestBodyOptions).toMatchObject([
+      {
+        label: "application/xml — markup",
+        requestBody: {
+          kind: "text",
+          contentType: "application/xml",
+          text: '<animal kind="cat" />',
+        },
+      },
+      {
+        label: "application/xml — object",
+        requestBody: {
+          kind: "text",
+          contentType: "application/xml",
+          text: "",
+        },
+      },
+    ]);
+    expect(plan.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "openapi_body_example_not_text",
+        severity: "warning",
+      }),
+    );
+    expect(plan.requests[0]?.capturedExchanges).toBeUndefined();
+    expect(plan.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "openapi_response_example_not_text",
+        severity: "warning",
       }),
     );
   });

@@ -1156,10 +1156,12 @@ export class RequestService {
       description: validateResourceDescription(request.description),
       notes: validateResourceNotes(request.notes),
       content: normalizeExecutionInput(request),
-      capture:
-        request.capturedExchange === undefined
-          ? undefined
-          : validateCapturedExchange(request.capturedExchange),
+      captures: (
+        request.capturedExchanges ??
+        (request.capturedExchange === undefined
+          ? []
+          : [request.capturedExchange])
+      ).map(validateCapturedExchange),
     }));
     return this.#database.transaction().execute(async (transaction) => {
       await this.#workspaces.requireCanEdit(transaction, userId, workspaceId);
@@ -1398,7 +1400,7 @@ export class RequestService {
           userId,
           "manual_save",
         );
-        if (imported.capture !== undefined) {
+        for (const capture of imported.captures) {
           const captureId = createEntityId();
           await transaction
             .insertInto("captured_exchanges")
@@ -1407,19 +1409,20 @@ export class RequestService {
               workspace_id: idToBytes(workspaceId),
               request_id: idToBytes(requestId),
               request_revision_id: idToBytes(revisionId),
-              source_provider_id: imported.capture.source,
-              status: imported.capture.status,
-              status_text: imported.capture.statusText,
-              headers_json: JSON.stringify(imported.capture.headers),
-              content_type: imported.capture.contentType,
-              body_text: imported.capture.body,
-              body_encoding: imported.capture.bodyEncoding,
-              body_complete: imported.capture.bodyComplete ? 1 : 0,
-              body_bytes: imported.capture.bodyBytes,
+              source_provider_id: capture.source,
+              label: capture.label ?? null,
+              status: capture.status,
+              status_text: capture.statusText,
+              headers_json: JSON.stringify(capture.headers),
+              content_type: capture.contentType,
+              body_text: capture.body,
+              body_encoding: capture.bodyEncoding,
+              body_complete: capture.bodyComplete ? 1 : 0,
+              body_bytes: capture.bodyBytes,
               recorded_at:
-                imported.capture.recordedAt === null
+                capture.recordedAt === null
                   ? null
-                  : Date.parse(imported.capture.recordedAt),
+                  : Date.parse(capture.recordedAt),
               imported_at: now,
             })
             .execute();
@@ -2699,6 +2702,7 @@ export class RequestService {
     if (row === undefined) return undefined;
     return {
       capturedExchangeId: bytesToId(row.id),
+      ...(row.label === null ? {} : { label: row.label }),
       source: row.source_provider_id,
       status: row.status,
       statusText: row.status_text,
@@ -3230,6 +3234,8 @@ function validateCapturedExchange(
     capture.status < 100 ||
     capture.status > 599 ||
     capture.statusText.length > 1024 ||
+    (capture.label !== undefined &&
+      (capture.label.trim() === "" || capture.label.length > 200)) ||
     capture.body.length > 262_144 ||
     !Number.isSafeInteger(capture.bodyBytes) ||
     capture.bodyBytes < 0 ||

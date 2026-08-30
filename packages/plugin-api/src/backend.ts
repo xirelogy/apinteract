@@ -91,6 +91,17 @@ export type ImportedRequestBodyDefinition =
       )[];
     };
 
+/** Describes one provider-defined request-body alternative selectable at import time. */
+export interface ImportedRequestBodyOption {
+  readonly optionId: string;
+  readonly label: string;
+  /** Stable provider-defined value used when one choice can apply to many requests. */
+  readonly selectionKey?: string;
+  readonly requestBody: ImportedRequestBodyDefinition;
+  /** Provider-owned Markdown appended to request notes only when this option is selected. */
+  readonly documentation?: string;
+}
+
 /** Describes a lossy, unsupported, or invalid source construct. */
 export interface ImportDiagnostic {
   readonly code: string;
@@ -116,6 +127,7 @@ export interface ImportedCollection {
 /** Preserves one recorded HTTP response without provider-controlled provenance. */
 export interface ImportedCapturedExchange {
   readonly capturedExchangeId?: string;
+  readonly label?: string;
   readonly status: number;
   readonly statusText: string;
   readonly headers: readonly {
@@ -145,11 +157,14 @@ export interface ImportedRequest {
   readonly query: readonly ImportedRequestField[];
   readonly headers: readonly ImportedRequestField[];
   readonly requestBody: ImportedRequestBodyDefinition;
+  readonly requestBodyOptions?: readonly ImportedRequestBodyOption[];
+  readonly defaultRequestBodyOptionId?: string;
   readonly body: string;
   readonly preRequestScript: string;
   readonly postResponseScript: string;
   readonly variables: readonly components["schemas"]["VariableWrite"][];
   readonly capturedExchange?: ImportedCapturedExchange;
+  readonly capturedExchanges?: readonly ImportedCapturedExchange[];
 }
 
 /** Describes a mutation-free canonical request and collection import preview. */

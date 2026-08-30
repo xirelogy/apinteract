@@ -113,6 +113,11 @@ Core application modules know provider contracts, canonical HTTP wire bodies,
 and host-owned mechanisms, not content implementations such as JSON parsing or
 HAR document structure.
 
+Import providers may attach bounded Markdown `documentation` to each request
+body option. The host appends only the selected option's documentation to the
+request notes when applying or opening the import; providers therefore keep
+media-type and schema details out of the request's common notes.
+
 ### Request Content
 
 `request.content` owns recognition, initialization, editing, validation, and
@@ -297,6 +302,18 @@ blob retrieval.
 parses it into a canonical, mutation-free import plan. The backend owns source
 limits, selection, plan validation, authorization, attachment policy, and the
 atomic persistence transaction.
+
+A request may expose bounded, labeled request-body alternatives together with
+one deterministic default. An option may include a provider-defined
+`selectionKey`; when the same keys are available across requests, the preview
+offers one import-wide choice and applies the corresponding option to each
+request. Otherwise it falls back to per-request choices. The generic import
+preview presents those labels and returns selected option IDs when applying the
+plan; neither host knows the source format's media-type or schema rules.
+Providers may also return
+multiple labeled response captures for one request. The host validates and
+persists every capture as imported history rather than an APInteract
+execution.
 
 Recorded responses returned by a provider do not contain provenance. The host
 stamps the selected provider ID after parsing, so one plugin cannot claim that

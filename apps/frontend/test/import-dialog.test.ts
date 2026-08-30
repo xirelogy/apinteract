@@ -30,13 +30,40 @@ describe("ImportDialog", () => {
           collectionKey: null,
           name: "GET /items",
           description: "",
-          notes: "",
+          notes: "Common request notes",
           method: "GET" as const,
           targetMode: "absolute" as const,
           targetUrl: "https://example.test/items",
           query: [],
           headers: [],
-          requestBody: { kind: "none" as const },
+          requestBody: {
+            kind: "text" as const,
+            contentType: "application/json",
+            text: "{}",
+          },
+          requestBodyOptions: [
+            {
+              optionId: "body:json",
+              label: "application/json",
+              requestBody: {
+                kind: "text" as const,
+                contentType: "application/json",
+                text: "{}",
+              },
+              documentation: "JSON request schema",
+            },
+            {
+              optionId: "body:text",
+              label: "text/plain",
+              requestBody: {
+                kind: "text" as const,
+                contentType: "text/plain",
+                text: "example",
+              },
+              documentation: "Text request schema",
+            },
+          ],
+          defaultRequestBodyOptionId: "body:json",
           body: "",
           preRequestScript: "",
           postResponseScript: "",
@@ -181,7 +208,7 @@ describe("ImportDialog", () => {
       '{"log":{"entries":[]}}',
     );
     expect(wrapper.text()).toContain("GET /items");
-    expect(wrapper.text()).toContain("Captured response");
+    expect(wrapper.text()).toContain("1 sample response");
     expect(wrapper.find(".import-preview-summary").exists()).toBe(false);
     expect(wrapper.find(".import-request-items").exists()).toBe(true);
     const metadata = wrapper.get(".import-preview-metadata");
@@ -217,6 +244,13 @@ describe("ImportDialog", () => {
       .findAllComponents(SelectMenu)
       .find((select) => select.props("label") === "Destination");
     expect(destinationSelect?.props("modelValue")).toBe("temporary");
+    const bodySelect = wrapper
+      .findAllComponents(SelectMenu)
+      .find(
+        (select) => select.props("label") === "Request body for GET /items",
+      );
+    bodySelect?.vm.$emit("update:modelValue", "body:text");
+    await flushPromises();
 
     await wrapper
       .findAll("button")
@@ -224,7 +258,17 @@ describe("ImportDialog", () => {
       ?.trigger("click");
     await flushPromises();
 
-    expect(openTemporary).toHaveBeenCalledWith(plan, plan.requests[0]);
+    expect(openTemporary).toHaveBeenCalledWith(
+      plan,
+      expect.objectContaining({
+        requestBody: {
+          kind: "text",
+          contentType: "text/plain",
+          text: "example",
+        },
+        notes: "Common request notes\n\nText request schema",
+      }),
+    );
   });
 
   it("defaults multiple requests to a named workspace collection", async () => {
@@ -239,7 +283,39 @@ describe("ImportDialog", () => {
       targetUrl: `https://example.test/${name}`,
       query: [],
       headers: [],
-      requestBody: { kind: "none" as const },
+      requestBody:
+        index === 0
+          ? {
+              kind: "text" as const,
+              contentType: "application/json",
+              text: "{}",
+            }
+          : { kind: "none" as const },
+      ...(index === 0
+        ? {
+            requestBodyOptions: [
+              {
+                optionId: "body:json",
+                label: "application/json",
+                requestBody: {
+                  kind: "text" as const,
+                  contentType: "application/json",
+                  text: "{}",
+                },
+              },
+              {
+                optionId: "body:text",
+                label: "text/plain",
+                requestBody: {
+                  kind: "text" as const,
+                  contentType: "text/plain",
+                  text: "example",
+                },
+              },
+            ],
+            defaultRequestBodyOptionId: "body:json",
+          }
+        : {}),
       body: "",
       preRequestScript: "",
       postResponseScript: "",
@@ -346,6 +422,12 @@ describe("ImportDialog", () => {
     expect(wrapper.get(".import-selected-count").text()).toBe(
       "2 of 2 selected",
     );
+    const bodySelect = wrapper
+      .findAllComponents(SelectMenu)
+      .find((select) => select.props("label") === "Request body for GET /one");
+    expect(bodySelect?.props("modelValue")).toBe("body:json");
+    bodySelect?.vm.$emit("update:modelValue", "body:text");
+    await flushPromises();
     const metadata = wrapper.get(".import-preview-metadata");
     expect(metadata.findAll("dt").map((entry) => entry.text())).toEqual([
       "Title",
@@ -372,6 +454,7 @@ describe("ImportDialog", () => {
       sourceText: '{"openapi":"3.1.0"}',
       plan,
       selectedItemIds: ["entry:0", "entry:1"],
+      requestBodySelections: [{ itemId: "entry:0", optionId: "body:text" }],
       collectionName: "My imported API",
       parentCollectionId: null,
     });

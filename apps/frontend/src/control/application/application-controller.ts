@@ -78,6 +78,10 @@ export interface ImportApplyOptions {
   readonly sourceText: string;
   readonly plan: ImportPlan;
   readonly selectedItemIds: readonly string[];
+  readonly requestBodySelections?: readonly {
+    readonly itemId: string;
+    readonly optionId: string;
+  }[];
   readonly collectionName: string;
   readonly parentCollectionId: string | null;
 }
@@ -1695,6 +1699,10 @@ export class ApplicationController {
           parentCollectionId: options.parentCollectionId,
           collectionName: options.collectionName,
           selectedItemIds: options.selectedItemIds,
+          ...(options.requestBodySelections === undefined ||
+          options.requestBodySelections.length === 0
+            ? {}
+            : { requestBodySelections: options.requestBodySelections }),
           expectedSourceFingerprint: options.plan.sourceFingerprint,
         },
       );

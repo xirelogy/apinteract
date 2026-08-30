@@ -24,6 +24,7 @@ const REQUEST_ATTACHMENTS_MIGRATION = "0014_request_attachments";
 const CAPTURED_EXCHANGES_MIGRATION = "0015_captured_exchanges";
 const RESOURCE_DOCUMENTATION_MIGRATION = "0016_resource_documentation";
 const GENERIC_CAPTURE_SOURCE_MIGRATION = "0017_generic_capture_source";
+const CAPTURE_LABEL_MIGRATION = "0018_capture_label";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -441,6 +442,16 @@ export class SqliteDatabase {
     if (genericCaptureSourceApplied === undefined) {
       this.#migrateGenericCaptureSource();
     }
+
+    const captureLabelApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(CAPTURE_LABEL_MIGRATION);
+    if (
+      captureLabelApplied === undefined ||
+      !this.#columnExists("captured_exchanges", "label")
+    ) {
+      this.#migrateCaptureLabel();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -486,10 +497,12 @@ export class SqliteDatabase {
         CAPTURED_EXCHANGES_MIGRATION,
         RESOURCE_DOCUMENTATION_MIGRATION,
         GENERIC_CAPTURE_SOURCE_MIGRATION,
+        CAPTURE_LABEL_MIGRATION,
       ].some((identifier) => !identifiers.has(identifier)) ||
       !this.#columnExists("request_drafts", "body_json") ||
       !this.#tableExists("request_attachments") ||
       !this.#tableExists("captured_exchanges") ||
+      !this.#columnExists("captured_exchanges", "label") ||
       !this.#columnExists("workspaces", "description_text") ||
       !this.#columnExists("collection_profiles", "description_text") ||
       !this.#columnExists("environments", "description_text") ||
@@ -1089,6 +1102,21 @@ export class SqliteDatabase {
           ON captured_exchanges(request_id, imported_at DESC, id DESC);
       `);
       this.#recordMigration(GENERIC_CAPTURE_SOURCE_MIGRATION);
+    })();
+  }
+
+  /** Adds an optional human-facing label for provider-supplied response examples. */
+  #migrateCaptureLabel(): void {
+    this.#driver.transaction(() => {
+      if (!this.#columnExists("captured_exchanges", "label")) {
+        this.#driver.exec(
+          "ALTER TABLE captured_exchanges ADD COLUMN label TEXT CHECK(label IS NULL OR length(label) BETWEEN 1 AND 200)",
+        );
+      }
+      const applied = this.#driver
+        .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+        .get(CAPTURE_LABEL_MIGRATION);
+      if (applied === undefined) this.#recordMigration(CAPTURE_LABEL_MIGRATION);
     })();
   }
 

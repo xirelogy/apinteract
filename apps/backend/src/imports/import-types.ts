@@ -4,6 +4,7 @@ export type {
   ImportDiagnostic,
   ImportDiagnosticSeverity,
   ImportedCollection,
+  ImportedRequestBodyOption,
   ImportProvider,
   ImportProviderId,
   ImportProviderManifest,
@@ -24,9 +25,10 @@ export interface CapturedExchangeView extends ImportedCapturedExchange {
 /** Represents one provider request after provenance has been host-stamped. */
 export type ImportedRequest = Omit<
   ProviderImportedRequest,
-  "capturedExchange"
+  "capturedExchange" | "capturedExchanges"
 > & {
   readonly capturedExchange?: CapturedExchangeView;
+  readonly capturedExchanges?: readonly CapturedExchangeView[];
 };
 
 /** Represents one validated provider plan ready for API or persistence use. */
@@ -40,6 +42,10 @@ export interface ImportApplyInput {
   readonly parentCollectionId: string | null;
   readonly collectionName: string;
   readonly selectedItemIds: readonly string[];
+  readonly requestBodySelections?: readonly {
+    readonly itemId: string;
+    readonly optionId: string;
+  }[];
   readonly expectedSourceFingerprint: string;
 }
 

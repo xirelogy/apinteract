@@ -45,6 +45,10 @@ const props = defineProps<{
     readonly sourceText: string;
     readonly plan: ImportPlan;
     readonly selectedItemIds: readonly string[];
+    readonly requestBodySelections: readonly {
+      readonly itemId: string;
+      readonly optionId: string;
+    }[];
     readonly collectionName: string;
     readonly parentCollectionId: string | null;
   }) => Promise<ImportApplyResult>;
@@ -61,6 +65,8 @@ const sourceName = ref("");
 const sourceText = ref("");
 const plan = ref<ImportPlan | null>(null);
 const selectedItemIds = ref<string[]>([]);
+const requestBodySelections = ref<Record<string, string>>({});
+const globalRequestBodySelection = ref("");
 const destination = ref<ImportDestination>("workspace");
 const collectionName = ref("");
 const working = ref(false);
@@ -78,6 +84,32 @@ const selectedProvider = computed(
     null,
 );
 
+/** Finds media-type choices shared by every request that offers alternatives. */
+const globalBodyOptions = computed(() => {
+  const requests = (plan.value?.requests ?? []).filter(
+    (request) => (request.requestBodyOptions?.length ?? 0) > 1,
+  );
+  if (requests.length < 2) return [];
+  const keys = requests.map(
+    (request) =>
+      new Set(
+        (request.requestBodyOptions ?? [])
+          .map((option) => option.selectionKey)
+          .filter((key): key is string => key !== undefined),
+      ),
+  );
+  if (keys.some((set) => set.size === 0)) return [];
+  const shared = [...keys[0]!].filter((key) =>
+    keys.every((set) => set.has(key)),
+  );
+  return shared.map((key) => {
+    const option = requests[0]!.requestBodyOptions!.find(
+      (candidate) => candidate.selectionKey === key,
+    )!;
+    return { value: key, label: option.label.split(" — ")[0] ?? option.label };
+  });
+});
+
 /** Builds provider-specific metadata for the collapsed preview details. */
 const previewMetadata = computed<
   readonly { readonly label: string; readonly value: string }[]
@@ -92,9 +124,10 @@ const previewMetadata = computed<
     { label: t("import.metadata.format"), value: providerLabel },
     { label: t("import.metadata.source"), value: currentPlan.sourceName },
   ];
-  const capturedResponses = currentPlan.requests.filter(
-    (request) => request.capturedExchange !== undefined,
-  ).length;
+  const capturedResponses = currentPlan.requests.reduce(
+    (count, request) => count + capturedResponseCount(request),
+    0,
+  );
   return [
     ...common,
     ...(currentPlan.pathPrefix === ""
@@ -201,6 +234,8 @@ watch(providerValue, () => {
   sourceText.value = "";
   plan.value = null;
   selectedItemIds.value = [];
+  requestBodySelections.value = {};
+  globalRequestBodySelection.value = "";
   localError.value = null;
   if (sourceInput.value !== null) sourceInput.value.value = "";
 });
@@ -260,12 +295,32 @@ async function preview(): Promise<void> {
     );
     plan.value = nextPlan;
     selectedItemIds.value = nextPlan.requests.map((request) => request.itemId);
+    requestBodySelections.value = Object.fromEntries(
+      nextPlan.requests.flatMap((request) =>
+        request.defaultRequestBodyOptionId === undefined
+          ? []
+          : [[request.itemId, request.defaultRequestBodyOptionId]],
+      ),
+    );
+    globalRequestBodySelection.value =
+      globalBodyOptions.value.find((option) =>
+        nextPlan.requests.some(
+          (request) =>
+            request.defaultRequestBodyOptionId !== undefined &&
+            request.requestBodyOptions?.find(
+              (candidate) =>
+                candidate.optionId === request.defaultRequestBodyOptionId &&
+                candidate.selectionKey === option.value,
+            ) !== undefined,
+        ),
+      )?.value ?? "";
     destination.value =
       nextPlan.requests.length === 1 ? "temporary" : "workspace";
     collectionName.value = nextPlan.suggestedName;
   } catch (cause) {
     plan.value = null;
     selectedItemIds.value = [];
+    requestBodySelections.value = {};
     localError.value = errorMessage(cause);
   } finally {
     working.value = false;
@@ -279,6 +334,110 @@ function toggleRequest(itemId: string, checked: boolean): void {
     : selectedItemIds.value.filter((candidate) => candidate !== itemId);
 }
 
+/** Updates one generic provider body choice without interpreting its format. */
+function selectRequestBody(itemId: string, optionId: string): void {
+  requestBodySelections.value = {
+    ...requestBodySelections.value,
+    [itemId]: optionId,
+  };
+}
+
+/** Applies one shared media-type choice to every compatible request. */
+function selectGlobalRequestBody(optionKey: string): void {
+  globalRequestBodySelection.value = optionKey;
+  const next = { ...requestBodySelections.value };
+  for (const request of plan.value?.requests ?? []) {
+    const option = request.requestBodyOptions?.find(
+      (candidate) => candidate.selectionKey === optionKey,
+    );
+    if (option !== undefined) next[request.itemId] = option.optionId;
+  }
+  requestBodySelections.value = next;
+}
+
+/** Returns the current or provider-default body choice for one preview item. */
+function selectedRequestBodyOptionId(request: ImportedRequest): string {
+  return (
+    requestBodySelections.value[request.itemId] ??
+    request.defaultRequestBodyOptionId ??
+    ""
+  );
+}
+
+/** Disables body choices while their request or the surrounding dialog is inactive. */
+function requestBodyChoiceDisabled(itemId: string): boolean {
+  return working.value || props.busy || !selectedItemIds.value.includes(itemId);
+}
+
+/** Reports whether a request exposes more than one selectable body option. */
+function hasRequestBodyAlternatives(request: ImportedRequest): boolean {
+  return (request.requestBodyOptions?.length ?? 0) > 1;
+}
+
+/** Reports whether this request needs an individual body selector. */
+function showRequestBodySelector(request: ImportedRequest): boolean {
+  return (
+    globalBodyOptions.value.length === 0 && hasRequestBodyAlternatives(request)
+  );
+}
+
+/** Counts singular or additive plural captures without double counting. */
+function capturedResponseCount(request: ImportedRequest): number {
+  return (
+    request.capturedExchanges?.length ??
+    (request.capturedExchange === undefined ? 0 : 1)
+  );
+}
+
+/** Resolves the selected preview body before opening an unsaved request. */
+function selectedTemporaryRequest(request: ImportedRequest): ImportedRequest {
+  const selectedOptionId =
+    requestBodySelections.value[request.itemId] ??
+    request.defaultRequestBodyOptionId;
+  const selectedOption = request.requestBodyOptions?.find(
+    (option) => option.optionId === selectedOptionId,
+  );
+  const firstCapture =
+    request.capturedExchange ?? request.capturedExchanges?.[0];
+  return {
+    ...request,
+    ...(selectedOption === undefined
+      ? {}
+      : {
+          requestBody: selectedOption.requestBody,
+          notes: appendOptionDocumentation(
+            request.notes,
+            selectedOption.documentation,
+          ),
+        }),
+    ...(firstCapture === undefined ? {} : { capturedExchange: firstCapture }),
+  };
+}
+
+/** Appends selected provider documentation without introducing blank sections. */
+function appendOptionDocumentation(
+  notes: string,
+  documentation?: string,
+): string {
+  return [notes.trim(), documentation?.trim() ?? ""]
+    .filter((section) => section !== "")
+    .join("\n\n");
+}
+
+/** Serializes choices only for selected requests that expose alternatives. */
+function selectedBodyChoices(): readonly {
+  readonly itemId: string;
+  readonly optionId: string;
+}[] {
+  const selectedIds = new Set(selectedItemIds.value);
+  return (plan.value?.requests ?? []).flatMap((request) => {
+    const optionId = requestBodySelections.value[request.itemId];
+    return selectedIds.has(request.itemId) && optionId !== undefined
+      ? [{ itemId: request.itemId, optionId }]
+      : [];
+  });
+}
+
 /** Applies the selection to a temporary tab or one atomic saved collection. */
 async function apply(): Promise<void> {
   const currentPlan = plan.value;
@@ -290,7 +449,9 @@ async function apply(): Promise<void> {
       const selected = currentPlan.requests.find((request) =>
         selectedItemIds.value.includes(request.itemId),
       );
-      if (selected !== undefined) props.openTemporary(currentPlan, selected);
+      if (selected !== undefined) {
+        props.openTemporary(currentPlan, selectedTemporaryRequest(selected));
+      }
     } else {
       await props.applyImport({
         providerId: currentPlan.providerId,
@@ -298,6 +459,7 @@ async function apply(): Promise<void> {
         sourceText: sourceText.value,
         plan: currentPlan,
         selectedItemIds: selectedItemIds.value,
+        requestBodySelections: selectedBodyChoices(),
         collectionName: collectionName.value.trim(),
         parentCollectionId:
           destination.value === "collection"
@@ -421,32 +583,70 @@ function errorMessage(cause: unknown): string {
           <div class="import-preview-body">
             <fieldset class="import-request-list">
               <legend>{{ t("import.requests") }}</legend>
+              <div
+                v-if="globalBodyOptions.length > 1"
+                class="import-global-body-choice"
+              >
+                <SelectMenu
+                  :model-value="globalRequestBodySelection"
+                  :options="globalBodyOptions"
+                  :label="t('import.requestBodyType')"
+                  density="compact"
+                  mobile-presentation="popover"
+                  :disabled="working || busy"
+                  @update:model-value="selectGlobalRequestBody"
+                />
+              </div>
               <div class="import-request-items">
-                <label
+                <div
                   v-for="request in plan.requests"
                   :key="request.itemId"
                   class="import-request-item"
                 >
-                  <input
-                    type="checkbox"
-                    :checked="selectedItemIds.includes(request.itemId)"
-                    :disabled="working || busy"
-                    @change="
-                      toggleRequest(
-                        request.itemId,
-                        ($event.currentTarget as HTMLInputElement).checked,
-                      )
+                  <label class="import-request-selection">
+                    <input
+                      type="checkbox"
+                      :checked="selectedItemIds.includes(request.itemId)"
+                      :disabled="working || busy"
+                      @change="
+                        toggleRequest(
+                          request.itemId,
+                          ($event.currentTarget as HTMLInputElement).checked,
+                        )
+                      "
+                    />
+                    <strong>{{ request.method }}</strong>
+                    <span class="import-request-name">{{ request.name }}</span>
+                  </label>
+                  <SelectMenu
+                    v-if="showRequestBodySelector(request)"
+                    class="import-request-body-select"
+                    :model-value="selectedRequestBodyOptionId(request)"
+                    :options="
+                      (request.requestBodyOptions ?? []).map((option) => ({
+                        value: option.optionId,
+                        label: option.label,
+                      }))
+                    "
+                    :label="t('import.requestBodyFor', { name: request.name })"
+                    density="compact"
+                    mobile-presentation="popover"
+                    :disabled="requestBodyChoiceDisabled(request.itemId)"
+                    @update:model-value="
+                      selectRequestBody(request.itemId, $event)
                     "
                   />
-                  <strong>{{ request.method }}</strong>
-                  <span class="import-request-name">{{ request.name }}</span>
                   <small
-                    v-if="request.capturedExchange"
+                    v-if="capturedResponseCount(request) > 0"
                     class="import-capture-label"
                   >
-                    {{ t("import.capturedResponse") }}
+                    {{
+                      t("import.capturedResponses", {
+                        count: capturedResponseCount(request),
+                      })
+                    }}
                   </small>
-                </label>
+                </div>
               </div>
             </fieldset>
 

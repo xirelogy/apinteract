@@ -48,6 +48,7 @@ describe("ResponsePanel body transfer", () => {
         requestRevisionId: null,
         kind: "capture",
         source: "har",
+        label: "example",
         state: "completed",
         status: 200,
         bodyAvailability: "complete",
@@ -86,7 +87,8 @@ describe("ResponsePanel body transfer", () => {
     }).format(new Date(execution.createdAt));
     expect(options[0]?.label).toBe(`201 · Execution · ${dateTime}`);
     expect(options[0]?.label).not.toContain("APInteract");
-    expect(options[1]?.label).toContain("200 · Imported response");
+    expect(options[1]?.label).toContain("200 · example");
+    expect(options[1]?.label).not.toContain("Imported response");
     select.vm.$emit("update:modelValue", exchanges[1]!.exchangeId);
     await wrapper.vm.$nextTick();
     expect(wrapper.emitted("selectExchange")).toEqual([

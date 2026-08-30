@@ -229,6 +229,7 @@ const zhHansMessages = {
   import: {
     action: "导入",
     capturedResponse: "已捕获的响应",
+    capturedResponses: "{count} 个响应示例",
     childCollection: "在 {name} 中新建集合",
     chooseFile: "请先选择导入类型",
     chooseFormatFile: "选择 {format} 文件",
@@ -247,6 +248,8 @@ const zhHansMessages = {
     },
     preview: "预览",
     requests: "请求",
+    requestBodyFor: "{name} 的请求体",
+    requestBodyType: "此次导入的请求体类型",
     selectType: "选择导入类型",
     selectedOfTotal: "已选择 {selected}/{total} 个",
     severity: {
@@ -766,6 +769,7 @@ const zhHantMessages = {
   import: {
     action: "匯入",
     capturedResponse: "已擷取的回應",
+    capturedResponses: "{count} 個回應範例",
     childCollection: "在 {name} 中新增集合",
     chooseFile: "請先選擇匯入類型",
     chooseFormatFile: "選擇 {format} 檔案",
@@ -784,6 +788,8 @@ const zhHantMessages = {
     },
     preview: "預覽",
     requests: "請求",
+    requestBodyFor: "{name} 的請求本文",
+    requestBodyType: "此次匯入的請求本文類型",
     selectType: "選擇匯入類型",
     selectedOfTotal: "已選取 {selected}/{total} 個",
     severity: {

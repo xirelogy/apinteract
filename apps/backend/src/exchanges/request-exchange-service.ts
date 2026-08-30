@@ -23,6 +23,7 @@ export interface RequestExchangeSummary {
   readonly requestRevisionId: EntityId | null;
   readonly kind: RequestExchangeKind;
   readonly source: string;
+  readonly label?: string;
   readonly state: "created" | "running" | "completed" | "failed";
   readonly status?: number;
   readonly bodyAvailability: "complete" | "truncated" | "unavailable";
@@ -86,6 +87,7 @@ export class RequestExchangeService {
           "body_complete",
           "body_bytes",
           "source_provider_id",
+          "label",
           "recorded_at",
           "imported_at",
         ])
@@ -123,6 +125,7 @@ export class RequestExchangeService {
           requestRevisionId: bytesToId(row.request_revision_id),
           kind: "capture",
           source: row.source_provider_id,
+          ...(row.label === null ? {} : { label: row.label }),
           state: "completed",
           status: row.status,
           bodyAvailability: captureBodyAvailability(
@@ -195,6 +198,7 @@ export class RequestExchangeService {
       requestRevisionId: bytesToId(row.request_revision_id),
       kind: "capture",
       source: row.source_provider_id,
+      ...(row.label === null ? {} : { label: row.label }),
       state: "completed",
       status: row.status,
       bodyAvailability: captureBodyAvailability(

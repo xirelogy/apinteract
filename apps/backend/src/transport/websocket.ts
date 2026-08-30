@@ -416,6 +416,13 @@ async function dispatch(
           selectedItemIds: requireImportItemIds(
             command.payload.selectedItemIds,
           ),
+          ...(command.payload.requestBodySelections === undefined
+            ? {}
+            : {
+                requestBodySelections: requireImportBodySelections(
+                  command.payload.requestBodySelections,
+                ),
+              }),
           expectedSourceFingerprint: requireString(
             command.payload.expectedSourceFingerprint,
             "expectedSourceFingerprint",
@@ -832,6 +839,60 @@ function requireImportItemIds(value: unknown): string[] {
     );
   }
   return itemIds;
+}
+
+/** Validates optional provider-defined body choices without interpreting them. */
+function requireImportBodySelections(
+  value: unknown,
+): { readonly itemId: string; readonly optionId: string }[] {
+  if (!Array.isArray(value) || value.length > 200) {
+    throw new CommandError(
+      "validation_failed",
+      "requestBodySelections must contain at most 200 items.",
+    );
+  }
+  const selections = value.map((candidate) => {
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      Array.isArray(candidate)
+    ) {
+      throw new CommandError(
+        "validation_failed",
+        "requestBodySelections contains an invalid item.",
+      );
+    }
+    const selection = candidate as Record<string, unknown>;
+    if (
+      Object.keys(selection).some(
+        (key) => key !== "itemId" && key !== "optionId",
+      )
+    ) {
+      throw new CommandError(
+        "validation_failed",
+        "requestBodySelections contains an unsupported field.",
+      );
+    }
+    const itemId = requireString(selection.itemId, "itemId");
+    const optionId = requireString(selection.optionId, "optionId");
+    if (optionId.length > 200) {
+      throw new CommandError(
+        "validation_failed",
+        "request body optionId must not exceed 200 characters.",
+      );
+    }
+    return { itemId, optionId };
+  });
+  if (
+    new Set(selections.map((selection) => selection.itemId)).size !==
+    selections.length
+  ) {
+    throw new CommandError(
+      "validation_failed",
+      "requestBodySelections must not contain duplicate request items.",
+    );
+  }
+  return selections;
 }
 
 /** Requires an explicit saved-request target interpretation. */

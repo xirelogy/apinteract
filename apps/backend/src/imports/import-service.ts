@@ -58,8 +58,9 @@ export class ImportService {
         "Select at least one unique request to import.",
       );
     }
-    const selected = plan.requests.filter((request) =>
-      selectedIds.has(request.itemId),
+    const selected = resolveRequestBodySelections(
+      plan.requests.filter((request) => selectedIds.has(request.itemId)),
+      input.requestBodySelections ?? [],
     );
     if (selected.length !== selectedIds.size) {
       throw new ImportSourceError(
@@ -96,6 +97,59 @@ export class ImportService {
       },
     );
   }
+}
+
+/** Resolves optional provider body choices without exposing format semantics. */
+function resolveRequestBodySelections(
+  selected: readonly ImportPlan["requests"][number][],
+  selections: readonly { readonly itemId: string; readonly optionId: string }[],
+): ImportPlan["requests"][number][] {
+  const byItemId = new Map<string, string>();
+  for (const selection of selections) {
+    if (byItemId.has(selection.itemId)) {
+      throw new ImportSourceError(
+        "import_selection_invalid",
+        "A request body was selected more than once for one request.",
+      );
+    }
+    byItemId.set(selection.itemId, selection.optionId);
+  }
+  const selectedIds = new Set(selected.map((request) => request.itemId));
+  if ([...byItemId.keys()].some((itemId) => !selectedIds.has(itemId))) {
+    throw new ImportSourceError(
+      "import_selection_invalid",
+      "A request body selection refers to an unselected request.",
+    );
+  }
+  return selected.map((request) => {
+    const optionId =
+      byItemId.get(request.itemId) ?? request.defaultRequestBodyOptionId;
+    if (optionId === undefined) return request;
+    const option = request.requestBodyOptions?.find(
+      (candidate) => candidate.optionId === optionId,
+    );
+    if (option === undefined) {
+      throw new ImportSourceError(
+        "import_selection_invalid",
+        "A selected request body option is not available.",
+      );
+    }
+    return {
+      ...request,
+      requestBody: option.requestBody,
+      notes: appendOptionDocumentation(request.notes, option.documentation),
+    };
+  });
+}
+
+/** Appends provider-owned option documentation without introducing blank sections. */
+function appendOptionDocumentation(
+  notes: string,
+  documentation?: string,
+): string {
+  return [notes.trim(), documentation?.trim() ?? ""]
+    .filter((section) => section !== "")
+    .join("\n\n");
 }
 
 /** Reports whether a global, singular, or grouped diagnostic blocks a selection. */

@@ -15,6 +15,9 @@ import type { VariableWrite } from "../variables/variable-profile-store.js";
 
 export const MAX_IMPORT_SOURCE_BYTES = 524_288;
 export const MAX_IMPORT_REQUESTS = 200;
+const MAX_IMPORT_BODY_OPTIONS = 50;
+const MAX_IMPORT_CAPTURES_PER_REQUEST = 50;
+const MAX_IMPORT_OPTION_DOCUMENTATION_LENGTH = 262_144;
 const importProviderIdPattern = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u;
 const semanticVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 
@@ -103,17 +106,9 @@ export class ImportProviderRegistry {
     }
     const stampedPlan: Omit<ImportPlan, "sourceFingerprint"> = {
       ...plan,
-      requests: plan.requests.map(({ capturedExchange, ...request }) => ({
-        ...request,
-        ...(capturedExchange === undefined
-          ? {}
-          : {
-              capturedExchange: {
-                ...capturedExchange,
-                source: provider.manifest.id,
-              },
-            }),
-      })),
+      requests: plan.requests.map((request) =>
+        stampProviderRequest(request, provider.manifest.id),
+      ),
     };
     validateCollections(stampedPlan.collections, stampedPlan.requests);
     const normalizedPlan = normalizeImportVariables(stampedPlan);
@@ -149,6 +144,97 @@ export class ImportProviderRegistry {
     }
     return first.provider;
   }
+}
+
+/** Validates additive provider choices and stamps host-owned capture provenance. */
+function stampProviderRequest(
+  request: Awaited<ReturnType<ImportProvider["parse"]>>["requests"][number],
+  providerId: ImportProviderId,
+): ImportedRequest {
+  const options = request.requestBodyOptions;
+  if (options === undefined) {
+    if (request.defaultRequestBodyOptionId !== undefined) {
+      throw new Error(
+        "Import provider returned a default request body option without options",
+      );
+    }
+  } else {
+    if (options.length === 0 || options.length > MAX_IMPORT_BODY_OPTIONS) {
+      throw new Error(
+        "Import provider returned an invalid number of body options",
+      );
+    }
+    const optionIds = new Set(options.map((option) => option.optionId));
+    if (
+      optionIds.size !== options.length ||
+      options.some(
+        (option) =>
+          option.optionId.trim() === "" ||
+          option.label.trim() === "" ||
+          (option.documentation !== undefined &&
+            (typeof option.documentation !== "string" ||
+              option.documentation.length >
+                MAX_IMPORT_OPTION_DOCUMENTATION_LENGTH)),
+      )
+    ) {
+      throw new Error("Import provider returned invalid request body options");
+    }
+    const selectionKeys = options
+      .map((option) => option.selectionKey)
+      .filter((key): key is string => key !== undefined);
+    if (selectionKeys.length !== 0 && selectionKeys.length !== options.length) {
+      throw new Error(
+        "Import provider must provide selectionKey for every body option or none",
+      );
+    }
+    const defaultOption = options.find(
+      (option) => option.optionId === request.defaultRequestBodyOptionId,
+    );
+    if (
+      defaultOption === undefined ||
+      JSON.stringify(defaultOption.requestBody) !==
+        JSON.stringify(request.requestBody)
+    ) {
+      throw new Error(
+        "Import provider returned an inconsistent default request body option",
+      );
+    }
+  }
+  if (
+    request.capturedExchange !== undefined &&
+    request.capturedExchanges !== undefined
+  ) {
+    throw new Error(
+      "Import provider returned both singular and plural captured responses",
+    );
+  }
+  const captures = request.capturedExchanges;
+  if (
+    captures !== undefined &&
+    captures.length > MAX_IMPORT_CAPTURES_PER_REQUEST
+  ) {
+    throw new Error("Import provider returned too many captured responses");
+  }
+  const { capturedExchange, capturedExchanges, ...content } = request;
+  return {
+    ...content,
+    ...(capturedExchange === undefined
+      ? {}
+      : {
+          capturedExchange: {
+            ...capturedExchange,
+            source: providerId,
+          },
+        }),
+    ...(capturedExchanges === undefined
+      ? {}
+      : {
+          capturedExchanges: capturedExchanges.map((capture) => ({
+            ...capture,
+            source: providerId,
+          })),
+        }),
+  };
 }
 
 /** Compares provider package weights while preserving registration ties. */

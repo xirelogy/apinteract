@@ -27,7 +27,7 @@ import TemplateTextControl from "@/view/presentation/controls/TemplateTextContro
 import TextInput from "@/view/presentation/controls/TextInput.vue";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import { useRowReorder } from "@/view/presentation/controls/row-reorder";
-import { Asterisk, Trash2 } from "@lucide/vue";
+import { Asterisk, FilePenLine, Trash2 } from "@lucide/vue";
 
 interface PendingFileField {
   readonly kind: "pending-file";
@@ -59,6 +59,7 @@ const attachmentInput = ref<HTMLInputElement | null>(null);
 const attachmentTargetIndex = ref<number | null>(null);
 const uploading = ref(false);
 const formatError = ref("");
+const expandedDescriptions = ref<number[]>([]);
 
 watch(
   () => props.body,
@@ -156,6 +157,13 @@ function ensureTrailingBlank(): void {
 function updateForm(): void {
   ensureTrailingBlank();
   publish();
+}
+
+/** Toggles the editable description row for one form field. */
+function toggleFieldDescription(index: number): void {
+  expandedDescriptions.value = expandedDescriptions.value.includes(index)
+    ? expandedDescriptions.value.filter((candidate) => candidate !== index)
+    : [...expandedDescriptions.value, index];
 }
 
 /** Moves one persisted form field while retaining the presentation-only blank row. */
@@ -423,123 +431,152 @@ function attachmentSize(bytes: number): string {
           :disabled="disabled || uploading || uploadAttachment === null"
           @change="attachMultipartFile"
         />
-        <div
-          v-for="(field, index) in formFields"
-          :key="index"
-          class="request-field-row"
-          :class="formFieldReorder.classes(index)"
-          @dragover.stop="formFieldReorder.updateDropTarget($event, index)"
-          @drop.stop="formFieldReorder.finishDrop($event)"
-        >
-          <CheckboxControl
-            v-model="field.enabled"
-            visually-hidden-label
-            :label="
-              t('request.enableField', {
-                kind: t('request.formField'),
-                index: index + 1,
-              })
-            "
-            :disabled="disabled"
-            @change="updateForm"
-          />
-          <TemplateTextControl
-            v-model="field.name"
-            density="compact"
-            font="mono"
-            :previews="variablePreviews"
-            :aria-label="t('request.formName', { index: index + 1 })"
-            :placeholder="
-              isBlank(field)
-                ? t('request.addFormField')
-                : t('common.fields.name')
-            "
-            :disabled="disabled"
-            @input="updateForm"
-          />
+        <template v-for="(field, index) in formFields" :key="index">
           <div
-            class="form-value-field"
-            :class="{ 'has-value-type-toggle': bodyKind === 'multipart' }"
+            class="request-field-row"
+            :class="formFieldReorder.classes(index)"
+            @dragover.stop="formFieldReorder.updateDropTarget($event, index)"
+            @drop.stop="formFieldReorder.finishDrop($event)"
           >
-            <FormValueTypeToggle
-              v-if="bodyKind === 'multipart'"
-              :model-value="isFileValue(field) ? 'file' : 'text'"
-              :disabled="disabled || uploadAttachment === null"
-              @update:model-value="selectValueType(index, $event)"
-            />
-            <TemplateTextControl
-              v-if="!isFileValue(field)"
-              v-model="field.value"
-              density="compact"
-              font="mono"
-              :previews="variablePreviews"
-              :aria-label="t('request.formValue', { index: index + 1 })"
-              :placeholder="t('common.fields.value')"
-              :disabled="disabled"
-              @input="updateForm"
-            />
-            <button
-              v-else-if="isPendingFile(field)"
-              type="button"
-              class="request-file-part request-file-part-empty"
-              :disabled="disabled || uploading"
-              @click="chooseAttachment(index)"
-            >
-              {{ t("request.attachFile") }}
-            </button>
-            <button
-              v-else
-              type="button"
-              class="request-file-part"
-              :disabled="disabled || uploading"
-              @click="chooseAttachment(index)"
-            >
-              <span class="request-file-name">{{
-                field.attachment.fileName
-              }}</span>
-              <span class="request-file-metadata">
-                {{ field.attachment.contentType }} ·
-                {{ attachmentSize(field.attachment.byteLength) }}
-              </span>
-            </button>
-          </div>
-          <div class="row-actions">
-            <RowReorderHandle
-              v-if="!isBlank(field)"
+            <CheckboxControl
+              v-model="field.enabled"
+              visually-hidden-label
               :label="
-                t('common.actions.reorderRow', {
-                  item: t('request.formField'),
-                  index: index + 1,
-                })
-              "
-              :disabled="disabled"
-              @drag-start="formFieldReorder.startDrag($event, index)"
-              @drag-end="formFieldReorder.cancelDrag"
-              @move="formFieldReorder.moveByKeyboard(index, $event)"
-            />
-            <IconButton
-              v-if="!isBlank(field)"
-              class="compact-icon-button"
-              size="compact"
-              :label="
-                t('request.removeField', {
+                t('request.enableField', {
                   kind: t('request.formField'),
                   index: index + 1,
                 })
               "
-              :title="
-                t('request.removeFieldTitle', { kind: t('request.formField') })
-              "
               :disabled="disabled"
-              @click="removeFormField(index)"
+              @change="updateForm"
+            />
+            <div class="field-key-cell">
+              <TemplateTextControl
+                v-model="field.name"
+                class="field-template-input"
+                density="compact"
+                font="mono"
+                :previews="variablePreviews"
+                :aria-label="t('request.formName', { index: index + 1 })"
+                :placeholder="
+                  isBlank(field)
+                    ? t('request.addFormField')
+                    : t('common.fields.name')
+                "
+                :disabled="disabled"
+                @input="updateForm"
+              />
+              <IconButton
+                class="field-description-action"
+                size="compact"
+                :class="{ 'has-content': field.description?.trim() !== '' }"
+                :label="t('documentation.editFieldDescription')"
+                :disabled="disabled || isBlank(field)"
+                @click="toggleFieldDescription(index)"
+              >
+                <FilePenLine :size="15" aria-hidden="true" />
+              </IconButton>
+            </div>
+            <div
+              class="form-value-field"
+              :class="{ 'has-value-type-toggle': bodyKind === 'multipart' }"
             >
-              <Trash2 :size="15" aria-hidden="true" />
-            </IconButton>
-            <span v-else class="new-row-marker" aria-hidden="true">
-              <Asterisk :size="15" />
-            </span>
+              <FormValueTypeToggle
+                v-if="bodyKind === 'multipart'"
+                :model-value="isFileValue(field) ? 'file' : 'text'"
+                :disabled="disabled || uploadAttachment === null"
+                @update:model-value="selectValueType(index, $event)"
+              />
+              <TemplateTextControl
+                v-if="!isFileValue(field)"
+                v-model="field.value"
+                density="compact"
+                font="mono"
+                :previews="variablePreviews"
+                :aria-label="t('request.formValue', { index: index + 1 })"
+                :placeholder="t('common.fields.value')"
+                :disabled="disabled"
+                @input="updateForm"
+              />
+              <button
+                v-else-if="isPendingFile(field)"
+                type="button"
+                class="request-file-part request-file-part-empty"
+                :disabled="disabled || uploading"
+                @click="chooseAttachment(index)"
+              >
+                {{ t("request.attachFile") }}
+              </button>
+              <button
+                v-else
+                type="button"
+                class="request-file-part"
+                :disabled="disabled || uploading"
+                @click="chooseAttachment(index)"
+              >
+                <span class="request-file-name">{{
+                  field.attachment.fileName
+                }}</span>
+                <span class="request-file-metadata">
+                  {{ field.attachment.contentType }} ·
+                  {{ attachmentSize(field.attachment.byteLength) }}
+                </span>
+              </button>
+            </div>
+            <div class="row-actions">
+              <RowReorderHandle
+                v-if="!isBlank(field)"
+                :label="
+                  t('common.actions.reorderRow', {
+                    item: t('request.formField'),
+                    index: index + 1,
+                  })
+                "
+                :disabled="disabled"
+                @drag-start="formFieldReorder.startDrag($event, index)"
+                @drag-end="formFieldReorder.cancelDrag"
+                @move="formFieldReorder.moveByKeyboard(index, $event)"
+              />
+              <IconButton
+                v-if="!isBlank(field)"
+                class="compact-icon-button"
+                size="compact"
+                :label="
+                  t('request.removeField', {
+                    kind: t('request.formField'),
+                    index: index + 1,
+                  })
+                "
+                :title="
+                  t('request.removeFieldTitle', {
+                    kind: t('request.formField'),
+                  })
+                "
+                :disabled="disabled"
+                @click="removeFormField(index)"
+              >
+                <Trash2 :size="15" aria-hidden="true" />
+              </IconButton>
+              <span v-else class="new-row-marker" aria-hidden="true">
+                <Asterisk :size="15" />
+              </span>
+            </div>
           </div>
-        </div>
+          <div
+            v-if="expandedDescriptions.includes(index) && !isBlank(field)"
+            class="field-description-row"
+          >
+            <TextInput
+              :model-value="field.description ?? ''"
+              :aria-label="t('documentation.fieldDescription')"
+              :placeholder="t('documentation.fieldDescriptionPlaceholder')"
+              :maxlength="4096"
+              :disabled="disabled"
+              @update:model-value="field.description = $event"
+              @input="updateForm"
+            />
+          </div>
+        </template>
       </div>
     </div>
   </div>

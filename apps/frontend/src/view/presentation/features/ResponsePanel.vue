@@ -257,7 +257,7 @@ const exchangeOptions = computed<readonly SelectMenuOption[]>(() =>
     value: summary.exchangeId,
     label: [
       exchangeStatusLabel(summary),
-      t(`response.exchange.kind.${summary.kind}`),
+      summary.label ?? t(`response.exchange.kind.${summary.kind}`),
       formatExchangeDateTime(summary.occurredAt),
     ].join(" · "),
   })),

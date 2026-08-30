@@ -1964,6 +1964,7 @@
         ],
         "properties": {
           "capturedExchangeId": { "$ref": "#/components/schemas/UuidV7" },
+          "label": { "type": "string", "minLength": 1, "maxLength": 200 },
           "source": { "$ref": "#/components/schemas/ImportProviderId" },
           "status": { "type": "integer", "minimum": 100, "maximum": 599 },
           "statusText": { "type": "string", "maxLength": 1024 },
@@ -1988,6 +1989,28 @@
             ]
           },
           "importedAt": { "$ref": "#/components/schemas/UtcDateTime" }
+        }
+      },
+      "ImportedRequestBodyOption": {
+        "description": "One provider-defined request body that may be selected before applying an import.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["optionId", "label", "requestBody"],
+        "properties": {
+          "optionId": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "selectionKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "requestBody": {
+            "$ref": "#/components/schemas/RequestBodyDefinition"
+          },
+          "documentation": {
+            "$ref": "#/components/schemas/ResourceNotes",
+            "description": "Provider-owned Markdown appended to request notes only when this option is selected."
+          }
         }
       },
       "ImportedCollection": {
@@ -2065,6 +2088,19 @@
           "requestBody": {
             "$ref": "#/components/schemas/RequestBodyDefinition"
           },
+          "requestBodyOptions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/ImportedRequestBodyOption"
+            }
+          },
+          "defaultRequestBodyOptionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
           "body": { "type": "string", "maxLength": 786432 },
           "preRequestScript": { "type": "string", "maxLength": 65536 },
           "postResponseScript": { "type": "string", "maxLength": 65536 },
@@ -2074,7 +2110,22 @@
           },
           "capturedExchange": {
             "$ref": "#/components/schemas/CapturedExchangeView"
+          },
+          "capturedExchanges": {
+            "type": "array",
+            "maxItems": 50,
+            "items": { "$ref": "#/components/schemas/CapturedExchangeView" }
           }
+        }
+      },
+      "ImportRequestBodySelection": {
+        "description": "Selects one provider-defined request body for an imported item.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["itemId", "optionId"],
+        "properties": {
+          "itemId": { "type": "string", "minLength": 1 },
+          "optionId": { "type": "string", "minLength": 1, "maxLength": 200 }
         }
       },
       "ImportPlan": {
@@ -2263,6 +2314,13 @@
                     "maxItems": 200,
                     "uniqueItems": true,
                     "items": { "type": "string" }
+                  },
+                  "requestBodySelections": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "items": {
+                      "$ref": "#/components/schemas/ImportRequestBodySelection"
+                    }
                   },
                   "expectedSourceFingerprint": {
                     "type": "string",
@@ -3747,6 +3805,12 @@
           "source": {
             "type": "string",
             "description": "APInteract for executions, otherwise the import-provider ID that supplied the capture."
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Optional provider-defined label for an imported capture."
           },
           "state": {
             "type": "string",

@@ -240,6 +240,7 @@ export const enUsMessages = {
   import: {
     action: "Import",
     capturedResponse: "Captured response",
+    capturedResponses: "{count} sample response | {count} sample responses",
     childCollection: "New collection inside {name}",
     chooseFile: "Choose an import type first",
     chooseFormatFile: "Choose {format} file",
@@ -258,6 +259,8 @@ export const enUsMessages = {
     },
     preview: "Preview",
     requests: "Requests",
+    requestBodyFor: "Request body for {name}",
+    requestBodyType: "Request body type for this import",
     selectType: "Select import type",
     selectedOfTotal: "{selected} of {total} selected",
     severity: {

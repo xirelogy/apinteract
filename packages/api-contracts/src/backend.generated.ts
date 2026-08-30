@@ -793,6 +793,7 @@ export interface components {
     /** @description An imported HTTP response capture that was not executed by APInteract. */
     CapturedExchangeView: {
       capturedExchangeId?: components["schemas"]["UuidV7"];
+      label?: string;
       source: components["schemas"]["ImportProviderId"];
       status: number;
       statusText: string;
@@ -805,6 +806,15 @@ export interface components {
       bodyBytes: number;
       recordedAt: components["schemas"]["UtcDateTime"] | null;
       importedAt?: components["schemas"]["UtcDateTime"];
+    };
+    /** @description One provider-defined request body that may be selected before applying an import. */
+    ImportedRequestBodyOption: {
+      optionId: string;
+      label: string;
+      selectionKey?: string;
+      requestBody: components["schemas"]["RequestBodyDefinition"];
+      /** @description Provider-owned Markdown appended to request notes only when this option is selected. */
+      documentation?: components["schemas"]["ResourceNotes"];
     };
     /** @description A provider-created collection below the imported root. */
     ImportedCollection: {
@@ -830,11 +840,19 @@ export interface components {
       query: components["schemas"]["RequestField"][];
       headers: components["schemas"]["RequestField"][];
       requestBody: components["schemas"]["RequestBodyDefinition"];
+      requestBodyOptions?: components["schemas"]["ImportedRequestBodyOption"][];
+      defaultRequestBodyOptionId?: string;
       body: string;
       preRequestScript: string;
       postResponseScript: string;
       variables: components["schemas"]["VariableWrite"][];
       capturedExchange?: components["schemas"]["CapturedExchangeView"];
+      capturedExchanges?: components["schemas"]["CapturedExchangeView"][];
+    };
+    /** @description Selects one provider-defined request body for an imported item. */
+    ImportRequestBodySelection: {
+      itemId: string;
+      optionId: string;
     };
     /** @description A mutation-free, source-neutral preview produced by one provider. */
     ImportPlan: {
@@ -899,6 +917,7 @@ export interface components {
         parentCollectionId: components["schemas"]["CollectionId"] | null;
         collectionName: string;
         selectedItemIds: string[];
+        requestBodySelections?: components["schemas"]["ImportRequestBodySelection"][];
         expectedSourceFingerprint: string;
       };
     } & {
@@ -1497,6 +1516,8 @@ export interface components {
       kind: "execution" | "capture";
       /** @description APInteract for executions, otherwise the import-provider ID that supplied the capture. */
       source: string;
+      /** @description Optional provider-defined label for an imported capture. */
+      label?: string;
       /** @enum {string} */
       state: "created" | "running" | "completed" | "failed";
       status?: number;
