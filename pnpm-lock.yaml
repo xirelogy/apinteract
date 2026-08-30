@@ -62,6 +62,9 @@ importers:
       '@apinteract/api-contracts':
         specifier: workspace:*
         version: link:../../packages/api-contracts
+      '@apinteract/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
       '@fastify/cookie':
         specifier: 11.0.2
         version: 11.0.2
@@ -120,6 +123,9 @@ importers:
       '@apinteract/api-contracts':
         specifier: workspace:*
         version: link:../../packages/api-contracts
+      '@apinteract/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
       '@codemirror/commands':
         specifier: ^6.10.4
         version: 6.10.4
@@ -242,6 +248,16 @@ importers:
       prettier:
         specifier: 3.6.2
         version: 3.6.2
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
+  packages/plugin-api:
+    dependencies:
+      '@apinteract/api-contracts':
+        specifier: workspace:*
+        version: link:../api-contracts
+    devDependencies:
       typescript:
         specifier: 5.9.3
         version: 5.9.3

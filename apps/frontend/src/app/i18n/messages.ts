@@ -363,6 +363,7 @@ export const enUsMessages = {
       file: "File value",
       change: "Current value type: {type}. Activate to change it.",
     },
+    formatBody: "Format body",
     replaceAttachedFile: "Replace attached file {fileName}",
     replaceBodyFile: "Replace request body file {fileName}",
     httpMethod: "HTTP method",

@@ -359,19 +359,45 @@ describe("RequestEditor", () => {
         text: "{",
       },
     });
+    expect(
+      wrapper
+        .findAll("button")
+        .some((button) => button.text() === "Format body"),
+    ).toBe(true);
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Format body")
+      ?.trigger("click");
+    expect(wrapper.get('[role="status"]').text()).toContain("not valid JSON");
+    editor.vm.$emit("update:modelValue", '{"value":true}');
+    await wrapper.vm.$nextTick();
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Format body")
+      ?.trigger("click");
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      body: '{\n  "value": true\n}',
+      requestBody: { text: '{\n  "value": true\n}' },
+    });
     bodyType?.vm.$emit("update:modelValue", "text");
     await wrapper.vm.$nextTick();
     expect(editor.props("language")).toBe("plain");
     expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
-      body: "{",
-      requestBody: { contentType: "text/plain", text: "{" },
+      body: '{\n  "value": true\n}',
+      requestBody: {
+        contentType: "text/plain",
+        text: '{\n  "value": true\n}',
+      },
     });
     bodyType?.vm.$emit("update:modelValue", "json");
     await wrapper.vm.$nextTick();
     expect(editor.props("language")).toBe("json");
     expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
-      body: "{",
-      requestBody: { contentType: "application/json", text: "{" },
+      body: '{\n  "value": true\n}',
+      requestBody: {
+        contentType: "application/json",
+        text: '{\n  "value": true\n}',
+      },
     });
 
     await wrapper
@@ -390,7 +416,7 @@ describe("RequestEditor", () => {
       .find((button) => button.text().includes("Send"))
       ?.trigger("click");
     expect(wrapper.emitted("execute")?.at(-1)?.[0]).toMatchObject({
-      requestBody: { kind: "text", text: "{" },
+      requestBody: { kind: "text", text: '{\n  "value": true\n}' },
     });
   });
 

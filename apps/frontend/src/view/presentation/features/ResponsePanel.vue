@@ -7,6 +7,7 @@ import {
   formatDateTime,
   useDateTimeFormatPreference,
 } from "@/app/preferences/date-time-format";
+import { frontendPluginRuntime } from "@/app/plugins/frontend-plugin-host";
 import {
   analyzeResponseContent,
   RESPONSE_IMAGE_PREVIEW_LIMIT_BYTES,
@@ -152,7 +153,11 @@ const hasResponseBody = computed(() => {
 const content = computed(() =>
   props.execution === null
     ? null
-    : analyzeResponseContent(props.execution, props.capturedResponse),
+    : analyzeResponseContent(
+        props.execution,
+        props.capturedResponse,
+        frontendPluginRuntime.responseContent,
+      ),
 );
 
 /** Exposes only successfully prepared or safely loadable derived body tabs. */

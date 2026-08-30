@@ -23,6 +23,7 @@ import { useI18n } from "vue-i18n";
 import { v7 as uuidV7 } from "uuid";
 
 import { defaultHeaderMergeMode } from "@/app/preferences/header-preferences";
+import { frontendPluginRuntime } from "@/app/plugins/frontend-plugin-host";
 import {
   formatDateTime,
   useDateTimeFormatPreference,
@@ -123,7 +124,9 @@ const props = withDefaults(
     loadResponseBody: null,
   },
 );
-const { locale, t } = useI18n();
+const i18n = useI18n();
+const { locale, t } = i18n;
+const requestBodyPresets = frontendPluginRuntime.requestContent;
 const dateTimeFormatPreference = useDateTimeFormatPreference();
 
 const emit = defineEmits<{
@@ -159,14 +162,16 @@ const targetModeOptions = computed(() => [
   { value: "composed", label: t("request.targetModes.composed") },
   { value: "absolute", label: t("request.targetModes.absolute") },
 ]);
-const bodyTypeOptions = computed(() => [
-  { value: "none", label: t("request.bodyTypes.none") },
-  { value: "text", label: t("request.bodyTypes.text") },
-  { value: "json", label: t("request.bodyTypes.json") },
-  { value: "urlencoded", label: t("request.bodyTypes.urlencoded") },
-  { value: "multipart", label: t("request.bodyTypes.multipart") },
-  { value: "file", label: t("request.bodyTypes.file") },
-]);
+const bodyTypeOptions = computed(() =>
+  requestBodyPresets.list().map((preset) => ({
+    value: preset.id,
+    label:
+      preset.label.translationKey !== undefined &&
+      i18n.te(preset.label.translationKey)
+        ? t(preset.label.translationKey)
+        : preset.label.default,
+  })),
+);
 const requestTabs = [
   "query",
   "headers",
@@ -185,15 +190,13 @@ const targetMode = ref<"absolute" | "composed">("composed");
 const targetUrl = ref("");
 const query = ref<RequestField[]>([]);
 const headers = ref<RequestField[]>([]);
-type BodyEditorKind =
-  | "none"
-  | "text"
-  | "json"
-  | "file"
-  | "urlencoded"
-  | "multipart";
-const bodyKind = ref<BodyEditorKind>("none");
+const bodyPresetId = ref("none");
+const bodyPreset = computed(() =>
+  requestBodyPresets.require(bodyPresetId.value),
+);
+const bodyKind = computed(() => bodyPreset.value.bodyKind);
 const bodyText = ref("");
+const bodyFormatError = ref("");
 const bodyContentType = ref("");
 const bodyFileAttachment = ref<RequestAttachment | null>(null);
 const bodyFileInput = ref<HTMLInputElement | null>(null);
@@ -250,7 +253,7 @@ watch(
       createBlankHeaderField,
     );
     const requestBody = bodyDefinitionFromSource(source);
-    bodyKind.value = bodyEditorKind(requestBody);
+    bodyPresetId.value = requestBodyPresetId(requestBody);
     bodyText.value = requestBody.kind === "text" ? requestBody.text : "";
     bodyFileAttachment.value =
       requestBody.kind === "file" ? { ...requestBody.attachment } : null;
@@ -325,13 +328,13 @@ const bodyHasContent = computed(() => {
 const generatedContentType = computed(() => {
   if (bodyKind.value === "none") return null;
   const override = bodyContentType.value.trim();
-  if (bodyKind.value === "text" || bodyKind.value === "json") {
+  if (bodyKind.value === "text") {
     return override || null;
   }
   if (bodyKind.value === "file") {
     return override || bodyFileAttachment.value?.contentType || null;
   }
-  const contentType = override || defaultContentType(bodyKind.value);
+  const contentType = override || bodyPreset.value.defaultContentType || "";
   if (contentType === "") return null;
   return bodyKind.value === "multipart"
     ? `${contentType}; boundary=${multipartBoundary.value}`
@@ -340,7 +343,7 @@ const generatedContentType = computed(() => {
 const bodyContentTypePlaceholder = computed(() =>
   bodyKind.value === "file"
     ? (bodyFileAttachment.value?.contentType ?? "application/octet-stream")
-    : defaultContentType(bodyKind.value),
+    : (bodyPreset.value.defaultContentType ?? ""),
 );
 const overriddenInheritedHeaderNames = computed(() => {
   const names = new Set<string>();
@@ -359,9 +362,7 @@ const referencedVariableNames = computed(() =>
     ...query.value.map((field) => field.value),
     ...headers.value.map((field) => field.value),
     ...props.inheritedHeaders.map((field) => field.value),
-    bodyKind.value === "text" || bodyKind.value === "json"
-      ? bodyText.value
-      : "",
+    bodyKind.value === "text" ? bodyText.value : "",
     ...(bodyKind.value === "urlencoded" || bodyKind.value === "multipart"
       ? formFields.value.flatMap((field) =>
           isMultipartFileValueField(field)
@@ -865,28 +866,9 @@ function isHeaderOverriddenByBody(field: RequestField): boolean {
   );
 }
 
-/** Recognizes JSON and structured-syntax JSON media types for editor syntax. */
-function isJsonMediaType(contentType: string | null): boolean {
-  if (contentType === null) return false;
-  const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-  return mediaType === "application/json" || mediaType.endsWith("+json");
-}
-
 /** Maps semantic body variants to the frontend presentation preset. */
-function bodyEditorKind(body: RequestBodyDefinition): BodyEditorKind {
-  if (body.kind === "text") {
-    return isJsonMediaType(body.contentType) ? "json" : "text";
-  }
-  return body.kind;
-}
-
-/** Returns the standard media type selected by one frontend body preset. */
-function defaultContentType(kind: BodyEditorKind): string {
-  if (kind === "text") return "text/plain";
-  if (kind === "json") return "application/json";
-  if (kind === "urlencoded") return "application/x-www-form-urlencoded";
-  if (kind === "multipart") return "multipart/form-data";
-  return "";
+function requestBodyPresetId(body: RequestBodyDefinition): string {
+  return requestBodyPresets.resolveBody(body).id;
 }
 
 /** Formats compact attachment sizes without implying transformed wire bytes. */
@@ -915,7 +897,7 @@ function bodyDefinitionFromSource(
 function currentRequestBody(): RequestBodyDefinition {
   if (bodyKind.value === "none") return { kind: "none" };
   const contentType = bodyContentType.value.trim() || null;
-  if (bodyKind.value === "text" || bodyKind.value === "json") {
+  if (bodyKind.value === "text") {
     return {
       kind: "text",
       contentType,
@@ -957,10 +939,7 @@ function currentDraft(): RequestDraftInput {
     query: meaningfulRequestFields(query.value),
     headers: meaningfulRequestFields(headers.value),
     requestBody: currentRequestBody(),
-    body:
-      bodyKind.value === "text" || bodyKind.value === "json"
-        ? bodyText.value
-        : "",
+    body: bodyKind.value === "text" ? bodyText.value : "",
     preRequestScript: preRequestScript.value,
     postResponseScript: postResponseScript.value,
   };
@@ -978,10 +957,7 @@ function emitChange(): void {
     query: meaningfulRequestFields(query.value),
     headers: meaningfulRequestFields(headers.value),
     requestBody: currentRequestBody(),
-    body:
-      bodyKind.value === "text" || bodyKind.value === "json"
-        ? bodyText.value
-        : "",
+    body: bodyKind.value === "text" ? bodyText.value : "",
     preRequestScript: preRequestScript.value,
     postResponseScript: postResponseScript.value,
   });
@@ -1003,30 +979,40 @@ function selectTargetMode(value: string): void {
 
 /** Applies a frontend body preset without changing the current text. */
 function selectBodyKind(value: string): void {
-  if (
-    value !== "none" &&
-    value !== "text" &&
-    value !== "json" &&
-    value !== "file" &&
-    value !== "urlencoded" &&
-    value !== "multipart"
-  ) {
-    return;
-  }
-  if (value === "file" && bodyKind.value !== "file") {
-    bodyKind.value = "file";
+  const preset = requestBodyPresets.get(value);
+  if (preset === undefined) return;
+  bodyFormatError.value = "";
+  if (preset.bodyKind === "file" && bodyKind.value !== "file") {
+    bodyPresetId.value = preset.id;
     bodyContentType.value = "";
     bodyFileAttachment.value = null;
     return;
   }
-  if (bodyKind.value !== value && value !== "none") {
+  if (bodyPresetId.value !== preset.id && preset.bodyKind !== "none") {
     bodyContentType.value =
-      value === "urlencoded" || value === "multipart"
-        ? ""
-        : defaultContentType(value);
+      preset.bodyKind === "text" ? (preset.defaultContentType ?? "") : "";
   }
-  bodyKind.value = value;
-  if (value !== "file") bodyFileAttachment.value = null;
+  bodyPresetId.value = preset.id;
+  if (preset.bodyKind !== "file") bodyFileAttachment.value = null;
+  emitChange();
+}
+
+/** Formats request text through its plugin contribution without changing invalid input. */
+function formatRequestBody(): void {
+  const result = requestBodyPresets.format(bodyPresetId.value, bodyText.value);
+  if (result === undefined) return;
+  if (!result.valid) {
+    bodyFormatError.value = result.error;
+    return;
+  }
+  bodyFormatError.value = "";
+  bodyText.value = result.value;
+  emitChange();
+}
+
+/** Clears stale parser feedback before publishing an edited request body. */
+function updateBodyText(): void {
+  bodyFormatError.value = "";
   emitChange();
 }
 
@@ -1062,7 +1048,7 @@ async function attachBodyFile(event: Event): Promise<void> {
   uploadingBodyFile.value = true;
   try {
     bodyFileAttachment.value = await props.uploadAttachment(file);
-    bodyKind.value = "file";
+    bodyPresetId.value = requestBodyPresets.defaultFor("file").id;
     emitChange();
   } catch {
     // The controller publishes the safe application error; keep replacement usable.
@@ -1722,7 +1708,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               <SelectMenu
                 class="body-type-picker"
                 :input-id="bodyTypeControlId"
-                :model-value="bodyKind"
+                :model-value="bodyPresetId"
                 :options="bodyTypeOptions"
                 :label="t('request.contentType')"
                 density="compact"
@@ -1742,18 +1728,34 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                 :disabled="editorDisabled"
                 @input="updateBodyContentType"
               />
+              <ButtonControl
+                v-if="bodyKind === 'text' && bodyPreset.format !== undefined"
+                size="compact"
+                variant="secondary"
+                :disabled="editorDisabled"
+                @click="formatRequestBody"
+              >
+                {{ t("request.formatBody") }}
+              </ButtonControl>
+              <p
+                v-if="bodyFormatError !== ''"
+                class="request-body-format-error"
+                role="status"
+              >
+                {{ bodyFormatError }}
+              </p>
             </div>
             <p v-if="bodyKind === 'none'" class="request-body-empty">
               {{ t("request.noBodyDescription") }}
             </p>
             <CodeEditor
-              v-else-if="bodyKind === 'text' || bodyKind === 'json'"
+              v-else-if="bodyKind === 'text'"
               v-model="bodyText"
               class="body-code-editor"
-              :language="bodyKind === 'json' ? 'json' : 'plain'"
+              :language="bodyPreset.textLanguage ?? 'plain'"
               :label="t('request.rawBody')"
               :disabled="editorDisabled"
-              @input="emitChange"
+              @input="updateBodyText"
             />
             <div v-else-if="bodyKind === 'file'" class="request-body-file">
               <input

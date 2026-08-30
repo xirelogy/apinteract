@@ -676,8 +676,8 @@ export interface components {
        */
       type: "VariablePreviewCommand";
     };
-    /** @enum {string} */
-    ImportProviderId: "openapi-json" | "har";
+    /** @description Stable identifier of an import provider installed in the backend plugin host. */
+    ImportProviderId: string;
     /** @description Declarative capabilities for one installed source adapter. */
     ImportProviderManifest: {
       id: components["schemas"]["ImportProviderId"];

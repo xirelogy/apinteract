@@ -1,7 +1,7 @@
 import type { EntityId } from "../foundation/id.js";
+import { createBackendPluginRuntime } from "../plugins/backend-plugin-host.js";
 import type { RequestService } from "../requests/request-service.js";
-import { HarImportProvider } from "./har-provider.js";
-import { ImportProviderRegistry } from "./import-provider-registry.js";
+import type { ImportProviderRegistry } from "./import-provider-registry.js";
 import {
   type ImportApplyInput,
   type ImportApplyResult,
@@ -11,7 +11,6 @@ import {
   type ImportSource,
   ImportSourceError,
 } from "./import-types.js";
-import { OpenApiJsonImportProvider } from "./openapi-json-provider.js";
 
 /** Coordinates provider parsing and delegates all persistent writes atomically. */
 export class ImportService {
@@ -20,10 +19,7 @@ export class ImportService {
 
   constructor(
     requests: RequestService,
-    registry = new ImportProviderRegistry([
-      new OpenApiJsonImportProvider(),
-      new HarImportProvider(),
-    ]),
+    registry = createBackendPluginRuntime().imports,
   ) {
     this.#requests = requests;
     this.#registry = registry;

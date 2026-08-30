@@ -1,204 +1,177 @@
 # APInteract Plugins
 
-APInteract plugins extend selected backend and proxy capabilities through
-domain-specific contracts. All plugin packages use one registration mechanism,
-while each extension point retains its own interface, compatibility rules, and
-data exposure.
+APInteract plugins extend explicitly registered frontend or backend providers.
+The shared TypeScript contract is published by `@apinteract/plugin-api`; each
+provider retains its own data, lifecycle, and security boundary.
 
-The plugin system is currently in the design stage. Detailed executable
-manifests and TypeScript interfaces will be published with the component
-implementations.
+The registration API and the first content/import providers are implemented.
+Automatic package discovery, administrator configuration, integrity checks,
+and external runtime loading remain planned. Installed source plugins are
+currently selected by the application composition root.
 
-Frontend translations use a separate data-only extension mechanism documented
-in [Translation packs](translations.md).
+## One Package, One Target
 
-## Package Layout
+One plugin package targets exactly one runtime:
 
-External plugins are self-contained packages loaded from an administrator-
-controlled, read-only volume:
-
-```text
-/opt/apinteract/extensions/
-  example-extension/
-    apinteract-extension.json
-    dist/
-      entrypoint
+```ts
+type PluginTarget = "frontend" | "backend";
 ```
 
-The package manifest declares:
+A frontend plugin cannot register backend providers, and a backend plugin
+cannot register frontend providers. Both use the same package signature:
 
-```text
-package identity and version
-compatible APInteract versions
-target component
-component entrypoints
-extension interfaces provided
-interface contract versions
-host services requested
-configuration schema
-optional integrity metadata
+```ts
+interface APInteractPlugin<TTarget, TProviders> {
+  manifest: {
+    apiVersion: 1;
+    id: string;
+    name: string;
+    version: string;
+    target: TTarget;
+  };
+  register(context: PluginRegistrationContext<TProviders>): void;
+}
 ```
 
-One package can provide more than one implementation. Each implementation is
-registered and configured separately.
+The package root convention is to export one `plugin` value. A package can
+register several contributions, but all contributions must belong to its one
+target runtime.
 
-## Common Registration
+```ts
+import type { FrontendPlugin } from "@apinteract/plugin-api/frontend";
 
-Every component entrypoint exports the same registration function:
+export const plugin: FrontendPlugin = {
+  manifest: {
+    apiVersion: 1,
+    id: "example.yaml",
+    name: "YAML content support",
+    version: "1.0.0",
+    target: "frontend",
+  },
+  register(context) {
+    // Typed frontend contributions belong here.
+  },
+};
 
-```text
-registerExtension(registrar)
+export default plugin;
 ```
 
-Each registration identifies:
+Plugin IDs use lowercase alphanumeric segments separated by dots or hyphens.
+Versions use semantic `major.minor.patch` form. The target host validates the
+manifest and rejects duplicate package IDs before completing startup.
 
-```text
-interface ID
-interface contract version
-implementation ID and version
-descriptor
-requested host services
-factory
+## Implemented Providers
+
+| Target   | Provider ID        | Contribution role                           |
+| -------- | ------------------ | ------------------------------------------- |
+| Frontend | `request.content`  | Request body recognition, editor, formatter |
+| Frontend | `response.content` | Response classification and safe projection |
+| Backend  | `request.import`   | Request and collection import plans         |
+
+Built-in JSON/XML/HTML/image/text support and built-in OpenAPI/HAR importers
+register through these same contracts.
+
+### Request Content
+
+`request.content` maps media types to an existing wire-level request body kind
+and a host-owned editor primitive. A text contribution may also provide an
+explicit formatter:
+
+```ts
+context.register("request.content", {
+  id: "yaml",
+  label: { default: "YAML" },
+  bodyKind: "text",
+  defaultContentType: "application/yaml",
+  mediaTypes: ["application/yaml", "*+yaml"],
+  textLanguage: "plain",
+  format(source) {
+    try {
+      return { valid: true, value: formatYaml(source) };
+    } catch {
+      return { valid: false, error: "The request body is not valid YAML." };
+    }
+  },
+});
 ```
 
-Examples of interface IDs include:
+Formatting runs only after the user activates **Format body**. Invalid input is
+left unchanged and the returned error is rendered as text. A formatter never
+changes the canonical request body kind or sends bytes by itself.
+
+The current host editor languages are `plain` and `json`. Adding YAML syntax
+highlighting requires a new host-supported language primitive; plugins cannot
+inject arbitrary Vue components or markup through this provider.
+
+Media-type patterns support exact values (`application/json`), structured
+suffixes (`*+json`), type wildcards (`text/*`), and the universal wildcard
+(`*/*`). Exact, suffix, type, and universal matches are considered in that
+order; an explicit numeric priority resolves deliberate overrides.
+
+### Response Content
+
+`response.content` receives bounded response evidence after deterministic
+media-type selection. It returns only host-recognized presentation kinds and
+optional structured JSON/XML text. It does not return HTML components.
+
+HTML preview remains network-inert and sandboxed by the host. Raster images
+remain subject to host-owned byte and dimension limits. SVG is parsed as XML
+and is not rendered as an image.
+
+The current API is suitable for built-in or trusted source plugins. Future
+externally loaded frontend plugins need an explicit trust and integrity model;
+registration itself is not a JavaScript sandbox.
+
+### Request And Collection Imports
+
+`request.import` is backend-only. A provider receives one bounded text source,
+probes it without mutation, and parses it into a canonical import plan:
 
 ```text
-authentication.provider
-payload.codec
-blob.store
-delivery.provider
-content.importer
-persistence.adapter
-script.runtime
-secret.store
-logging.sink
-proxy.selector
+source
+  -> provider probe
+  -> requests, collection hierarchy, variables, diagnostics
+  -> host validation
+  -> user preview and selection
+  -> atomic persistence
 ```
 
-The interface ID selects a dedicated typed contract. A codec and a persistence
-adapter therefore use the same registration mechanism without sharing a
-business interface.
+The backend owns source size limits, provider selection, plan validation,
+authorization, attachment policy, and the persistence transaction. Provider
+IDs are stable validated strings rather than a closed built-in enum, so an
+installed provider can be selected through the existing component API.
 
-Registration describes factories and dependencies. Network connections,
-database access, background work, and domain processing begin only after the
-host validates and initializes a configured implementation.
+Imported captured responses currently retain HAR-specific persistence rules.
+The general extension boundary in this iteration covers requests and
+collections; generalizing capture provenance is a separate contract change.
 
-## Host Services
+## Registration Lifecycle
 
-Plugins request explicit versioned host services such as secure randomness,
-cryptography, outbound HTTP, configuration-secret access, delivery, scoped
-credential reading, structured logging, or metrics.
-
-These declarations document intended access, keep plugins independent from
-component internals, and support future out-of-process isolation. In-process
-plugins remain trusted code and are not sandboxed by the declaration system.
-
-## Sensitivity
-
-APInteract assigns sensitivity from the registered interface and requested
-services. A plugin can request additional access but cannot classify itself
-below the interface baseline.
-
-The operator-visible summary uses:
+The implemented lifecycle is intentionally small:
 
 ```text
-standard
-sensitive
-critical
+manifest validation
+registration against typed providers
+provider-specific conflict validation
+service/UI consumption
 ```
 
-The detailed report also identifies data exposure, operational authority, and
-failure impact. Examples include access to payload bytes, authentication
-evidence, secrets, complete persistence, outbound networking, or startup-
-critical services.
+Registration happens during component bootstrap. Plugins must not start
+network connections, background work, or persistent mutation from their
+registration function. Discovery, configuration, initialization, health, and
+shutdown hooks will be added when external package loading is implemented.
 
-Sensitivity reporting provides deployment visibility rather than a security
-sandbox. Write access to a plugin volume remains equivalent to code-execution
-access in the target component.
+Frontend and backend plugins are trusted code in their respective processes.
+Provider contracts constrain coupling and output shape; they do not sandbox a
+plugin.
 
-## Lifecycle
+## Planned Provider Contracts
 
-Plugins follow one component-owned lifecycle:
+Authentication providers, blob stores, delivery providers, persistence
+adapters, script runtimes, secret stores, logging sinks, and proxy selectors
+remain planned extension points. They should reuse the same single-target
+package signature while defining their own typed provider contracts.
 
-```text
-manifest discovery
-compatibility validation
-registration
-configuration validation
-initialization
-health reporting
-shutdown
-```
-
-MVP components load plugins at startup. Optional plugin failure disables the
-affected implementation. A configured startup-critical implementation, such
-as the selected persistence adapter, prevents startup when unavailable or
-incompatible.
-
-## Plugin Contracts
-
-### Authentication Providers
-
-[Authentication provider plugins](authentication-providers.md) define
-declarative login interactions, credential data, external-provider
-communication, and provider assertions. User linkage and session management
-remain core backend services.
-
-### Payload Codecs
-
-Payload codecs transform or analyze raw and structured request and response
-data. The backend retains ownership of payload modes, media types,
-authoritative bytes, and execution behavior.
-
-### Blob Stores
-
-Blob stores stream immutable bytes to local filesystems or external object
-storage. The backend owns identifiers, authorization, references, quotas,
-retention, and garbage collection.
-
-### Delivery Providers
-
-Delivery providers transmit email, SMS, and similar messages. Authentication
-providers own challenge generation and verification; delivery plugins only
-transmit prepared messages.
-
-### Content Importers
-
-Importers parse external formats into neutral import plans and diagnostics.
-The backend presents conflicts and commits accepted plans transactionally.
-
-### Persistence Adapters
-
-Persistence adapters implement repositories, transactions, migrations, and
-health for supported databases. They preserve backend domain behavior rather
-than defining database-specific product rules.
-
-### Script Runtimes
-
-Script runtimes provide the engine that evaluates request scripts. The
-[scripting guide](../scripting/README.md) explains the helpers available to a
-script and the limits that protect a request and its data.
-
-### Secret Stores
-
-Secret stores can integrate local encryption, external vaults, or key-
-management systems. Variable scope, aliases, access control, and secret taint
-remain backend behavior.
-
-### Logging Sinks
-
-Logging sinks export pre-redacted structured operational records. They do not
-change log policy, request unredacted data, or define audit events.
-
-### Proxy Selectors
-
-Proxy selectors choose among configured proxy nodes using backend-provided
-metadata and health. They do not perform target requests or replace the public
-proxy component contract.
-
-## Core Behavior
-
-Plugins do not replace APInteract users, session policy, authorization,
-workspace hierarchy, variable precedence, request versioning, execution state,
-audit definitions, or public component protocols.
+[Authentication provider plugins](authentication-providers.md) describe the
+planned authentication boundary. [Translation packs](translations.md) remain
+data-only frontend extensions rather than executable plugins.

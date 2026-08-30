@@ -1,27 +1,27 @@
 import { parser as xmlParser } from "@lezer/xml";
+import type {
+  ResponseContentContribution,
+  ResponseContentKind,
+  ResponseContentPresentation,
+  ResponseContentPresenterContext,
+  StructuredResponseView,
+} from "@apinteract/plugin-api/frontend";
 
 import type { ExecutionView } from "@/model/contracts/backend";
+import {
+  MediaTypeRegistry,
+  normalizeMediaType,
+} from "@/model/domain/media-types";
 
 export const RESPONSE_TEXT_PREVIEW_LIMIT_BYTES = 256 * 1024;
 export const RESPONSE_IMAGE_PREVIEW_LIMIT_BYTES = 16 * 1024 * 1024;
 export const RESPONSE_IMAGE_MAX_DIMENSION = 16_384;
 export const RESPONSE_IMAGE_MAX_PIXELS = 40_000_000;
 
-export type ResponseContentKind =
-  | "empty"
-  | "text"
-  | "json"
-  | "xml"
-  | "html"
-  | "image"
-  | "binary"
-  | "unavailable";
-
-export interface StructuredResponseView {
-  readonly language: "json" | "xml";
-  readonly value?: string;
-  readonly valid: boolean;
-}
+export type {
+  ResponseContentKind,
+  StructuredResponseView,
+} from "@apinteract/plugin-api/frontend";
 
 export interface ResponseContentAnalysis {
   readonly kind: ResponseContentKind;
@@ -31,7 +31,9 @@ export interface ResponseContentAnalysis {
   readonly structured?: StructuredResponseView;
 }
 
-const rasterImageMediaTypes = new Set([
+export type ResponseContentPresenter = ResponseContentContribution;
+
+export const RASTER_IMAGE_MEDIA_TYPES = [
   "image/bmp",
   "image/gif",
   "image/jpeg",
@@ -39,7 +41,38 @@ const rasterImageMediaTypes = new Set([
   "image/vnd.microsoft.icon",
   "image/webp",
   "image/x-icon",
-]);
+] as const;
+const rasterImageMediaTypes = new Set<string>(RASTER_IMAGE_MEDIA_TYPES);
+
+/** Owns response presenters without allowing contributed executable markup. */
+export class ResponseContentPresenterRegistry {
+  readonly #mediaTypes = new MediaTypeRegistry<ResponseContentPresenter>();
+
+  /** Registers one presenter through deterministic media-type patterns. */
+  register(presenter: ResponseContentPresenter): void {
+    this.#mediaTypes.register({
+      id: presenter.id,
+      patterns: presenter.mediaTypes,
+      ...(presenter.priority === undefined
+        ? {}
+        : { priority: presenter.priority }),
+      value: presenter,
+    });
+  }
+
+  /** Produces the selected bounded projection for a declared media type. */
+  present(
+    mediaType: string | null,
+    context: Omit<ResponseContentPresenterContext, "mediaType">,
+  ): ResponseContentPresentation | undefined {
+    const normalized = normalizeMediaType(mediaType);
+    if (normalized === null) return undefined;
+    return this.#mediaTypes.resolve(normalized)?.present({
+      ...context,
+      mediaType: normalized,
+    });
+  }
+}
 
 /** Returns the normalized first declared response media type, without parameters. */
 export function responseMediaType(
@@ -49,10 +82,7 @@ export function responseMediaType(
     (header) => header.name.trim().toLowerCase() === "content-type",
   )?.value;
   if (value === undefined) return null;
-  const mediaType = value.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-  return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/u.test(mediaType)
-    ? mediaType
-    : null;
+  return normalizeMediaType(value);
 }
 
 /** Reports whether the bounded UTF-8 preview represents the complete body. */
@@ -79,6 +109,7 @@ export function isRasterImageMediaType(mediaType: string | null): boolean {
 export function analyzeResponseContent(
   execution: ExecutionView,
   capturedResponse = false,
+  presenters: ResponseContentPresenterRegistry,
 ): ResponseContentAnalysis {
   const mediaType = responseMediaType(execution.headers);
   const bodyBytes = execution.bodyBytes ?? 0;
@@ -106,54 +137,20 @@ export function analyzeResponseContent(
       previewTruncated,
     };
   }
-  if (mediaType !== null && isJsonMediaType(mediaType)) {
+  const presentation = presenters.present(mediaType, {
+    execution,
+    previewComplete,
+    previewTruncated,
+  });
+  if (presentation !== undefined) {
     return {
-      kind: "json",
-      mediaType,
-      previewComplete,
-      previewTruncated,
-      ...(previewComplete && execution.bodyPreview !== undefined
-        ? { structured: parseJsonResponse(execution.bodyPreview) }
-        : {}),
-    };
-  }
-  if (mediaType === "text/html" || mediaType === "application/xhtml+xml") {
-    return {
-      kind: "html",
-      mediaType,
-      previewComplete,
-      previewTruncated,
-      ...(mediaType === "application/xhtml+xml" &&
-      previewComplete &&
-      execution.bodyPreview !== undefined
-        ? { structured: parseXmlResponse(execution.bodyPreview) }
-        : {}),
-    };
-  }
-  if (mediaType !== null && isXmlMediaType(mediaType)) {
-    return {
-      kind: "xml",
-      mediaType,
-      previewComplete,
-      previewTruncated,
-      ...(previewComplete && execution.bodyPreview !== undefined
-        ? { structured: parseXmlResponse(execution.bodyPreview) }
-        : {}),
-    };
-  }
-  if (isRasterImageMediaType(mediaType)) {
-    return {
-      kind: "image",
+      ...presentation,
       mediaType,
       previewComplete,
       previewTruncated,
     };
   }
-  if (
-    execution.bodyPreview !== undefined ||
-    mediaType?.startsWith("text/") === true ||
-    mediaType?.includes("javascript") === true
-  ) {
+  if (execution.bodyPreview !== undefined) {
     return {
       kind: "text",
       mediaType,
@@ -169,26 +166,8 @@ export function analyzeResponseContent(
   };
 }
 
-/** Reports whether a normalized media type follows JSON registration conventions. */
-function isJsonMediaType(mediaType: string): boolean {
-  return (
-    mediaType === "application/json" ||
-    mediaType === "text/json" ||
-    mediaType.endsWith("+json")
-  );
-}
-
-/** Reports whether a normalized media type follows XML registration conventions. */
-function isXmlMediaType(mediaType: string): boolean {
-  return (
-    mediaType === "application/xml" ||
-    mediaType === "text/xml" ||
-    mediaType.endsWith("+xml")
-  );
-}
-
 /** Validates JSON and formats only structural whitespace, preserving source tokens. */
-function parseJsonResponse(source: string): StructuredResponseView {
+export function parseJsonResponse(source: string): StructuredResponseView {
   try {
     JSON.parse(source);
   } catch {
@@ -202,7 +181,7 @@ function parseJsonResponse(source: string): StructuredResponseView {
 }
 
 /** Validates XML through CodeMirror's non-executing parser and retains its source. */
-function parseXmlResponse(source: string): StructuredResponseView {
+export function parseXmlResponse(source: string): StructuredResponseView {
   const tree = xmlParser.parse(source);
   let valid = source.trim() !== "";
   tree.iterate({

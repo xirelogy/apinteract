@@ -32,6 +32,7 @@ COPY apps/backend/package.json apps/backend/package.json
 COPY apps/frontend/package.json apps/frontend/package.json
 COPY apps/proxy/package.json apps/proxy/package.json
 COPY packages/api-contracts/package.json packages/api-contracts/package.json
+COPY packages/plugin-api/package.json packages/plugin-api/package.json
 
 RUN --mount=type=cache,id=apinteract-pnpm-store,target=/opt/pnpm/store \
     pnpm install --frozen-lockfile

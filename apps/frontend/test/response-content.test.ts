@@ -1,12 +1,26 @@
 import { describe, expect, it } from "vitest";
+import type { FrontendPlugin } from "@apinteract/plugin-api/frontend";
 
+import { createFrontendPluginRuntime } from "../src/app/plugins/frontend-plugin-host";
 import type { ExecutionView } from "../src/model/contracts/backend";
 import {
-  analyzeResponseContent,
+  analyzeResponseContent as analyzeWithPresenters,
   isRasterImageMediaType,
   isResponsePreviewComplete,
+  ResponseContentPresenterRegistry,
   responseMediaType,
 } from "../src/model/domain/response-content";
+
+const builtinPresenters = createFrontendPluginRuntime().responseContent;
+
+/** Analyzes through built-ins unless a test supplies an isolated registry. */
+function analyzeResponseContent(
+  execution: ExecutionView,
+  capturedResponse = false,
+  presenters = builtinPresenters,
+) {
+  return analyzeWithPresenters(execution, capturedResponse, presenters);
+}
 
 /** Creates a terminal execution with overridable response evidence. */
 function execution(overrides: Partial<ExecutionView> = {}): ExecutionView {
@@ -128,6 +142,47 @@ describe("response content analysis", () => {
 
     expect(analysis.kind).toBe("html");
     expect(analysis.structured?.valid).toBe(true);
+  });
+
+  it("allows a contributed presenter to override a built-in deliberately", () => {
+    const yamlPlugin: FrontendPlugin = {
+      manifest: {
+        apiVersion: 1,
+        id: "example.yaml-response",
+        name: "YAML response support",
+        version: "1.0.0",
+        target: "frontend",
+      },
+      /** Registers one response presenter through the frontend plugin host. */
+      register(context) {
+        context.register("response.content", {
+          id: "yaml",
+          mediaTypes: ["application/yaml", "*+yaml"],
+          present: () => ({ kind: "text" }),
+        });
+      },
+    };
+    const runtime = createFrontendPluginRuntime();
+    runtime.plugins.install(yamlPlugin);
+    const source = "value: true";
+    expect(
+      analyzeResponseContent(
+        execution({
+          headers: [
+            { name: "content-type", value: "application/example+yaml" },
+          ],
+          bodyBytes: source.length,
+          bodyPreview: source,
+        }),
+        false,
+        runtime.responseContent,
+      ).kind,
+    ).toBe("text");
+    expect(runtime.plugins.has("example.yaml-response")).toBe(true);
+
+    expect(createFrontendPluginRuntime().responseContent).toBeInstanceOf(
+      ResponseContentPresenterRegistry,
+    );
   });
 
   it("distinguishes raster, textual, binary, empty, and unavailable bodies", () => {

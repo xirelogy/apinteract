@@ -1,0 +1,29 @@
+{
+  "name": "@apinteract/plugin-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/core.ts",
+      "default": "./src/core.ts"
+    },
+    "./frontend": {
+      "types": "./src/frontend.ts",
+      "default": "./src/frontend.ts"
+    },
+    "./backend": {
+      "types": "./src/backend.ts",
+      "default": "./src/backend.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@apinteract/api-contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

@@ -1694,7 +1694,10 @@
       },
       "ImportProviderId": {
         "type": "string",
-        "enum": ["openapi-json", "har"]
+        "description": "Stable identifier of an import provider installed in the backend plugin host.",
+        "minLength": 1,
+        "maxLength": 100,
+        "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
       },
       "ImportProviderManifest": {
         "description": "Declarative capabilities for one installed source adapter.",

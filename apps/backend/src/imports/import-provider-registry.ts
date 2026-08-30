@@ -15,18 +15,24 @@ import type { VariableWrite } from "../variables/variable-profile-store.js";
 
 export const MAX_IMPORT_SOURCE_BYTES = 524_288;
 export const MAX_IMPORT_REQUESTS = 200;
+const importProviderIdPattern = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u;
+const semanticVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 
 /** Registers source adapters and owns deterministic detection and plan validation. */
 export class ImportProviderRegistry {
   readonly #providers = new Map<ImportProviderId, ImportProvider>();
 
-  constructor(providers: readonly ImportProvider[]) {
-    for (const provider of providers) {
-      if (this.#providers.has(provider.manifest.id)) {
-        throw new Error(`Duplicate import provider ${provider.manifest.id}`);
-      }
-      this.#providers.set(provider.manifest.id, provider);
+  constructor(providers: readonly ImportProvider[] = []) {
+    for (const provider of providers) this.register(provider);
+  }
+
+  /** Registers one uniquely identified parser before the service accepts work. */
+  register(provider: ImportProvider): void {
+    validateImportProviderManifest(provider.manifest);
+    if (this.#providers.has(provider.manifest.id)) {
+      throw new Error(`Duplicate import provider ${provider.manifest.id}`);
     }
+    this.#providers.set(provider.manifest.id, provider);
   }
 
   /** Lists public provider metadata in registration order. */
@@ -97,6 +103,21 @@ export class ImportProviderRegistry {
       );
     }
     return first.provider;
+  }
+}
+
+/** Validates metadata that must remain selectable through the component API. */
+function validateImportProviderManifest(
+  manifest: ImportProviderManifest,
+): void {
+  if (manifest.id.length > 100 || !importProviderIdPattern.test(manifest.id)) {
+    throw new Error(`Invalid import provider ID: ${manifest.id}`);
+  }
+  if (!semanticVersionPattern.test(manifest.version)) {
+    throw new Error(`Invalid import provider version: ${manifest.version}`);
+  }
+  if (manifest.label.trim() === "") {
+    throw new Error(`Import provider label is required: ${manifest.id}`);
   }
 }
 

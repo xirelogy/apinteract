@@ -801,10 +801,16 @@ function requireMethod(value: unknown): HttpMethod {
 /** Reads an explicit provider or null for deterministic automatic detection. */
 function optionalImportProviderId(value: unknown): ImportProviderId | null {
   if (value === null) return null;
-  if (value === "openapi-json" || value === "har") return value;
+  if (
+    typeof value === "string" &&
+    value.length <= 100 &&
+    /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(value)
+  ) {
+    return value;
+  }
   throw new CommandError(
     "validation_failed",
-    "providerId must be openapi-json, har, or null.",
+    "providerId must be a valid installed provider ID or null.",
   );
 }
 
