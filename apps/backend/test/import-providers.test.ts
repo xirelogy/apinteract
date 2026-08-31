@@ -398,7 +398,7 @@ describe("import providers", () => {
     );
   });
 
-  it("preserves textual XML examples without serializing object examples as JSON", async () => {
+  it("preserves textual XML and serializes schema-shaped examples as XML", async () => {
     const plan = await new ImportProviderRegistry([
       new OpenApiJsonImportProvider(),
     ]).preview("openapi-json", {
@@ -414,11 +414,32 @@ describe("import providers", () => {
                   "application/xml": {
                     schema: {
                       type: "object",
-                      properties: { kind: { type: "string" } },
+                      xml: { name: "animal" },
+                      properties: {
+                        kind: {
+                          type: "string",
+                          example: "cat",
+                          xml: { attribute: true },
+                        },
+                        names: {
+                          type: "array",
+                          xml: { wrapped: true },
+                          items: {
+                            type: "string",
+                            example: "Mochi",
+                            xml: { name: "name" },
+                          },
+                        },
+                      },
                     },
                     examples: {
                       markup: { value: '<animal kind="cat" />' },
-                      object: { value: { kind: "cat" } },
+                      object: {
+                        value: {
+                          kind: "cat",
+                          names: ["Mochi", "Miso & Co"],
+                        },
+                      },
                     },
                   },
                 },
@@ -430,7 +451,23 @@ describe("import providers", () => {
                     "application/xml": {
                       schema: {
                         type: "object",
-                        properties: { kind: { type: "string" } },
+                        xml: { name: "animal" },
+                        properties: {
+                          kind: {
+                            type: "string",
+                            example: "cat",
+                            xml: { attribute: true },
+                          },
+                          names: {
+                            type: "array",
+                            xml: { wrapped: true },
+                            items: {
+                              type: "string",
+                              example: "Mochi",
+                              xml: { name: "name" },
+                            },
+                          },
+                        },
                       },
                     },
                   },
@@ -456,23 +493,91 @@ describe("import providers", () => {
         requestBody: {
           kind: "text",
           contentType: "application/xml",
-          text: "",
+          text: [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<animal kind="cat">',
+            "  <names>",
+            "    <name>Mochi</name>",
+            "    <name>Miso &amp; Co</name>",
+            "  </names>",
+            "</animal>",
+          ].join("\n"),
         },
       },
     ]);
-    expect(plan.diagnostics).toContainEqual(
-      expect.objectContaining({
-        code: "openapi_body_example_not_text",
-        severity: "warning",
-      }),
+    expect(plan.requests[0]?.capturedExchanges).toMatchObject([
+      {
+        label: "example",
+        status: 200,
+        contentType: "application/xml",
+        body: [
+          '<?xml version="1.0" encoding="UTF-8"?>',
+          '<animal kind="cat">',
+          "  <names>",
+          "    <name>Mochi</name>",
+          "  </names>",
+          "</animal>",
+        ].join("\n"),
+      },
+    ]);
+    expect(plan.diagnostics).not.toContainEqual(
+      expect.objectContaining({ code: "openapi_body_example_not_text" }),
     );
-    expect(plan.requests[0]?.capturedExchanges).toBeUndefined();
-    expect(plan.diagnostics).toContainEqual(
-      expect.objectContaining({
-        code: "openapi_response_example_not_text",
-        severity: "warning",
-      }),
+    expect(plan.diagnostics).not.toContainEqual(
+      expect.objectContaining({ code: "openapi_response_example_not_text" }),
     );
+  });
+
+  it("constructs an XML request example when only a schema is available", async () => {
+    const plan = await new ImportProviderRegistry([
+      new OpenApiJsonImportProvider(),
+    ]).preview("openapi-json", {
+      name: "schema-xml.json",
+      text: JSON.stringify({
+        openapi: "3.1.0",
+        info: { title: "Schema XML", version: "1" },
+        paths: {
+          "/inventory": {
+            post: {
+              requestBody: {
+                content: {
+                  "application/problem+xml": {
+                    schema: {
+                      type: "object",
+                      title: "inventory",
+                      properties: {
+                        count: { type: "integer", example: 2 },
+                        labels: {
+                          type: "array",
+                          items: {
+                            type: "string",
+                            example: "new",
+                            xml: { name: "label" },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+              responses: {},
+            },
+          },
+        },
+      }),
+    });
+
+    expect(plan.requests[0]?.requestBody).toEqual({
+      kind: "text",
+      contentType: "application/problem+xml",
+      text: [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<inventory>",
+        "  <count>2</count>",
+        "  <label>new</label>",
+        "</inventory>",
+      ].join("\n"),
+    });
   });
 
   it("keeps conflicting OpenAPI defaults at root without request overrides", async () => {

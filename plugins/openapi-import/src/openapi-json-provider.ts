@@ -919,7 +919,13 @@ function mapResponseExamples(
           });
           return captures;
         }
-        const body = serializeMediaExample(contentType, example.value);
+        const body = serializeMediaExample(
+          document,
+          contentType,
+          rawMedia.schema,
+          example.value,
+          diagnostics,
+        );
         if (body === null) {
           diagnostics.push({
             code: "openapi_response_example_not_text",
@@ -1002,20 +1008,317 @@ function explicitMediaExamples(
   return [];
 }
 
-/** Serializes one response example without placing JSON under another media type. */
+/** Serializes one response example according to its declared wire media type. */
 function serializeMediaExample(
+  document: Record<string, unknown>,
   contentType: string,
+  schema: unknown,
   value: unknown,
+  diagnostics: ImportDiagnostic[],
 ): string | null {
-  if (contentType === "application/json" || contentType.endsWith("+json")) {
+  if (isJsonMediaType(contentType)) {
     return JSON.stringify(value, null, 2) ?? "";
   }
   if (value === undefined || value === null) return "";
   if (typeof value === "string") return value;
+  if (isXmlMediaType(contentType)) {
+    return serializeXmlExample(document, schema, value, diagnostics);
+  }
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
   return null;
+}
+
+interface XmlSerializationContext {
+  readonly document: Record<string, unknown>;
+  readonly diagnostics: ImportDiagnostic[];
+}
+
+interface XmlElementInput {
+  readonly name: string;
+  readonly schema: unknown;
+  readonly value: unknown;
+  readonly depth: number;
+}
+
+interface XmlSchemaMetadata {
+  readonly name: string;
+  readonly prefix: string;
+  readonly namespace: string;
+  readonly attribute: boolean;
+  readonly wrapped: boolean;
+}
+
+/** Reports whether a declared media type carries JSON structured content. */
+function isJsonMediaType(contentType: string): boolean {
+  const normalized = normalizedMediaType(contentType);
+  return normalized === "application/json" || normalized.endsWith("+json");
+}
+
+/** Reports whether a declared media type carries XML structured content. */
+function isXmlMediaType(contentType: string): boolean {
+  const normalized = normalizedMediaType(contentType);
+  return (
+    normalized === "application/xml" ||
+    normalized === "text/xml" ||
+    normalized.endsWith("+xml")
+  );
+}
+
+/** Removes parameters and casing differences from one media type. */
+function normalizedMediaType(contentType: string): string {
+  return (contentType.split(";", 1)[0] ?? "").trim().toLowerCase();
+}
+
+/** Converts a schema-shaped value into a deterministic XML document. */
+function serializeXmlExample(
+  document: Record<string, unknown>,
+  rawSchema: unknown,
+  value: unknown,
+  diagnostics: ImportDiagnostic[],
+): string {
+  const schema = resolveLocalReference(document, rawSchema, diagnostics);
+  const schemaRecord = isRecord(schema) ? schema : {};
+  const metadata = xmlSchemaMetadata(schemaRecord);
+  const rootName =
+    metadata.name || stringValue(schemaRecord.title).trim() || "root";
+  const context: XmlSerializationContext = { document, diagnostics };
+  return `<?xml version="1.0" encoding="UTF-8"?>\n${serializeXmlElement(
+    context,
+    { name: rootName, schema: schemaRecord, value, depth: 0 },
+  )}`;
+}
+
+/** Serializes one XML element while respecting bounded OpenAPI XML metadata. */
+function serializeXmlElement(
+  context: XmlSerializationContext,
+  input: XmlElementInput,
+): string {
+  const indentation = "  ".repeat(input.depth);
+  const schema = resolveLocalReference(
+    context.document,
+    input.schema,
+    context.diagnostics,
+  );
+  const schemaRecord = isRecord(schema) ? schema : {};
+  const metadata = xmlSchemaMetadata(schemaRecord);
+  const localName = safeXmlName(metadata.name || input.name, "item");
+  const prefix = safeXmlPrefix(metadata.prefix);
+  const tagName = prefix === "" ? localName : `${prefix}:${localName}`;
+  const attributes: string[] = [];
+  if (metadata.namespace !== "") {
+    const declaration = prefix === "" ? "xmlns" : `xmlns:${prefix}`;
+    attributes.push(
+      `${declaration}="${escapeXmlAttribute(metadata.namespace)}"`,
+    );
+  }
+
+  if (input.depth > 8) return xmlEmptyElement(indentation, tagName, attributes);
+  if (Array.isArray(input.value)) {
+    const itemSchema = resolveLocalReference(
+      context.document,
+      schemaRecord.items,
+      context.diagnostics,
+    );
+    const itemMetadata = xmlSchemaMetadata(
+      isRecord(itemSchema) ? itemSchema : {},
+    );
+    const children = input.value.map((entry) =>
+      serializeXmlElement(context, {
+        name: itemMetadata.name || "item",
+        schema: itemSchema,
+        value: entry,
+        depth: input.depth + 1,
+      }),
+    );
+    return xmlContainerElement(indentation, tagName, attributes, children);
+  }
+  if (isRecord(input.value)) {
+    const properties = isRecord(schemaRecord.properties)
+      ? schemaRecord.properties
+      : {};
+    const children: string[] = [];
+    for (const [propertyName, propertyValue] of Object.entries(input.value)) {
+      const propertySchema = resolveLocalReference(
+        context.document,
+        properties[propertyName],
+        context.diagnostics,
+      );
+      const propertyMetadata = xmlSchemaMetadata(
+        isRecord(propertySchema) ? propertySchema : {},
+      );
+      if (
+        propertyMetadata.attribute &&
+        !Array.isArray(propertyValue) &&
+        !isRecord(propertyValue)
+      ) {
+        const attributeName = safeXmlName(
+          propertyMetadata.name || propertyName,
+          "attribute",
+        );
+        const attributePrefix = safeXmlPrefix(propertyMetadata.prefix);
+        const qualifiedName =
+          attributePrefix === ""
+            ? attributeName
+            : `${attributePrefix}:${attributeName}`;
+        if (propertyMetadata.namespace !== "" && attributePrefix !== "") {
+          attributes.push(
+            `xmlns:${attributePrefix}="${escapeXmlAttribute(propertyMetadata.namespace)}"`,
+          );
+        }
+        attributes.push(
+          `${qualifiedName}="${escapeXmlAttribute(xmlPrimitive(propertyValue))}"`,
+        );
+        continue;
+      }
+      children.push(
+        ...serializeXmlProperty(
+          context,
+          propertyName,
+          propertySchema,
+          propertyValue,
+          input.depth + 1,
+        ),
+      );
+    }
+    return xmlContainerElement(indentation, tagName, attributes, children);
+  }
+  const text = xmlPrimitive(input.value);
+  if (text === "") return xmlEmptyElement(indentation, tagName, attributes);
+  return `${indentation}<${tagName}${xmlAttributes(attributes)}>${escapeXmlText(text)}</${tagName}>`;
+}
+
+/** Serializes one object property, including wrapped and unwrapped arrays. */
+function serializeXmlProperty(
+  context: XmlSerializationContext,
+  propertyName: string,
+  rawSchema: unknown,
+  value: unknown,
+  depth: number,
+): string[] {
+  const schema = resolveLocalReference(
+    context.document,
+    rawSchema,
+    context.diagnostics,
+  );
+  const schemaRecord = isRecord(schema) ? schema : {};
+  const metadata = xmlSchemaMetadata(schemaRecord);
+  if (!Array.isArray(value)) {
+    return [
+      serializeXmlElement(context, {
+        name: propertyName,
+        schema: schemaRecord,
+        value,
+        depth,
+      }),
+    ];
+  }
+  if (metadata.wrapped) {
+    return [
+      serializeXmlElement(context, {
+        name: propertyName,
+        schema: schemaRecord,
+        value,
+        depth,
+      }),
+    ];
+  }
+  const itemSchema = resolveLocalReference(
+    context.document,
+    schemaRecord.items,
+    context.diagnostics,
+  );
+  const itemMetadata = xmlSchemaMetadata(
+    isRecord(itemSchema) ? itemSchema : {},
+  );
+  return value.map((entry) =>
+    serializeXmlElement(context, {
+      name: itemMetadata.name || metadata.name || propertyName,
+      schema: itemSchema,
+      value: entry,
+      depth,
+    }),
+  );
+}
+
+/** Reads the supported OpenAPI XML Object fields from one schema. */
+function xmlSchemaMetadata(schema: Record<string, unknown>): XmlSchemaMetadata {
+  const xml = isRecord(schema.xml) ? schema.xml : {};
+  return {
+    name: stringValue(xml.name).trim(),
+    prefix: stringValue(xml.prefix).trim(),
+    namespace: stringValue(xml.namespace).trim(),
+    attribute: xml.attribute === true,
+    wrapped: xml.wrapped === true,
+  };
+}
+
+/** Produces a safe XML local name from imported schema metadata. */
+function safeXmlName(value: string, fallback: string): string {
+  const candidate = value.trim();
+  if (/^[A-Za-z_][A-Za-z0-9._-]*$/u.test(candidate)) return candidate;
+  const sanitized = candidate.replace(/[^A-Za-z0-9._-]/gu, "_");
+  if (/^[A-Za-z_]/u.test(sanitized)) return sanitized;
+  return safeXmlName(fallback, "item");
+}
+
+/** Produces a safe optional XML namespace prefix. */
+function safeXmlPrefix(value: string): string {
+  return value === "" ? "" : safeXmlName(value, "ns");
+}
+
+/** Renders an empty XML element at one indentation level. */
+function xmlEmptyElement(
+  indentation: string,
+  tagName: string,
+  attributes: readonly string[],
+): string {
+  return `${indentation}<${tagName}${xmlAttributes(attributes)} />`;
+}
+
+/** Renders a container element or collapses it when it has no children. */
+function xmlContainerElement(
+  indentation: string,
+  tagName: string,
+  attributes: readonly string[],
+  children: readonly string[],
+): string {
+  if (children.length === 0)
+    return xmlEmptyElement(indentation, tagName, attributes);
+  return `${indentation}<${tagName}${xmlAttributes(attributes)}>\n${children.join("\n")}\n${indentation}</${tagName}>`;
+}
+
+/** Joins already-escaped XML attributes onto one opening tag. */
+function xmlAttributes(attributes: readonly string[]): string {
+  return attributes.length === 0 ? "" : ` ${attributes.join(" ")}`;
+}
+
+/** Converts an XML scalar to its source text before escaping. */
+function xmlPrimitive(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
+  ) {
+    return String(value);
+  }
+  return "";
+}
+
+/** Escapes text for an XML character-data node. */
+function escapeXmlText(value: string): string {
+  return value
+    .replace(/&/gu, "&amp;")
+    .replace(/</gu, "&lt;")
+    .replace(/>/gu, "&gt;");
+}
+
+/** Escapes text for a double-quoted XML attribute. */
+function escapeXmlAttribute(value: string): string {
+  return escapeXmlText(value).replace(/"/gu, "&quot;");
 }
 
 /** Maps concrete response-header examples and always records Content-Type. */
@@ -1336,10 +1639,20 @@ function mapRequestBodyDefinition(
     explicitExample === undefined
       ? sampleSchema(document, schema, diagnostics, 0)
       : explicitExample;
-  if (
-    normalizedContentType !== "application/json" &&
-    !normalizedContentType.endsWith("+json")
-  ) {
+  if (isXmlMediaType(normalizedContentType)) {
+    if (typeof example === "string") {
+      return { kind: "text", contentType, text: example };
+    }
+    return {
+      kind: "text",
+      contentType,
+      text:
+        example === undefined || example === null
+          ? ""
+          : serializeXmlExample(document, schema, example, diagnostics),
+    };
+  }
+  if (!isJsonMediaType(normalizedContentType)) {
     if (typeof example === "string") {
       return { kind: "text", contentType, text: example };
     }
