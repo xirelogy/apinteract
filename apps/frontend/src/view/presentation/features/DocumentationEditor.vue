@@ -44,6 +44,7 @@ markdown.renderer.rules.link_open = (
   environment,
   renderer,
 ) => {
+  tokens[index]?.attrSet("target", "_blank");
   tokens[index]?.attrSet("rel", "noopener noreferrer");
   return defaultLinkOpen(tokens, index, options, environment, renderer);
 };
@@ -53,6 +54,7 @@ markdown.renderer.rules.image = (tokens, index) =>
 const renderedNotes = computed(() =>
   DOMPurify.sanitize(markdown.render(props.notes), {
     USE_PROFILES: { html: true },
+    ADD_ATTR: ["target"],
     FORBID_TAGS: ["img", "picture", "source", "video", "audio", "iframe"],
     FORBID_ATTR: ["style", "srcset"],
   }),

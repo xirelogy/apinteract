@@ -65,9 +65,9 @@ describe("DocumentationEditor", () => {
     expect(preview.find("script").exists()).toBe(false);
     expect(preview.find("img").exists()).toBe(false);
     expect(preview.html()).not.toContain('href="javascript:');
-    expect(
-      preview.get('a[href="https://example.test"]').attributes("rel"),
-    ).toBe("noopener noreferrer");
+    const externalLink = preview.get('a[href="https://example.test"]');
+    expect(externalLink.attributes("target")).toBe("_blank");
+    expect(externalLink.attributes("rel")).toBe("noopener noreferrer");
     expect(preview.text()).toContain('<script>alert("unsafe")</script>');
     expect(preview.text()).toContain("tracker");
   });

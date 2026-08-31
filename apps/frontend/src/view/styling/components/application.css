@@ -1340,29 +1340,16 @@
 
 .documentation-preview-panel {
   overflow: auto;
-  padding: var(--space-3);
+  padding: var(--space-5);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
-  background: var(--surface-code);
+  background: var(--surface-primary);
 }
 
 .documentation-source-panel:not([hidden]),
 .documentation-preview-panel:not([hidden]) {
   display: block;
   height: 100%;
-}
-
-.markdown-preview {
-  overflow-wrap: anywhere;
-  line-height: var(--line-height-body);
-}
-
-.markdown-preview > :first-child {
-  margin-block-start: 0;
-}
-
-.markdown-preview > :last-child {
-  margin-block-end: 0;
 }
 
 .documentation-empty-preview {
