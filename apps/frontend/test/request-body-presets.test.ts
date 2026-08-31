@@ -14,6 +14,7 @@ describe("request body preset registry", () => {
       "apinteract.basic-http-content/none",
       "apinteract.basic-http-content/text",
       "apinteract.json-content/json",
+      "apinteract.xml-content/xml",
       "apinteract.basic-http-content/urlencoded",
       "apinteract.basic-http-content/multipart",
       "apinteract.basic-http-content/file",
@@ -29,6 +30,13 @@ describe("request body preset registry", () => {
         text: "{}",
       }).id,
     ).toBe("apinteract.json-content/json");
+    expect(
+      registry.resolveBody({
+        kind: "text",
+        contentType: "application/problem+xml; charset=utf-8",
+        text: "<problem />",
+      }).id,
+    ).toBe("apinteract.xml-content/xml");
     expect(
       registry.resolveBody({
         kind: "text",

@@ -1,12 +1,31 @@
 import { parser } from "@lezer/xml";
 import type { PluginRegistrationContext } from "@apinteract/plugin-api";
-import type { FrontendPluginProviders } from "@apinteract/plugin-api/frontend";
+import type {
+  FrontendPluginProviders,
+  RequestContentEditorContext,
+  WireBodyEditorMountOptions,
+} from "@apinteract/plugin-api/frontend";
 import { localize } from "@apinteract/plugin-sdk/frontend/localization";
 
-/** Registers structured XML response parsing. */
+/** Registers XML request editing and structured response parsing. */
 export function register(
   context: PluginRegistrationContext<FrontendPluginProviders>,
 ): void {
+  context.register("request.content", {
+    id: "xml",
+    label: { default: "XML" },
+    mediaTypes: ["application/xml", "text/xml", "*+xml"],
+    order: 25,
+    createBody: (previous) => ({
+      kind: "text",
+      contentType: "application/xml",
+      text: previous.kind === "text" ? previous.text : "",
+    }),
+    isDefaultFor: () => false,
+    effectiveContentType: (body) =>
+      body.kind === "text" ? body.contentType : null,
+    mountEditor: (container, editor) => mountRequestEditor(container, editor),
+  });
   context.register("response.content", {
     id: "xml",
     label: { default: "XML" },
@@ -64,6 +83,41 @@ export function register(
       };
     },
   });
+}
+
+/** Mounts the source-preserving XML request editor through the shared wire mechanism. */
+function mountRequestEditor(
+  container: HTMLElement,
+  editor: RequestContentEditorContext,
+) {
+  const optionsFor = (
+    current: RequestContentEditorContext,
+  ): WireBodyEditorMountOptions => ({
+    body: current.body,
+    wireKind: "text",
+    label: localize(
+      "Raw request body",
+      { "zh-CN": "原始请求体", "zh-TW": "原始請求本文" },
+      current.locale,
+    ),
+    disabled: current.disabled,
+    variablePreviews: current.variablePreviews,
+    ...(current.uploadAttachment === undefined
+      ? {}
+      : { uploadAttachment: current.uploadAttachment }),
+    codeLanguage: "xml",
+    contentTypePlaceholder: "application/xml",
+    onChange: current.updateBody,
+  });
+  const handle = editor.ui.mountWireBodyEditor(container, optionsFor(editor));
+  return {
+    update(current: RequestContentEditorContext) {
+      handle.update(optionsFor(current));
+    },
+    destroy() {
+      handle.destroy();
+    },
+  };
 }
 
 /** Validates XML with a non-executing parser and preserves exact source. */

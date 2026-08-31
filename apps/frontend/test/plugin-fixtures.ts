@@ -31,7 +31,10 @@ const builtinPlugins: readonly (readonly [
     jsonContent,
   ],
   [
-    manifest("apinteract.xml-content", "XML content", ["response.content"]),
+    manifest("apinteract.xml-content", "XML content", [
+      "request.content",
+      "response.content",
+    ]),
     xmlContent,
   ],
   [

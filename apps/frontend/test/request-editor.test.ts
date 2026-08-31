@@ -401,6 +401,26 @@ describe("RequestEditor", () => {
       body: '{\n  "value": true\n}',
       requestBody: { text: '{\n  "value": true\n}' },
     });
+    bodyType?.vm.$emit("update:modelValue", "apinteract.xml-content/xml");
+    await wrapper.vm.$nextTick();
+    expect(
+      wrapper
+        .get('[aria-label="Raw request body"]')
+        .attributes("data-language"),
+    ).toBe("xml");
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      body: '{\n  "value": true\n}',
+      requestBody: {
+        kind: "text",
+        contentType: "application/xml",
+        text: '{\n  "value": true\n}',
+      },
+    });
+    expect(
+      wrapper
+        .findAll("button")
+        .some((button) => button.text() === "Format body"),
+    ).toBe(false);
     bodyType?.vm.$emit(
       "update:modelValue",
       "apinteract.basic-http-content/text",
@@ -509,6 +529,7 @@ describe("RequestEditor", () => {
       { value: "apinteract.basic-http-content/none", label: "None" },
       { value: "apinteract.basic-http-content/text", label: "Plain text" },
       { value: "apinteract.json-content/json", label: "JSON" },
+      { value: "apinteract.xml-content/xml", label: "XML" },
       {
         value: "apinteract.basic-http-content/urlencoded",
         label: "Form (URL-encoded)",
