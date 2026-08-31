@@ -12,6 +12,6 @@
     "@apinteract/plugin-sdk": "workspace:*",
     "@types/node": "24.10.0",
     "typescript": "5.9.3",
-    "vite": "7.1.10"
+    "vite": "7.3.6"
   }
 }

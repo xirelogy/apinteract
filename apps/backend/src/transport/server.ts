@@ -33,8 +33,8 @@ export async function createBackendServer(
       index: "index.html",
       cacheControl: false,
       /** Gives the SPA shell and content-hashed assets distinct cache policies. */
-      setHeaders(response, path) {
-        response.setHeader(
+      setHeaders(reply, path) {
+        reply.raw.setHeader(
           "Cache-Control",
           path.split(/[/\\]/u).includes("assets")
             ? "public, max-age=31536000, immutable"
