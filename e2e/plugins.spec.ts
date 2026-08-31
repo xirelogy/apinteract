@@ -9,7 +9,33 @@ test("lists discovered frontend and backend plugins read-only", async ({
   await page.getByRole("button", { name: "Account menu for admin" }).click();
   await page.getByRole("menuitem", { name: "Options" }).click();
   const options = page.getByRole("dialog", { name: "Options" });
+  const generalBox = await options.boundingBox();
+  expect(generalBox).not.toBeNull();
+  const optionsTabs = options.locator(".account-options-tabs");
+  const languageControl = options.getByRole("combobox", { name: "Language" });
+  await languageControl.focus();
+  const [optionsTabsBox, languageControlBox] = await Promise.all([
+    optionsTabs.boundingBox(),
+    languageControl.boundingBox(),
+  ]);
+  expect(optionsTabsBox).not.toBeNull();
+  expect(languageControlBox).not.toBeNull();
+  expect(languageControlBox!.x - optionsTabsBox!.x).toBeGreaterThan(1);
+  expect(
+    optionsTabsBox!.x +
+      optionsTabsBox!.width -
+      (languageControlBox!.x + languageControlBox!.width),
+  ).toBeGreaterThan(1);
+  await options.getByRole("tab", { name: "Defaults" }).click();
+  const defaultsBox = await options.boundingBox();
+  expect(defaultsBox).not.toBeNull();
+  expect(Math.abs(defaultsBox!.width - generalBox!.width)).toBeLessThan(2);
+  expect(Math.abs(defaultsBox!.height - generalBox!.height)).toBeLessThan(2);
   await options.getByRole("tab", { name: "Plugins" }).click();
+  const pluginsBox = await options.boundingBox();
+  expect(pluginsBox).not.toBeNull();
+  expect(Math.abs(pluginsBox!.width - generalBox!.width)).toBeLessThan(2);
+  expect(Math.abs(pluginsBox!.height - generalBox!.height)).toBeLessThan(2);
   const plugins = options.getByRole("list", { name: "Enabled plugins" });
 
   await expect(plugins.getByRole("listitem")).toHaveCount(7);
@@ -20,6 +46,15 @@ test("lists discovered frontend and backend plugins read-only", async ({
   await expect(plugins).toContainText("Frontend");
   await expect(plugins).toContainText("Backend");
   await expect(plugins).toContainText("Built-in");
+  const pluginListOverflow = await plugins.evaluate((list) => ({
+    overflowY: window.getComputedStyle(list).overflowY,
+    scrollHeight: list.scrollHeight,
+    clientHeight: list.clientHeight,
+  }));
+  expect(pluginListOverflow.overflowY).toBe("auto");
+  expect(pluginListOverflow.scrollHeight).toBeGreaterThan(
+    pluginListOverflow.clientHeight,
+  );
   await expect(options.getByRole("button", { name: "Save" })).toBeEnabled();
 });
 

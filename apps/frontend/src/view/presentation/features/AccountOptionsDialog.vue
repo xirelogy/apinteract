@@ -135,14 +135,14 @@ function selectDateTimeFormat(value: string): void {
     aria-labelledby="account-options-dialog-title"
     @update:open="emit('update:open', $event)"
   >
-    <div class="resource-dialog-surface">
+    <div class="resource-dialog-surface account-options-surface">
       <header class="resource-dialog-header">
         <h2 id="account-options-dialog-title">{{ t("header.options") }}</h2>
         <IconButton :label="t('common.actions.close')" @click="close">
           <X :size="18" aria-hidden="true" />
         </IconButton>
       </header>
-      <div class="resource-dialog-form">
+      <div class="resource-dialog-form account-options-form">
         <TabsRoot v-model="activeSection" class="account-options-tabs">
           <TabsList class="request-tabs" :label="t('header.options')">
             <TabsTrigger class="tab-button" value="general">
@@ -240,7 +240,10 @@ function selectDateTimeFormat(value: string): void {
               />
             </FormField>
           </TabsPanel>
-          <TabsPanel value="plugins" class="account-options-section">
+          <TabsPanel
+            value="plugins"
+            class="account-options-section account-options-plugins"
+          >
             <p v-if="store.pluginListState === 'loading'" role="status">
               {{ t("header.plugins.loading") }}
             </p>
