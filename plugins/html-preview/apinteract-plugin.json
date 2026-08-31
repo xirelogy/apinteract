@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "apiVersion": 2,
+  "apiVersion": 1,
   "id": "apinteract.html-preview",
   "name": "HTML response preview",
   "version": "1.0.0",

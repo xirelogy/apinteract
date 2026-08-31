@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { PluginPackageManifest } from "@apinteract/plugin-api";
+import {
+  PLUGIN_API_VERSION,
+  PLUGIN_MANIFEST_SCHEMA_VERSION,
+  type PluginPackageManifest,
+} from "@apinteract/plugin-api";
 import type { FrontendPluginModule } from "@apinteract/plugin-api/frontend";
 
 import { createTestFrontendPluginRuntime } from "./plugin-fixtures";
@@ -51,8 +55,8 @@ describe("request body preset registry", () => {
 
   it("accepts contributed executable editors backed by host mechanisms", () => {
     const yamlManifest: PluginPackageManifest<"frontend"> = {
-      schemaVersion: 1,
-      apiVersion: 2,
+      schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
+      apiVersion: PLUGIN_API_VERSION,
       id: "example.yaml",
       name: "YAML content",
       version: "1.0.0",

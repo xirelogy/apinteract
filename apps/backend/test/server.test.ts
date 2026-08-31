@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Application } from "../src/bootstrap/application.js";
 import type { BackendConfiguration } from "../src/config.js";
 import { createBackendServer } from "../src/transport/server.js";
+import { BACKEND_APPLICATION_VERSION } from "../src/version.js";
 
 describe("backend static frontend hosting", () => {
   it("serves the SPA root and immutable compiled assets under web-ui", async () => {
@@ -124,6 +125,13 @@ describe("backend static frontend hosting", () => {
         url: `/plugins/example.frontend/${"b".repeat(64)}/chunks/presenter.js`,
       });
       expect(stalePluginAsset.statusCode).toBe(404);
+
+      const health = await server.inject({ method: "GET", url: "/health" });
+      expect(health.statusCode).toBe(200);
+      expect(health.json()).toMatchObject({
+        status: "ready",
+        version: BACKEND_APPLICATION_VERSION,
+      });
 
       const redirect = await server.inject({
         method: "GET",

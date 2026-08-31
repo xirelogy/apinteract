@@ -32,7 +32,7 @@ optional authoring helpers that plugin builds bundle into their own artifacts.
 ```json
 {
   "schemaVersion": 1,
-  "apiVersion": 2,
+  "apiVersion": 1,
   "id": "example.yaml-content",
   "name": "YAML content",
   "version": "1.0.0",
@@ -42,6 +42,12 @@ optional authoring helpers that plugin builds bundle into their own artifacts.
   "providers": ["request.content", "response.content"]
 }
 ```
+
+`schemaVersion` is the whole-number manifest format generation. `apiVersion`
+is the whole-number host/plugin compatibility generation and changes only when
+that contract breaks. It is deliberately not SemVer: the independently
+released `@apinteract/plugin-api` and `@apinteract/plugin-sdk` packages use
+SemVer for compatible and incompatible package releases.
 
 IDs use lowercase alphanumeric segments separated by dots or hyphens. Versions
 use semantic `major.minor.patch` form. Entrypoints must remain below `dist/` and

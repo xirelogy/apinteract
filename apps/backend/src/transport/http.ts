@@ -13,6 +13,7 @@ import {
   AccessDeniedError,
   ResourceNotFoundError,
 } from "../workspaces/workspace-service.js";
+import { BACKEND_APPLICATION_VERSION } from "../version.js";
 import { sendProblem } from "./problem.js";
 
 const REFRESH_COOKIE = "apinteract_refresh";
@@ -68,7 +69,7 @@ export async function registerHttpRoutes(
     const status = proxyReady && auditReady ? "ready" : "not_ready";
     return reply.code(status === "ready" ? 200 : 503).send({
       status,
-      version: "0.0.0",
+      version: BACKEND_APPLICATION_VERSION,
       checks: {
         database: "ready",
         blobs: "ready",

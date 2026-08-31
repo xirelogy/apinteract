@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { PluginPackageManifest } from "@apinteract/plugin-api";
+import {
+  PLUGIN_API_VERSION,
+  PLUGIN_MANIFEST_SCHEMA_VERSION,
+  type PluginPackageManifest,
+} from "@apinteract/plugin-api";
 import type { BackendPluginModule } from "@apinteract/plugin-api/backend";
 
 import { createBackendPluginRuntime } from "../src/plugins/backend-plugin-host.js";
 
 const exampleManifest: PluginPackageManifest<"backend"> = {
-  schemaVersion: 1,
-  apiVersion: 2,
+  schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
+  apiVersion: PLUGIN_API_VERSION,
   id: "example.single-request",
   name: "Single request import",
   version: "1.0.0",

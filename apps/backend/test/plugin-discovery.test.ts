@@ -3,6 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+import {
+  PLUGIN_API_VERSION,
+  PLUGIN_MANIFEST_SCHEMA_VERSION,
+} from "@apinteract/plugin-api";
 
 import {
   discoverPluginPackages,
@@ -115,8 +119,8 @@ async function writePlugin(
   await writeFile(
     join(packagePath, "apinteract-plugin.json"),
     JSON.stringify({
-      schemaVersion: 1,
-      apiVersion: 2,
+      schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
+      apiVersion: PLUGIN_API_VERSION,
       id,
       name: id,
       version: "1.0.0",

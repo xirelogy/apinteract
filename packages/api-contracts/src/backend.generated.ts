@@ -725,10 +725,16 @@ export interface components {
     /** @description Stable identifier of an import provider installed in the backend plugin host. */
     ImportProviderId: string;
     PluginPackageManifest: {
-      /** @constant */
+      /**
+       * @description Plugin manifest format generation.
+       * @constant
+       */
       schemaVersion: 1;
-      /** @constant */
-      apiVersion: 2;
+      /**
+       * @description Breaking-compatibility generation of the host/plugin API; package releases use SemVer separately.
+       * @constant
+       */
+      apiVersion: 1;
       id: string;
       name: string;
       version: string;

@@ -1,4 +1,8 @@
-import type { PluginPackageManifest } from "@apinteract/plugin-api";
+import {
+  PLUGIN_API_VERSION,
+  PLUGIN_MANIFEST_SCHEMA_VERSION,
+  type PluginPackageManifest,
+} from "@apinteract/plugin-api";
 import type { FrontendPluginModule } from "@apinteract/plugin-api/frontend";
 
 import * as basicHttpContent from "../../../plugins/basic-http-content/src/index";
@@ -80,8 +84,8 @@ function manifest(
   providers: readonly ("request.content" | "response.content")[],
 ): PluginPackageManifest<"frontend"> {
   return {
-    schemaVersion: 1,
-    apiVersion: 2,
+    schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
+    apiVersion: PLUGIN_API_VERSION,
     id,
     name,
     version: "1.0.0",

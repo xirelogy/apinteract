@@ -20,6 +20,7 @@ import { RequestService } from "../src/requests/request-service.js";
 import { ScriptService } from "../src/scripting/script-service.js";
 import { WorkspaceService } from "../src/workspaces/workspace-service.js";
 import { VariableService } from "../src/variables/variable-service.js";
+import { DEFAULT_BACKEND_USER_AGENT } from "../src/version.js";
 
 describe("response preview evidence", () => {
   it("retains format-neutral UTF-8 and rejects malformed or unsafe text", () => {
@@ -382,7 +383,7 @@ describe("ExecutionService shutdown", () => {
       expect(sentHeaders).toContainEqual({ name: "X-Scripted", value: "yes" });
       expect(sentHeaders).toContainEqual({
         name: "User-Agent",
-        value: "APInteract/0.0.0",
+        value: DEFAULT_BACKEND_USER_AGENT,
       });
       const terminal = events.at(-1);
       expect(terminal?.type).toBe("execution.completed");
@@ -411,7 +412,7 @@ describe("ExecutionService shutdown", () => {
             },
             {
               name: "User-Agent",
-              value: "APInteract/0.0.0",
+              value: DEFAULT_BACKEND_USER_AGENT,
               redacted: false,
               derived: false,
             },

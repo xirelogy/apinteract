@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "apiVersion": 2,
+  "apiVersion": 1,
   "id": "apinteract.har-import",
   "name": "HAR import",
   "version": "1.0.0",

@@ -1,6 +1,8 @@
-import type {
-  PluginPackageManifest,
-  PluginSource,
+import {
+  PLUGIN_API_VERSION,
+  PLUGIN_MANIFEST_SCHEMA_VERSION,
+  type PluginPackageManifest,
+  type PluginSource,
 } from "@apinteract/plugin-api";
 import type { FrontendPluginModule } from "@apinteract/plugin-api/frontend";
 
@@ -64,8 +66,8 @@ function parseCatalogEntry(value: unknown): FrontendPluginCatalogEntry {
   const manifest = entry.manifest as Record<string, unknown> | undefined;
   if (
     manifest === undefined ||
-    manifest.schemaVersion !== 1 ||
-    manifest.apiVersion !== 2 ||
+    manifest.schemaVersion !== PLUGIN_MANIFEST_SCHEMA_VERSION ||
+    manifest.apiVersion !== PLUGIN_API_VERSION ||
     manifest.target !== "frontend" ||
     typeof manifest.id !== "string" ||
     typeof manifest.name !== "string" ||

@@ -1792,8 +1792,16 @@
           "providers"
         ],
         "properties": {
-          "schemaVersion": { "type": "integer", "const": 1 },
-          "apiVersion": { "type": "integer", "const": 2 },
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1,
+            "description": "Plugin manifest format generation."
+          },
+          "apiVersion": {
+            "type": "integer",
+            "const": 1,
+            "description": "Breaking-compatibility generation of the host/plugin API; package releases use SemVer separately."
+          },
           "id": { "type": "string" },
           "name": { "type": "string" },
           "version": { "type": "string" },

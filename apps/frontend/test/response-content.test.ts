@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { PluginPackageManifest } from "@apinteract/plugin-api";
+import {
+  PLUGIN_API_VERSION,
+  PLUGIN_MANIFEST_SCHEMA_VERSION,
+  type PluginPackageManifest,
+} from "@apinteract/plugin-api";
 import type { FrontendPluginModule } from "@apinteract/plugin-api/frontend";
 
 import { createFrontendPluginRuntime } from "../src/app/plugins/frontend-plugin-host";
@@ -138,8 +142,8 @@ describe("response content analysis", () => {
 
   it("allows a contributed presenter to override a built-in deliberately", () => {
     const yamlManifest: PluginPackageManifest<"frontend"> = {
-      schemaVersion: 1,
-      apiVersion: 2,
+      schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
+      apiVersion: PLUGIN_API_VERSION,
       id: "example.yaml-response",
       name: "YAML response support",
       version: "1.0.0",
@@ -216,8 +220,8 @@ describe("response content analysis", () => {
   it("does not expose partial frontend contributions after a conflict", () => {
     const runtime = createFrontendPluginRuntime();
     const manifest: PluginPackageManifest<"frontend"> = {
-      schemaVersion: 1,
-      apiVersion: 2,
+      schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
+      apiVersion: PLUGIN_API_VERSION,
       id: "example.atomic",
       name: "Atomic example",
       version: "1.0.0",

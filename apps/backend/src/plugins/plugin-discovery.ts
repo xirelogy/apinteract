@@ -3,10 +3,12 @@ import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type {
-  PluginPackageManifest,
-  PluginSource,
-  PluginTarget,
+import {
+  PLUGIN_API_VERSION,
+  PLUGIN_MANIFEST_SCHEMA_VERSION,
+  type PluginPackageManifest,
+  type PluginSource,
+  type PluginTarget,
 } from "@apinteract/plugin-api";
 import type { BackendPluginModule } from "@apinteract/plugin-api/backend";
 
@@ -200,9 +202,12 @@ export function validatePluginManifest(value: unknown): PluginPackageManifest {
   const manifest = value as Record<string, unknown>;
   const target = manifest.target;
   const providers = manifest.providers;
-  if (manifest.schemaVersion !== 1 || manifest.apiVersion !== 2) {
+  if (
+    manifest.schemaVersion !== PLUGIN_MANIFEST_SCHEMA_VERSION ||
+    manifest.apiVersion !== PLUGIN_API_VERSION
+  ) {
     throw new Error(
-      "Plugin manifest schemaVersion must be 1 and apiVersion must be 2",
+      "Plugin manifest schemaVersion and apiVersion must both be 1",
     );
   }
   if (typeof manifest.id !== "string" || !pluginIdPattern.test(manifest.id)) {
@@ -247,8 +252,8 @@ export function validatePluginManifest(value: unknown): PluginPackageManifest {
     throw new Error("Plugin manifest has invalid providers");
   }
   return {
-    schemaVersion: 1,
-    apiVersion: 2,
+    schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
+    apiVersion: PLUGIN_API_VERSION,
     id: manifest.id,
     name: manifest.name,
     version: manifest.version,

@@ -2,12 +2,20 @@ export type PluginTarget = "frontend" | "backend";
 
 export type PluginSource = "built-in" | "user";
 
+/** Current JSON manifest format generation accepted by plugin hosts. */
+export const PLUGIN_MANIFEST_SCHEMA_VERSION = 1;
+
+/** Current executable host/plugin compatibility generation. */
+export const PLUGIN_API_VERSION = 1;
+
 /** Identifies one installable plugin package and its single execution target. */
 export interface PluginPackageManifest<
   TTarget extends PluginTarget = PluginTarget,
 > {
-  readonly schemaVersion: 1;
-  readonly apiVersion: 2;
+  /** Selects the JSON manifest format independently of the executable API. */
+  readonly schemaVersion: typeof PLUGIN_MANIFEST_SCHEMA_VERSION;
+  /** Selects one breaking-compatibility generation of the host/plugin API. */
+  readonly apiVersion: typeof PLUGIN_API_VERSION;
   readonly id: string;
   readonly name: string;
   readonly version: string;
