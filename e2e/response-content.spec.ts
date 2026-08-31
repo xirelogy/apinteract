@@ -56,6 +56,38 @@ test("displays structured, isolated, image, and binary responses", async ({
     .click();
   await expect(rawJson).toBeVisible();
   await expect(structuredJson).toBeHidden();
+  const rawEditorBox = await page
+    .locator(".body-preview .response-code-viewer")
+    .boundingBox();
+  expect(rawEditorBox).not.toBeNull();
+  expect(Math.abs(rawEditorBox!.x - structuredEditorBox!.x)).toBeLessThan(3);
+  expect(Math.abs(rawEditorBox!.y - structuredEditorBox!.y)).toBeLessThan(3);
+  expect(
+    Math.abs(
+      rawEditorBox!.x +
+        rawEditorBox!.width -
+        (structuredEditorBox!.x + structuredEditorBox!.width),
+    ),
+  ).toBeLessThan(3);
+  expect(
+    Math.abs(
+      rawEditorBox!.y +
+        rawEditorBox!.height -
+        (structuredEditorBox!.y + structuredEditorBox!.height),
+    ),
+  ).toBeLessThan(3);
+  await responseTabs.getByRole("tab", { name: /Headers/u }).click();
+  const headerPadding = await page
+    .locator(".response-headers")
+    .evaluate((node) => {
+      const style = window.getComputedStyle(node);
+      return {
+        top: Number.parseFloat(style.paddingTop),
+        bottom: Number.parseFloat(style.paddingBottom),
+      };
+    });
+  expect(headerPadding.top).toBeGreaterThan(0);
+  expect(Math.abs(headerPadding.top - headerPadding.bottom)).toBeLessThan(1);
 
   await sendFixtureRequest(page, "/response/xml");
   await page
