@@ -2502,6 +2502,8 @@
   flex: 1 1 auto;
   flex-direction: column;
   margin-top: var(--space-4);
+  margin-inline: calc(-1 * var(--focus-outline-clearance));
+  padding-inline: var(--focus-outline-clearance);
   padding-top: var(--space-3);
   padding-bottom: var(--space-1);
   overflow: hidden;
@@ -2564,7 +2566,7 @@
 }
 
 .import-file-picker:focus-within .import-file-button {
-  outline: var(--focus-outline);
+  outline: var(--focus-outline-width) solid var(--focus);
   outline-offset: var(--focus-outline-offset);
 }
 
