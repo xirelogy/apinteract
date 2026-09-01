@@ -1,0 +1,10 @@
+configVersion: 1
+cache:
+  path: /cache
+  retentionMs: 900000
+targetPolicy:
+  # The isolated verification target is a sibling container on a private
+  # Compose network. Loopback and link-local targets remain hard-denied.
+  privateNetworkAccess: allow
+  allowCidrs: []
+  denyCidrs: []

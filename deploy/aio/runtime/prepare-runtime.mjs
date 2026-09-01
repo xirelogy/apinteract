@@ -45,6 +45,20 @@ export const DEFAULT_PROXY_CONFIGURATION = Object.freeze({
   },
   cache: {
     path: "/cache",
+    retentionMs: 15 * 60 * 1000,
+  },
+  limits: {
+    maxMetadataBytes: 1_048_576,
+    maxRequestHeaderCount: 1_024,
+    maxRequestBodyBytes: 786_432,
+    maxResponseBodyBytes: 1_073_741_824,
+    maxCacheBytesPerPrincipal: 2_147_483_648,
+    maxConcurrentExecutionsPerPrincipal: 16,
+  },
+  targetPolicy: {
+    privateNetworkAccess: "deny",
+    allowCidrs: [],
+    denyCidrs: [],
   },
 });
 
@@ -245,6 +259,8 @@ function validateProxyConfigurationKeys(configuration) {
     "configVersion",
     "server",
     "cache",
+    "limits",
+    "targetPolicy",
     "principals",
   ]);
   requireKnownKeys(
@@ -255,7 +271,24 @@ function validateProxyConfigurationKeys(configuration) {
   requireKnownKeys(
     recordOrEmpty(configuration.cache, "config.cache"),
     "config.cache",
-    ["path"],
+    ["path", "retentionMs"],
+  );
+  requireKnownKeys(
+    recordOrEmpty(configuration.limits, "config.limits"),
+    "config.limits",
+    [
+      "maxMetadataBytes",
+      "maxRequestHeaderCount",
+      "maxRequestBodyBytes",
+      "maxResponseBodyBytes",
+      "maxCacheBytesPerPrincipal",
+      "maxConcurrentExecutionsPerPrincipal",
+    ],
+  );
+  requireKnownKeys(
+    recordOrEmpty(configuration.targetPolicy, "config.targetPolicy"),
+    "config.targetPolicy",
+    ["privateNetworkAccess", "allowCidrs", "denyCidrs"],
   );
   if (configuration.principals !== undefined) {
     if (!Array.isArray(configuration.principals)) {

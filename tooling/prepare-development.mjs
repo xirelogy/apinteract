@@ -94,6 +94,11 @@ function proxyConfiguration() {
     cache: {
       path: resolve(runtimeRoot, "cache", "proxy"),
     },
+    targetPolicy: {
+      privateNetworkAccess: "allow",
+      allowCidrs: [],
+      denyCidrs: [],
+    },
     principals: [
       {
         id: "development-backend",

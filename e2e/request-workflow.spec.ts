@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
+import { hostname } from "node:os";
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
+
+const targetOrigin = `http://${hostname()}:8090`;
 
 test("creates, restores, and sends the first workspace request", async ({
   page,
@@ -70,9 +73,7 @@ test("creates, restores, and sends the first workspace request", async ({
     .getByLabel("Name", { exact: true })
     .fill(environmentName);
   await environmentEditor.getByLabel("Variable name 1").fill("base_url");
-  await environmentEditor
-    .getByLabel("Variable value 1")
-    .fill("http://127.0.0.1:8090");
+  await environmentEditor.getByLabel("Variable value 1").fill(targetOrigin);
   await environmentEditor.getByLabel("Variable name 2").fill("source");
   await environmentEditor
     .getByLabel("Variable value 2")
@@ -180,9 +181,7 @@ test("creates, restores, and sends the first workspace request", async ({
     page.locator('.url-template-input [data-variable-name="base_url"]'),
   ).toHaveAttribute("data-preview-status", "resolved");
   await inspectTemplateAt(page, "Request path", 3);
-  await expect(page.getByRole("tooltip")).toContainText(
-    "http://127.0.0.1:8090",
-  );
+  await expect(page.getByRole("tooltip")).toContainText(targetOrigin);
   await selectMenuOption(page, "HTTP method", "POST");
   await page.getByLabel("Query name 1").fill("source");
   await page.getByLabel("Query value 1").fill("<<source>>");
@@ -360,7 +359,7 @@ test("creates, restores, and sends the first workspace request", async ({
       `Scratch ${suffix}`,
     );
   }
-  await page.getByLabel("Target URL").fill("http://127.0.0.1:8090/hello");
+  await page.getByLabel("Target URL").fill(`${targetOrigin}/hello`);
   await page.getByRole("button", { name: `Close Scratch ${suffix}` }).click();
   const discardDialog = page.getByRole("dialog", {
     name: "Discard changes?",

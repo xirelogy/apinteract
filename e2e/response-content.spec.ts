@@ -1,4 +1,8 @@
+import { hostname } from "node:os";
+
 import { expect, test, type Page } from "@playwright/test";
+
+const targetOrigin = `http://${hostname()}:8090`;
 
 test("displays structured, isolated, image, and binary responses", async ({
   page,
@@ -200,7 +204,7 @@ async function createWorkspace(page: Page, name: string): Promise<void> {
 
 /** Executes one fixture endpoint and waits for its terminal response. */
 async function sendFixtureRequest(page: Page, path: string): Promise<void> {
-  await page.getByLabel("Target URL").fill(`http://127.0.0.1:8090${path}`);
+  await page.getByLabel("Target URL").fill(`${targetOrigin}${path}`);
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByRole("status")).toHaveText("In progress");
   await expect(page.locator(".status-code")).toHaveText("200");

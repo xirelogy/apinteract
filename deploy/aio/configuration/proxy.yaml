@@ -1,3 +1,8 @@
 configVersion: 1
 cache:
   path: /cache
+  retentionMs: 900000
+targetPolicy:
+  privateNetworkAccess: deny
+  allowCidrs: []
+  denyCidrs: []

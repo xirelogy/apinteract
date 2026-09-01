@@ -14,7 +14,7 @@
     }
   },
   "scripts": {
-    "generate": "openapi-typescript ../../docs/backend-api/openapi.json -o src/backend.generated.ts && openapi-typescript ../../docs/proxy-api/openapi.json -o src/proxy.generated.ts && prettier --write \"src/*.generated.ts\"",
+    "generate": "openapi-typescript ../../docs/backend-api/openapi.json -o src/backend.generated.ts && openapi-typescript ../../docs/proxy-api/openapi.json -o src/proxy.generated.ts && node ../../tooling/generate-proxy-runtime-contract.mjs ../../docs/proxy-api/openapi.json ../../apps/proxy/src/transport/proxy-runtime.generated.ts && prettier --write \"src/*.generated.ts\" \"../../apps/proxy/src/transport/proxy-runtime.generated.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

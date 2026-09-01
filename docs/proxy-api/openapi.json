@@ -60,14 +60,36 @@
     "cookieJar": false,
     "responseBodyRepresentation": "HTTP transfer coding removed; content encoding preserved."
   },
+  "x-apinteract-target-policy": {
+    "resolution": "The proxy resolves every target hostname, validates every candidate address, and pins one approved address into the connection while retaining the original hostname for Host and TLS verification.",
+    "hardDeniedAddressClasses": [
+      "loopback",
+      "link-local",
+      "unspecified",
+      "multicast",
+      "non-unicast special-use"
+    ],
+    "administratorPrecedence": [
+      "hard deny",
+      "deny CIDRs",
+      "allow CIDRs",
+      "private-network access mode",
+      "public destination allow"
+    ],
+    "dnsRebinding": "All returned A and AAAA addresses must pass policy. The HTTP client cannot perform a second unvalidated resolution."
+  },
   "x-apinteract-error-codes": {
     "proxy": [
       "proxy_capacity_exceeded",
+      "target_policy_denied",
       "request_body_limit_exceeded",
+      "request_metadata_invalid",
+      "request_validation_failed",
       "response_body_limit_exceeded",
       "cache_write_failed",
       "execution_cancelled",
-      "execution_state_conflict"
+      "execution_state_conflict",
+      "internal_proxy_error"
     ],
     "network": [
       "dns_resolution_failed",
@@ -77,7 +99,8 @@
       "tls_handshake_failed",
       "response_header_timeout",
       "response_idle_timeout",
-      "total_timeout"
+      "total_timeout",
+      "target_request_failed"
     ],
     "http_protocol": [
       "malformed_http_response",
@@ -147,7 +170,7 @@
         "tags": ["Proxy executions"],
         "operationId": "createProxyExecution",
         "summary": "Create an HTTP execution session",
-        "description": "Creates a transient execution owned by the authenticated backend principal. Ownership is derived exclusively from the bearer token and cannot be supplied or changed by the client. A rotated token mapped to the same principal may access the session. Idempotency keys are scoped to the principal and retained until the execution is released or expires.",
+        "description": "Creates a transient execution owned by the authenticated backend principal. Ownership is derived exclusively from the bearer token and cannot be supplied or changed by the client. Idempotency keys are scoped to the principal and retained until the execution is released or expires.",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"

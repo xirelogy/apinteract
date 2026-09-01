@@ -36,7 +36,9 @@ try {
     await buildFrontend();
   }
 
-  startProcess("fixture", ["exec", "node", "tooling/run-http-fixture.mjs"]);
+  startProcess("fixture", ["exec", "node", "tooling/run-http-fixture.mjs"], {
+    APINTERACT_FIXTURE_HOST: "0.0.0.0",
+  });
   await waitForUrl("http://127.0.0.1:8090/hello");
 
   startProcess("proxy", [
@@ -117,6 +119,11 @@ async function prepareRuntime() {
         configVersion: 1,
         server: { host: "127.0.0.1", port: 8081 },
         cache: { path: resolve(runtimeRoot, "proxy-cache") },
+        targetPolicy: {
+          privateNetworkAccess: "allow",
+          allowCidrs: [],
+          denyCidrs: [],
+        },
         principals: [
           {
             id: "browser-test-backend",
@@ -188,10 +195,11 @@ async function initializeAdministrator() {
   );
 }
 
-/** Starts one long-running component and treats an early exit as fatal. */
-function startProcess(name, arguments_) {
+/** Starts one long-running component with scoped environment overrides. */
+function startProcess(name, arguments_, environment = {}) {
   const child = spawn("pnpm", arguments_, {
     cwd: repositoryRoot,
+    env: { ...process.env, ...environment },
     stdio: "inherit",
   });
   children.push(child);

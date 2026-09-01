@@ -1,5 +1,7 @@
 services:
   apinteract:
+    volumes:
+      - ./proxy.verify.yaml:/etc/apinteract/proxy.yaml:ro
     depends_on:
       target:
         condition: service_started

@@ -87,7 +87,9 @@ state is limited to:
 The initializer generates a random local bearer credential, writes it with
 owner-only permissions, and places the same value into effective backend and
 proxy configuration. The credential is not included in the image,
-administrator configuration, logs, or persistent data.
+administrator configuration, logs, or persistent data. The effective proxy
+configuration is generated at `/run/apinteract/proxy.yaml`; administrator
+input remains read-only at `/etc/apinteract/proxy.yaml` when mounted.
 
 s6 stops the backend before the proxy, allowing the backend to stop accepting
 new work and close its resources before the data plane is terminated.
@@ -142,7 +144,10 @@ The initializer always owns these AIO-specific values:
 
 This prevents an administrator file from exposing the internal proxy or
 replacing its runtime-owned identity. Other supported backend storage,
-session, origin, and proxy cache settings merge over the packaged defaults.
+session, origin, proxy cache, resource-limit, and outbound target-policy
+settings merge over the packaged defaults. Private and unique-local targets are
+denied by default. Set `targetPolicy.privateNetworkAccess` to `allow` for LAN or
+sibling-container targets; loopback and link-local targets remain denied.
 
 ## Persistent Data And Backup
 

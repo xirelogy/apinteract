@@ -108,9 +108,10 @@ asdk.request.body.setText(
 ### Read and change the URL
 
 Read the current URL with `asdk.request.url.get()` and replace it with
-`asdk.request.setUrl(value)`. APInteract checks a changed URL again
-before sending the request. In particular, the normal SSRF, redirect, target,
-and origin policies still apply.
+`asdk.request.setUrl(value)`. APInteract checks a changed URL again before
+sending the request. The proxy resolves every final hostname, applies its
+loopback, link-local, private-network, and administrator CIDR policy, and pins
+an approved address into the connection. Redirects remain manual.
 
 Changing the target origin is a separate permission. A script cannot use a
 request mutation to bypass an administrator's network policy.
@@ -268,8 +269,8 @@ The scripting environment does not provide:
 - access to backend services, proxy credentials, sessions, or host objects.
 
 The request sent by APInteract is the only outbound network operation. Because
-a pre-request script can change that request, the backend applies its full
-target and SSRF policy after every script.
+a pre-request script can change that request, the final materialized URL is
+still subject to the proxy's full target and SSRF policy after every script.
 
 ## Script errors
 

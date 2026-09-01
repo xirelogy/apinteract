@@ -23,14 +23,35 @@ configuration maps each recognized token to a backend principal. A principal
 represents an authorized backend instance and is distinct from an APInteract
 application user.
 
+Operators should configure a high-entropy bearer token, protect the proxy
+configuration with restrictive filesystem permissions, and keep the matching
+backend credential out of logs and source control. AIO generates and protects
+this credential automatically. Separately deployed proxies should follow the
+complete [bearer authentication configuration](configuration.md#bearer-authentication).
+
 The proxy derives execution ownership only from that principal; request data
 does not contain an ownership field. Requests authenticated as another
 principal receive the same response as requests for a missing execution. This
 prevents execution identifiers from revealing resources across principals. See
-[proxy authentication configuration](configuration.md).
+[proxy authentication configuration](configuration.md#bearer-authentication).
 
-Bearer credentials do not provide transport confidentiality. Remote proxy
-communication uses TLS.
+Bearer credentials do not provide transport confidentiality. The proxy does not
+currently terminate inbound TLS. Remote deployments must use an external TLS
+terminator and configure the backend with its HTTPS endpoint; AIO traffic stays
+on container loopback.
+
+## Outbound Target Policy
+
+Before opening a socket, the proxy resolves the final HTTP or HTTPS hostname,
+checks every returned address against hard safety rules and administrator CIDR
+policy, and pins one approved address into the connection. The original
+hostname remains authoritative for `Host` and TLS verification. A mixed DNS
+answer containing any denied address is rejected.
+
+Loopback and link-local destinations, including common cloud metadata
+addresses, are always denied. Private-network access is denied by default but
+can be enabled for LAN deployments; explicit deny CIDRs retain precedence. See
+[proxy configuration](configuration.md#outbound-target-policy) for exact rules.
 
 ## TLS And Transport Observations
 
@@ -40,10 +61,11 @@ certificate and hostname. Insecure mode keeps the connection encrypted but
 allows an untrusted, expired, hostname-mismatched, or self-signed target
 certificate.
 
-The proxy can report the actual local and remote socket endpoints, connection
-reuse, negotiated TLS details, verification outcome, and the peer certificate
-chain. `/capabilities` identifies which observations are available to the
-authenticated principal.
+The contract can represent local and remote socket endpoints, connection reuse,
+negotiated TLS details, verification outcome, and the peer certificate chain.
+The current Node transport reports these capability flags as false and omits
+the observations. `/capabilities` is authoritative for what a running proxy can
+provide.
 
 Successful connections carry available observations in the response-head
 frame, before response body frames. DNS, connection, and TLS failures carry
@@ -55,8 +77,10 @@ display without replacing the observed certificate representation.
 ## Response Recovery
 
 The proxy caches response frames until the terminal execution is released or
-expires. If a backend receives frames through sequence `173` and disconnects,
-it resumes without repeating those bytes:
+its configured retention deadline expires. Expiry removes the execution,
+idempotency mapping, quota accounting, and frame file. If a backend receives
+frames through sequence `173` and disconnects before then, it resumes without
+repeating those bytes:
 
 ```http
 GET /executions/{executionId}/response?afterSequence=173

@@ -39,6 +39,13 @@ test("generates matching private AIO component credentials", async () => {
     JSON.stringify({
       configVersion: 1,
       server: { host: "0.0.0.0", port: 9000 },
+      cache: { retentionMs: 30_000 },
+      limits: { maxConcurrentExecutionsPerPrincipal: 4 },
+      targetPolicy: {
+        privateNetworkAccess: "allow",
+        allowCidrs: ["10.20.0.0/16"],
+        denyCidrs: ["10.20.5.0/24"],
+      },
       principals: [{ id: "untrusted", bearerToken: "untrusted" }],
     }),
   );
@@ -67,6 +74,13 @@ test("generates matching private AIO component credentials", async () => {
   assert.equal(prepared.backend.proxy.endpoint, "http://127.0.0.1:8081");
   assert.equal(prepared.proxy.server.host, "127.0.0.1");
   assert.equal(prepared.proxy.server.port, 8081);
+  assert.equal(prepared.proxy.cache.retentionMs, 30_000);
+  assert.equal(prepared.proxy.limits.maxConcurrentExecutionsPerPrincipal, 4);
+  assert.deepEqual(prepared.proxy.targetPolicy, {
+    privateNetworkAccess: "allow",
+    allowCidrs: ["10.20.0.0/16"],
+    denyCidrs: ["10.20.5.0/24"],
+  });
   assert.equal(prepared.proxy.principals[0].id, "aio-backend");
   assert.equal(
     prepared.proxy.principals[0].bearerToken,
@@ -110,6 +124,7 @@ test("uses the published local origin unless an administrator overrides it", asy
 
   assert.equal(prepared.backend.server.publicOrigin, "http://localhost:9980");
   assert.equal(prepared.backend.sessions.secureCookie, false);
+  assert.equal(prepared.proxy.targetPolicy.privateNetworkAccess, "deny");
 });
 
 /** Requires a generated runtime file to remain readable only by its owner. */

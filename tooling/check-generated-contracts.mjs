@@ -3,6 +3,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { generateProxyRuntimeContract } from "./generate-proxy-runtime-contract.mjs";
+
 const root = new URL("../", import.meta.url);
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "apinteract-contracts-"));
 
@@ -37,6 +39,29 @@ try {
         `${generated} is stale. Run pnpm contracts:generate and commit the result.`,
       );
     }
+  }
+
+  const runtimeOutput = join(temporaryDirectory, "proxy.runtime.generated.ts");
+  await generateProxyRuntimeContract(
+    new URL("../docs/proxy-api/openapi.json", import.meta.url),
+    runtimeOutput,
+  );
+  execFileSync("pnpm", ["exec", "prettier", "--write", runtimeOutput], {
+    cwd: root,
+    stdio: "inherit",
+  });
+  if (
+    readFileSync(
+      new URL(
+        "../apps/proxy/src/transport/proxy-runtime.generated.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    ) !== readFileSync(runtimeOutput, "utf8")
+  ) {
+    throw new Error(
+      "apps/proxy/src/transport/proxy-runtime.generated.ts is stale. Run pnpm contracts:generate and commit the result.",
+    );
   }
 
   execFileSync(

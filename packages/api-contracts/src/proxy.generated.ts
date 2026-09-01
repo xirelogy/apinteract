@@ -55,7 +55,7 @@ export interface paths {
     put?: never;
     /**
      * Create an HTTP execution session
-     * @description Creates a transient execution owned by the authenticated backend principal. Ownership is derived exclusively from the bearer token and cannot be supplied or changed by the client. A rotated token mapped to the same principal may access the session. Idempotency keys are scoped to the principal and retained until the execution is released or expires.
+     * @description Creates a transient execution owned by the authenticated backend principal. Ownership is derived exclusively from the bearer token and cannot be supplied or changed by the client. Idempotency keys are scoped to the principal and retained until the execution is released or expires.
      */
     post: operations["createProxyExecution"];
     delete?: never;
