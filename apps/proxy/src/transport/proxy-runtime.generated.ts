@@ -355,19 +355,16 @@ export const proxyRuntimeContract = {
           type: "integer",
           minimum: 1,
           maximum: 600000,
-          default: 10000,
         },
         responseHeaderTimeoutMs: {
           type: "integer",
           minimum: 1,
           maximum: 600000,
-          default: 30000,
         },
         responseIdleTimeoutMs: {
           type: "integer",
           minimum: 1,
           maximum: 600000,
-          default: 30000,
           description:
             "Maximum time between bytes received from the target after its response begins.",
         },
@@ -375,28 +372,24 @@ export const proxyRuntimeContract = {
           type: "integer",
           minimum: 1,
           maximum: 86400000,
-          default: 300000,
           description:
             "Maximum lifetime from execution creation through target completion. Starting at creation also bounds sessions that never begin request-body upload.",
         },
         redirectMode: {
           type: "string",
           const: "manual",
-          default: "manual",
           description:
             "Redirect responses are returned to the backend and are never followed automatically in the MVP.",
         },
         tlsVerification: {
           type: "string",
           enum: ["strict", "insecure"],
-          default: "strict",
           description:
             "Strict verifies the target certificate and hostname. Insecure explicitly disables enforcement of both checks for this execution while retaining TLS encryption. The proxy reports the verification outcome in transport metadata when its transport implementation exposes it.",
         },
         maxResponseBodyBytes: {
           type: "integer",
           minimum: 1,
-          default: 1073741824,
           description:
             "Maximum target response body accepted for this execution. It must not exceed the effective principal capability.",
         },

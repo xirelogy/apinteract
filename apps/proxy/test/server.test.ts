@@ -107,10 +107,11 @@ describe("proxy runtime contract", () => {
     });
   });
 
-  it("does not fill required execution behavior fields from OpenAPI defaults", async () => {
+  it("requires execution behavior fields to be supplied explicitly", async () => {
     const server = await createServer();
     const value = descriptor("https://example.com/");
-    delete (value.request as { behavior?: unknown }).behavior;
+    delete (value.request.behavior as { connectTimeoutMs?: number })
+      .connectTimeoutMs;
 
     const response = await createExecution(
       server,

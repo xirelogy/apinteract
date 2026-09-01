@@ -245,36 +245,23 @@ export interface components {
     } & unknown;
     /** @description Non-header target behavior. Outbound HTTP is HTTP/1.1, cookies are not retained between executions, and content encoding is never automatically decompressed. Transfer coding may be removed by HTTP framing while content-encoded bytes remain unchanged. */
     ExecutionBehavior: {
-      /** @default 10000 */
       connectTimeoutMs: number;
-      /** @default 30000 */
       responseHeaderTimeoutMs: number;
-      /**
-       * @description Maximum time between bytes received from the target after its response begins.
-       * @default 30000
-       */
+      /** @description Maximum time between bytes received from the target after its response begins. */
       responseIdleTimeoutMs: number;
-      /**
-       * @description Maximum lifetime from execution creation through target completion. Starting at creation also bounds sessions that never begin request-body upload.
-       * @default 300000
-       */
+      /** @description Maximum lifetime from execution creation through target completion. Starting at creation also bounds sessions that never begin request-body upload. */
       totalTimeoutMs: number;
       /**
        * @description Redirect responses are returned to the backend and are never followed automatically in the MVP.
-       * @default manual
        * @constant
        */
       redirectMode: "manual";
       /**
        * @description Strict verifies the target certificate and hostname. Insecure explicitly disables enforcement of both checks for this execution while retaining TLS encryption. The proxy reports the verification outcome in transport metadata when its transport implementation exposes it.
-       * @default strict
        * @enum {string}
        */
       tlsVerification: "strict" | "insecure";
-      /**
-       * @description Maximum target response body accepted for this execution. It must not exceed the effective principal capability.
-       * @default 1073741824
-       */
+      /** @description Maximum target response body accepted for this execution. It must not exceed the effective principal capability. */
       maxResponseBodyBytes: number;
     };
     /** @description Transient execution state. Principal identity is intentionally omitted because ownership is derived from authentication and is not client-controlled. */
