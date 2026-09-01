@@ -24,6 +24,11 @@ process.once("SIGINT", () => void stop());
 process.once("SIGTERM", () => void stop());
 
 try {
+  await runProcess("plugin API build", [
+    "--filter",
+    "@apinteract/plugin-api",
+    "build",
+  ]);
   await runProcess("plugin build", ["plugins:build"]);
   await prepareRuntime();
   await initializeAdministrator();

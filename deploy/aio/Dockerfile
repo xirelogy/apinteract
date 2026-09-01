@@ -61,8 +61,8 @@ RUN --mount=type=cache,id=apinteract-pnpm-store,target=/opt/pnpm/store \
       cp "${plugin}/package.json" "${plugin}/apinteract-plugin.json" "${target}/"; \
       cp -R "${plugin}/dist" "${target}/dist"; \
     done \
-    && pnpm --offline --filter @apinteract/backend deploy --prod --no-optional /artifacts/backend \
-    && pnpm --offline --filter @apinteract/proxy deploy --prod --no-optional /artifacts/proxy
+    && pnpm --prefer-offline --filter @apinteract/backend deploy --prod --no-optional /artifacts/backend \
+    && pnpm --prefer-offline --filter @apinteract/proxy deploy --prod --no-optional /artifacts/proxy
 
 FROM ${NODE_IMAGE} AS runtime
 

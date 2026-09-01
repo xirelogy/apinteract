@@ -6,18 +6,19 @@
   "exports": {
     ".": {
       "types": "./src/core.ts",
-      "default": "./src/core.ts"
+      "default": "./dist/core.js"
     },
     "./frontend": {
       "types": "./src/frontend.ts",
-      "default": "./src/frontend.ts"
+      "default": "./dist/frontend.js"
     },
     "./backend": {
       "types": "./src/backend.ts",
-      "default": "./src/backend.ts"
+      "default": "./dist/backend.js"
     }
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

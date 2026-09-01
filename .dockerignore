@@ -11,6 +11,8 @@
 !apps/**
 !packages/
 !packages/**
+!plugins/
+!plugins/**
 !docs/
 !docs/**
 !tooling/
