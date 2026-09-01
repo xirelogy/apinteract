@@ -11,42 +11,59 @@ proprietary services.
 
 ## Project Status
 
-APInteract currently has an architectural walking skeleton spanning its Vue
-frontend, backend, local request proxy, authentication, persistence, and
-request-execution path. It is not release-ready; product capabilities and
-operational hardening remain under active development.
+APInteract is an actively developed product preparing for its
+`0.1.0-alpha1` public release. Its core self-hosted workflow is operational
+across the Vue frontend, backend, request proxy, authentication, persistence,
+scripting, and outbound request-execution boundaries.
 
-## Direction
+The project is usable from source today. During active alpha development,
+interfaces, deployment guidance, and upgrade expectations may continue to
+evolve and will be documented with each release.
 
-The planned product will:
+## Current Capabilities
 
-- support REST API workflows in its first release;
-- organize requests into nested collections and workspaces;
-- provide workspace environments, variables, secret values, and variable
+APInteract currently:
+
+- supports REST API request design, execution, and response inspection;
+- organizes versioned requests into nested collections and workspaces;
+- provides workspace environments, variables, secret values, and variable
   aliases;
-- support inherited collection headers and versioned requests;
-- provide sandboxed pre-request and post-response scripting through a small
+- resolves inherited collection headers and scoped variables explicitly;
+- runs sandboxed pre-request and post-response scripts through a documented
   SDK;
-- support multiple users with simple username and password authentication for
-  the initial release;
-- run in containers for straightforward self-hosting; and
-- provide responsive interfaces for desktop and mobile devices.
+- supports username-and-password authentication and isolated user sessions;
+- imports OpenAPI and HAR request definitions through built-in plugins;
+- presents raw, structured, HTML, image, and binary response content through
+  bounded viewers; and
+- runs as a verified all-in-one container for straightforward self-hosting.
 
-## Planned Architecture
+## Run APInteract
 
-APInteract is expected to consist of three independently defined components:
+Docker Engine with the Compose plugin is required. From the repository root:
+
+```sh
+deploy/scripts/aio up
+deploy/scripts/aio init-admin
+```
+
+Open `http://localhost:8080/web-ui/` and sign in with the administrator account
+you created. See the [all-in-one deployment guide](deploy/aio/README.md) for
+configuration, storage, networking, backup, and verification guidance.
+
+## Architecture
+
+APInteract consists of three independently defined components:
 
 - a Vue 3 and TypeScript frontend built with Vite;
 - a Node.js backend for business logic, persistence, orchestration, and
   scripting; and
 - a proxy service that performs outbound API requests.
 
-The frontend and backend will communicate through WebSocket. Proxy nodes will
-offer a small REST API and may run with the backend or as separate services.
-SQLite will be the default database, with PostgreSQL and MySQL support designed
-behind a portable persistence boundary.
-
-The detailed boundaries and contracts are still under design.
+The frontend and backend communicate through WebSocket. The backend reaches
+the proxy through its authenticated REST API whether both components share the
+all-in-one container or are deployed across a network boundary. SQLite is the
+current persistent store; database-specific behavior remains behind a portable
+persistence boundary.
 
 The public [architecture overview](docs/architecture/README.md) describes
 component ownership, request execution, communication planes, and deployment
@@ -55,6 +72,13 @@ topologies.
 The source-built [all-in-one deployment](deploy/aio/README.md) packages the
 compiled frontend, backend, and loopback proxy in one container for local
 self-hosting and full-boundary verification.
+
+The `0.1.0-alpha1` release is expected to support the all-in-one topology only.
+A standalone proxy image is planned shortly afterward for deployments that
+need outbound requests to originate from another network. In that topology,
+the frontend and backend still run from the all-in-one image, while the backend
+is configured with the remote proxy's address and bearer credential instead of
+using its container-local proxy.
 
 ## Documentation
 
@@ -65,10 +89,10 @@ between APInteract components. The proxy component's canonical
 [OpenAPI JSON document](docs/proxy-api/openapi.json) currently defines the
 `0.1.1` backend-to-proxy execution protocol.
 
-The planned
+The proposed
 [authentication provider plugin contract](docs/plugins/authentication-providers.md)
-defines how additional login methods integrate without replacing APInteract
-users, authorization, or session management.
+describes how additional login methods can integrate without replacing
+APInteract users, authorization, or session management.
 
 ## License
 

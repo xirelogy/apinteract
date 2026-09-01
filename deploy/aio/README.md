@@ -1,12 +1,15 @@
 # All-In-One Deployment
 
 The APInteract all-in-one image contains the compiled frontend, backend, and a
-loopback-only request proxy. It is intended for one-host self-managed
-deployments and for verifying the complete component boundary before a
-release image is published.
+loopback-only request proxy. It is the maintained one-host deployment for
+self-managed APInteract installations and verifies the same public component
+boundaries used by separated deployments.
 
-The image is not yet a release artifact. Build and runtime verification should
-be completed on every supported target architecture before production use.
+APInteract is actively developed toward its `0.1.0-alpha1` public release. The
+image can currently be built from source; published registry images and
+cross-version upgrade guarantees are not yet available. Run the complete build
+and runtime verification before relying on a source revision in a persistent
+deployment.
 
 ## Start APInteract
 

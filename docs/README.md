@@ -23,9 +23,7 @@ This directory contains the public documentation for APInteract.
 - [All-in-one deployment](../deploy/aio/README.md): source-built container
   operation, storage, configuration, and verification.
 
-Security, user, and contributor documentation follows as those designs become
-stable enough to publish.
-
-APInteract is in active walking-skeleton implementation. Published documents
-distinguish implemented contracts from proposals that remain subject to
-change.
+APInteract is actively developed toward its `0.1.0-alpha1` public release.
+Published documents describe current product behavior and mark proposed or
+evolving contracts explicitly. Additional security, operations, user, and
+contributor guides will be added as their release processes mature.

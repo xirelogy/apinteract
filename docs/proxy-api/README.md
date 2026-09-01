@@ -26,8 +26,9 @@ application user.
 Operators should configure a high-entropy bearer token, protect the proxy
 configuration with restrictive filesystem permissions, and keep the matching
 backend credential out of logs and source control. AIO generates and protects
-this credential automatically. Separately deployed proxies should follow the
-complete [bearer authentication configuration](configuration.md#bearer-authentication).
+this credential automatically. When standalone proxy packaging becomes
+available, its operators should follow the complete
+[bearer authentication configuration](configuration.md#bearer-authentication).
 
 The proxy derives execution ownership only from that principal; request data
 does not contain an ownership field. Requests authenticated as another
@@ -36,9 +37,9 @@ prevents execution identifiers from revealing resources across principals. See
 [proxy authentication configuration](configuration.md#bearer-authentication).
 
 Bearer credentials do not provide transport confidentiality. The proxy does not
-currently terminate inbound TLS. Remote deployments must use an external TLS
-terminator and configure the backend with its HTTPS endpoint; AIO traffic stays
-on container loopback.
+currently terminate inbound TLS. Once supported, remote deployments must use an
+external TLS terminator and configure the backend with its HTTPS endpoint; AIO
+traffic stays on container loopback.
 
 ## Outbound Target Policy
 
