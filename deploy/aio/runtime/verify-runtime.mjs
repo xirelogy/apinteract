@@ -113,14 +113,24 @@ async function verifyPublicPwa() {
   await requirePublicAsset(`${root}icons/apple-touch-icon.png`, "image/png");
 
   const worker = await requirePublicAsset(`${root}sw.js`, "javascript");
+  const routeRegistrations = worker.body.match(/registerRoute/gu)?.length ?? 0;
+  const cacheFirstStrategies =
+    worker.body.match(/\.CacheFirst\(/gu)?.length ?? 0;
+  const networkFirstStrategies =
+    worker.body.match(/\.NetworkFirst\(/gu)?.length ?? 0;
   if (
     worker.headers.get("cache-control") !== "no-cache" ||
     !worker.body.includes("auth|api|ws") ||
-    /NetworkFirst|StaleWhileRevalidate|CacheFirst/u.test(worker.body)
+    !worker.body.includes("[a-f0-9]{64}") ||
+    !worker.body.includes("catalog\\.json") ||
+    !worker.body.includes("apinteract-frontend-plugins") ||
+    !worker.body.includes("apinteract-plugin-catalog") ||
+    routeRegistrations !== 3 ||
+    cacheFirstStrategies !== 1 ||
+    networkFirstStrategies !== 1 ||
+    worker.body.includes("StaleWhileRevalidate")
   ) {
-    throw new Error(
-      "The AIO service worker violates the static-only cache policy",
-    );
+    throw new Error("The AIO service worker violates the bounded cache policy");
   }
 }
 
