@@ -94,6 +94,10 @@ export function createProxyServer(
         // The canonical schemas use additionalProperties=false as rejection,
         // not as permission to silently mutate untrusted request bodies.
         removeAdditional: false,
+        // OpenAPI defaults are descriptive metadata; required request fields
+        // must be supplied explicitly so omission cannot acquire hidden or
+        // future dynamic behavior.
+        useDefaults: false,
       },
     },
     logger: {
@@ -164,7 +168,7 @@ export function createProxyServer(
     componentVersion: PROXY_APPLICATION_VERSION,
   }));
 
-  server.addHook("preHandler", async (request, reply) => {
+  server.addHook("onRequest", async (request, reply) => {
     if (request.url === "/health") {
       return;
     }

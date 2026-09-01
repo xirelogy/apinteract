@@ -41,6 +41,24 @@ afterEach(async () => {
 });
 
 describe("proxy runtime contract", () => {
+  it("authenticates before parsing malformed public input", async () => {
+    const server = await createServer();
+    const response = await server.inject({
+      method: "POST",
+      url: "/executions",
+      headers: {
+        "content-type": "application/json",
+      },
+      payload: '{"unexpected":',
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json<ProblemBody>()).toMatchObject({
+      category: "proxy",
+      code: "authentication_required",
+    });
+  });
+
   it("reports the same effective limits that execution routes enforce", async () => {
     const server = await createServer({
       maxConcurrentExecutionsPerPrincipal: 2,
@@ -87,6 +105,21 @@ describe("proxy runtime contract", () => {
       category: "proxy",
       code: "request_validation_failed",
     });
+  });
+
+  it("does not fill required execution behavior fields from OpenAPI defaults", async () => {
+    const server = await createServer();
+    const value = descriptor("https://example.com/");
+    delete (value.request as { behavior?: unknown }).behavior;
+
+    const response = await createExecution(
+      server,
+      "required-behavior-01",
+      value,
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json<ProblemBody>().code).toBe("request_validation_failed");
   });
 
   it("rejects forbidden transport headers through custom OpenAPI semantics", async () => {
