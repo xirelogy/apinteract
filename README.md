@@ -11,10 +11,10 @@ proprietary services.
 
 ## Project Status
 
-APInteract is an actively developed product preparing for its
-`0.1.0-alpha1` public release. Its core self-hosted workflow is operational
-across the Vue frontend, backend, request proxy, authentication, persistence,
-scripting, and outbound request-execution boundaries.
+APInteract is an actively developed product in public alpha. Its core
+self-hosted workflow is operational across the Vue frontend, backend, request
+proxy, authentication, persistence, scripting, and outbound request-execution
+boundaries.
 
 The project is usable from source today. During active alpha development,
 interfaces, deployment guidance, and upgrade expectations may continue to
@@ -46,7 +46,7 @@ from this source repository:
 ```yaml
 services:
   apinteract:
-    image: apinteract/aio:0.1.0-alpha1
+    image: xirelogy/apinteract:VERSION
     restart: unless-stopped
     ports:
       - 127.0.0.1:8080:8080
@@ -59,6 +59,10 @@ volumes:
   apinteract-cache:
 ```
 
+Replace `VERSION` with a published Docker image version without the Git tag's
+leading `v`. The `latest` alias is available, but a version or immutable digest
+keeps deployments predictable.
+
 Start the service and create its first administrator:
 
 ```sh
@@ -66,11 +70,10 @@ docker compose up -d
 docker compose exec --user 10001:10001 apinteract apinteract-admin init
 ```
 
-The image must already be available locally or replaced with the registry
-reference for the release being deployed. Open the configured public origin
-followed by `/web-ui/` and sign in. See the [all-in-one deployment
-guide](deploy/aio/README.md) for public-origin configuration, reverse-proxy
-networking, storage, backup, and verification guidance.
+Open the configured public origin followed by `/web-ui/` and sign in. See the
+[all-in-one deployment guide](deploy/aio/README.md) for immutable digest
+pinning, public-origin configuration, reverse-proxy networking, storage,
+backup, and verification guidance.
 
 ## Develop From Source
 
@@ -109,7 +112,7 @@ The source-built [all-in-one deployment](deploy/aio/README.md) packages the
 compiled frontend, backend, and loopback proxy in one container for local
 self-hosting and full-boundary verification.
 
-The `0.1.0-alpha1` release is expected to support the all-in-one topology only.
+The current alpha release supports the all-in-one topology only.
 A standalone proxy image is planned shortly afterward for deployments that
 need outbound requests to originate from another network. In that topology,
 the frontend and backend still run from the all-in-one image, while the backend

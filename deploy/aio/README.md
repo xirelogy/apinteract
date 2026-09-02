@@ -5,11 +5,9 @@ loopback-only request proxy. It is the maintained one-host deployment for
 self-managed APInteract installations and verifies the same public component
 boundaries used by separated deployments.
 
-APInteract is actively developed toward its `0.1.0-alpha1` public release. The
-image can currently be built from source; published registry images and
-cross-version upgrade guarantees are not yet available. Run the complete build
-and runtime verification before relying on a source revision in a persistent
-deployment.
+APInteract is actively developed, and cross-version upgrade guarantees are not
+yet available. Version-tagged AIO releases are built, verified, signed, and
+published by GitHub Actions to `docker.io/xirelogy/apinteract`.
 
 ## Start APInteract
 
@@ -19,7 +17,7 @@ use a small Compose file independent of the source repository:
 ```yaml
 services:
   apinteract:
-    image: apinteract/aio:0.1.0-alpha1
+    image: xirelogy/apinteract:VERSION
     restart: unless-stopped
     ports:
       - 127.0.0.1:8080:8080
@@ -32,17 +30,21 @@ volumes:
   apinteract-cache:
 ```
 
+Replace `VERSION` with a published image version without the Git tag's leading
+`v`.
+
 Start it with:
 
 ```sh
 docker compose up -d
 ```
 
-The image must already be available locally or replaced with the registry
-reference for the release being deployed. The loopback binding above is a
-safe default for placing a TLS-terminating reverse proxy in front of
-APInteract. Opening the port beyond loopback requires an appropriate ingress
-and an HTTPS `publicOrigin`; see [Network Exposure](#network-exposure).
+The loopback binding above is a safe default for placing a TLS-terminating
+reverse proxy in front of APInteract. Opening the port beyond loopback requires
+an appropriate ingress and an HTTPS `publicOrigin`; see
+[Network Exposure](#network-exposure). Pinning an immutable digest provides the
+strongest deployment identity; `latest` follows every release tag, including
+pre-releases.
 
 Open the configured public origin followed by `/web-ui/` and sign in with the
 administrator you create. Opening the origin root redirects to that canonical
@@ -176,7 +178,7 @@ docker run -d --name apinteract \
   -v apinteract-data:/data \
   -v apinteract-cache:/cache \
   -v /etc/apinteract/backend.yaml:/etc/apinteract/backend.yaml:ro \
-  apinteract/aio:0.1.0-alpha1
+  xirelogy/apinteract:VERSION
 ```
 
 If you use an ingress or reverse proxy, publish the container only on a

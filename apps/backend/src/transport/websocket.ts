@@ -63,6 +63,7 @@ const WEBSOCKET_HEARTBEAT_INTERVAL_MS = 25_000;
 /** Installs a native ping/pong watchdog and returns its cleanup function. */
 export function installWebSocketHeartbeat(socket: WebSocket): () => void {
   let alive = true;
+  /** Records the peer response required before the next heartbeat interval. */
   const markAlive = (): void => {
     alive = true;
   };

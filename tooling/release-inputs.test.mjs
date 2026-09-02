@@ -18,6 +18,10 @@ const administratorHelper = await readFile(
   new URL("../deploy/aio/apinteract-admin", import.meta.url),
   "utf8",
 );
+const publishWorkflow = await readFile(
+  new URL("../.github/workflows/publish-aio.yml", import.meta.url),
+  "utf8",
+);
 
 test("pins release build inputs and verifies downloaded supervisor archives", () => {
   assert.match(
@@ -80,4 +84,34 @@ test("exposes the gated image operation as a release build", () => {
   assert.match(releaseScript, /The AIO build or runtime verification failed/);
   assert.match(releaseScript, /trivy-image\.json[^]* 0/);
   assert.match(releaseScript, /trivy-image-gate\.json[^]* 1 --ignore-unfixed/);
+});
+
+test("publishes only validated version tags as immutable and latest images", () => {
+  assert.match(
+    publishWorkflow,
+    /^\s+tags:\s*\n\s+- "v\[0-9\]\+\.\[0-9\]\+\.\[0-9\]\+"\s*\n\s+- "v\[0-9\]\+\.\[0-9\]\+\.\[0-9\]\+-\[0-9A-Za-z\]\+"$/m,
+  );
+  assert.match(
+    publishWorkflow,
+    /\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\(-\[0-9A-Za-z\]\+\)\?\$/,
+  );
+  assert.match(publishWorkflow, /deploy\/scripts\/release build/);
+  assert.match(publishWorkflow, /run: pnpm check/);
+  assert.match(publishWorkflow, /image="docker\.io\/xirelogy\/apinteract"/);
+  assert.match(publishWorkflow, /secrets\.DOCKERHUB_TOKEN/);
+  assert.match(publishWorkflow, /docker login docker\.io/);
+  assert.doesNotMatch(publishWorkflow, /packages:\s*write/);
+  assert.match(publishWorkflow, /Refuse to overwrite an immutable version tag/);
+  assert.match(publishWorkflow, /docker push "\$\{IMAGE\}:\$\{VERSION\}"/);
+  assert.match(publishWorkflow, /docker push "\$\{IMAGE\}:latest"/);
+  assert.match(publishWorkflow, /cosign sign --yes/);
+  assert.match(publishWorkflow, /--type slsaprovenance/);
+  assert.match(publishWorkflow, /--type spdxjson/);
+  assert.doesNotMatch(publishWorkflow, /uses:\s+[^\s]+@v\d+/);
+  for (const action of ["checkout", "setup-node", "upload-artifact"]) {
+    assert.match(
+      publishWorkflow,
+      new RegExp(`uses: actions/${action}@[a-f0-9]{40}`),
+    );
+  }
 });

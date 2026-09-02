@@ -200,7 +200,7 @@ deployment separates only the proxy: the compiled frontend and backend remain
 in the all-in-one image, and the backend is configured with the remote proxy's
 address and bearer credential instead of its container-local proxy.
 
-The `0.1.0-alpha1` release supports only the all-in-one topology. Standalone
+The current alpha release supports only the all-in-one topology. Standalone
 proxy packaging and the corresponding all-in-one remote-proxy configuration
 are not yet supported and are planned for a near-term release. Remote
 communication will require external TLS termination as described by the proxy

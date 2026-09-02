@@ -1,0 +1,171 @@
+name: Publish AIO image
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-[0-9A-Za-z]+"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-aio
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      DOCKER_CONFIG: ${{ runner.temp }}/apinteract-docker
+      COSIGN_IMAGE: ghcr.io/sigstore/cosign/cosign:v2.4.1
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Install the declared pnpm version
+        run: |
+          corepack enable
+          corepack install --global pnpm@8.15.0
+
+      - name: Validate release tag and manifests
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+)?$ ]]; then
+            printf 'Tag must look like v0.1.0, v0.1.0-alpha1, or v0.1.0-rc2.\n' >&2
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          image="docker.io/xirelogy/apinteract"
+          node tooling/release-version.mjs check "${version}"
+          printf 'version=%s\nimage=%s\n' "${version}" "${image}" >>"${GITHUB_OUTPUT}"
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run repository checks
+        run: pnpm check
+
+      - name: Authenticate to Docker Hub
+        env:
+          REGISTRY_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${REGISTRY_TOKEN}" ]]; then
+            printf 'The DOCKERHUB_TOKEN repository secret is required.\n' >&2
+            exit 1
+          fi
+          mkdir -p "${DOCKER_CONFIG}"
+          printf '%s' "${REGISTRY_TOKEN}" | docker login docker.io \
+            --username xirelogy --password-stdin
+
+      - name: Refuse to overwrite an immutable version tag
+        env:
+          IMAGE: ${{ steps.release.outputs.image }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          if docker buildx imagetools inspect "${IMAGE}:${VERSION}" >/dev/null 2>&1; then
+            printf 'Registry tag already exists and will not be overwritten: %s:%s\n' \
+              "${IMAGE}" "${VERSION}" >&2
+            exit 1
+          fi
+
+      - name: Run release gates and verify the AIO runtime
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: deploy/scripts/release build "${VERSION}"
+
+      - name: Publish immutable version tag
+        id: publish
+        env:
+          IMAGE: ${{ steps.release.outputs.image }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          local_image="apinteract/aio:${VERSION}"
+          docker image tag "${local_image}" "${IMAGE}:${VERSION}"
+          docker push "${IMAGE}:${VERSION}"
+          digest="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" \
+            --format '{{.Manifest.Digest}}')"
+          if [[ ! "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            printf 'The published version tag has no valid immutable digest.\n' >&2
+            exit 1
+          fi
+          printf 'digest=%s\nreference=%s@%s\n' \
+            "${digest}" "${IMAGE}" "${digest}" >>"${GITHUB_OUTPUT}"
+
+      - name: Create SLSA provenance predicate
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          node tooling/generate-release-provenance.mjs \
+            "var/release/${VERSION}/provenance.json" \
+            "${GITHUB_REPOSITORY}" \
+            "${GITHUB_REF}" \
+            "${GITHUB_SHA}" \
+            "${VERSION}" \
+            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}"
+
+      - name: Sign and attest the published digest
+        env:
+          REFERENCE: ${{ steps.publish.outputs.reference }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          evidence="$(pwd)/var/release/${VERSION}"
+          cosign() {
+            docker run --rm \
+              --env ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              --env ACTIONS_ID_TOKEN_REQUEST_URL \
+              --env COSIGN_EXPERIMENTAL=1 \
+              --env DOCKER_CONFIG=/docker-config \
+              --volume "${DOCKER_CONFIG}:/docker-config:ro" \
+              --volume "${evidence}:/evidence:ro" \
+              "${COSIGN_IMAGE}" "$@"
+          }
+          cosign sign --yes "${REFERENCE}"
+          cosign attest --yes --type slsaprovenance \
+            --predicate /evidence/provenance.json "${REFERENCE}"
+          cosign attest --yes --type spdxjson \
+            --predicate /evidence/image.spdx.json "${REFERENCE}"
+
+      - name: Advance latest to the signed release
+        env:
+          EXPECTED_DIGEST: ${{ steps.publish.outputs.digest }}
+          IMAGE: ${{ steps.release.outputs.image }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker image tag "apinteract/aio:${VERSION}" "${IMAGE}:latest"
+          docker push "${IMAGE}:latest"
+          latest_digest="$(docker buildx imagetools inspect "${IMAGE}:latest" \
+            --format '{{.Manifest.Digest}}')"
+          if [[ "${latest_digest}" != "${EXPECTED_DIGEST}" ]]; then
+            printf 'The latest tag does not resolve to the signed release digest.\n' >&2
+            exit 1
+          fi
+
+      - name: Upload release evidence
+        if: ${{ always() && steps.release.outputs.version != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aio-release-${{ steps.release.outputs.version }}
+          path: |
+            var/release/${{ steps.release.outputs.version }}/
+            !var/release/${{ steps.release.outputs.version }}/*.tar
+          if-no-files-found: error
+          retention-days: 30

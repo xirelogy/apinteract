@@ -25,7 +25,7 @@ This directory contains the public documentation for APInteract.
 - [Release supply-chain verification](../deploy/release/README.md): dependency,
   secret, license, image, SBOM, signature, and provenance release gates.
 
-APInteract is actively developed toward its `0.1.0-alpha1` public release.
+APInteract is actively developed as a public alpha.
 Published documents describe current product behavior and mark proposed or
 evolving contracts explicitly. Additional security, operations, user, and
 contributor guides will be added as their release processes mature.
