@@ -147,6 +147,7 @@ COPY --from=build --chown=apinteract:apinteract /workspace/apps/frontend/dist /o
 COPY --from=build --chown=apinteract:apinteract /artifacts/plugins /opt/apinteract/plugins
 COPY --chown=root:root LICENSE /opt/apinteract/LICENSE
 COPY --chown=apinteract:apinteract deploy/aio/runtime /opt/apinteract/runtime
+COPY --chmod=0755 deploy/aio/apinteract-admin /usr/local/bin/apinteract-admin
 COPY deploy/aio/s6-rc.d /etc/s6-overlay/s6-rc.d
 
 RUN chmod 0755 \

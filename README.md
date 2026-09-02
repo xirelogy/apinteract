@@ -39,16 +39,52 @@ APInteract currently:
 
 ## Run APInteract
 
-Docker Engine with the Compose plugin is required. From the repository root:
+The maintained deployment is the all-in-one container. Docker Engine with the
+Compose plugin is required. A production Compose file can be kept separately
+from this source repository:
 
-```sh
-deploy/scripts/aio up
-deploy/scripts/aio init-admin
+```yaml
+services:
+  apinteract:
+    image: apinteract/aio:0.1.0-alpha1
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:8080:8080
+    volumes:
+      - apinteract-data:/data
+      - apinteract-cache:/cache
+
+volumes:
+  apinteract-data:
+  apinteract-cache:
 ```
 
-Open `http://localhost:8080/web-ui/` and sign in with the administrator account
-you created. See the [all-in-one deployment guide](deploy/aio/README.md) for
-configuration, storage, networking, backup, and verification guidance.
+Start the service and create its first administrator:
+
+```sh
+docker compose up -d
+docker compose exec --user 10001:10001 apinteract apinteract-admin init
+```
+
+The image must already be available locally or replaced with the registry
+reference for the release being deployed. Open the configured public origin
+followed by `/web-ui/` and sign in. See the [all-in-one deployment
+guide](deploy/aio/README.md) for public-origin configuration, reverse-proxy
+networking, storage, backup, and verification guidance.
+
+## Develop From Source
+
+Contributor workflows use a separate development container with mounted source
+and a Vite frontend. They are intentionally distinct from the production AIO
+deployment:
+
+```sh
+deploy/scripts/development bootstrap
+deploy/scripts/development dev
+```
+
+See the [development container guide](deploy/development/README.md) for tests,
+browser checks, and local development settings.
 
 ## Architecture
 

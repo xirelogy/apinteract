@@ -13,25 +13,63 @@ deployment.
 
 ## Start APInteract
 
-Docker Engine with the Compose plugin is required. From the repository root:
+Docker Engine with the Compose plugin is required. A production deployment can
+use a small Compose file independent of the source repository:
 
-```sh
-deploy/scripts/aio up
-deploy/scripts/aio init-admin
+```yaml
+services:
+  apinteract:
+    image: apinteract/aio:0.1.0-alpha1
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:8080:8080
+    volumes:
+      - apinteract-data:/data
+      - apinteract-cache:/cache
+
+volumes:
+  apinteract-data:
+  apinteract-cache:
 ```
 
-Open `http://localhost:8080/web-ui/` and sign in with the administrator just
-created. Opening `http://localhost:8080/` redirects to that canonical UI path.
+Start it with:
+
+```sh
+docker compose up -d
+```
+
+The image must already be available locally or replaced with the registry
+reference for the release being deployed. The loopback binding above is a
+safe default for placing a TLS-terminating reverse proxy in front of
+APInteract. Opening the port beyond loopback requires an appropriate ingress
+and an HTTPS `publicOrigin`; see [Network Exposure](#network-exposure).
+
+Open the configured public origin followed by `/web-ui/` and sign in with the
+administrator you create. Opening the origin root redirects to that canonical
+UI path.
+
 The administrator command reads the password interactively and does not place
 it in a command argument or environment variable. If an administrator loses
-access, reset the password from the host as a break-glass operation:
-
-```sh
-deploy/scripts/aio reset-password admin
-```
+access, reset the password as a break-glass operation.
 
 The reset also revokes the user's active sessions. `init-admin` remains safe to
 rerun and does not replace credentials after the instance is initialized.
+
+In a productive deployment, run the concise helper shipped in the image.
+Replace `apinteract` with the container name or ID assigned by your deployment:
+
+```sh
+docker exec -it --user 10001:10001 apinteract apinteract-admin init
+```
+
+The command reads the password interactively from the terminal. It only
+creates the first administrator; it does not replace an initialized account.
+Reset an existing account with:
+
+```sh
+docker exec -it --user 10001:10001 apinteract \
+  apinteract-admin reset-password USER
+```
 
 The maintained wrapper provides these operations:
 
@@ -118,6 +156,34 @@ Direct cleartext access is permitted only for a loopback public origin. A
 deployment exposed through a reverse proxy should terminate TLS and provide a
 backend administrator configuration whose `publicOrigin` is the exact HTTPS
 origin shown to browsers.
+
+For an image-only deployment, provide that value through the administrator
+configuration mount (no source checkout is required). Create a host file such
+as `/etc/apinteract/backend.yaml`:
+
+```yaml
+configVersion: 1
+server:
+  publicOrigin: https://apinteract.example.com
+```
+
+Mount it read-only when creating the container:
+
+```sh
+docker run -d --name apinteract \
+  --restart unless-stopped \
+  -p 127.0.0.1:8080:8080 \
+  -v apinteract-data:/data \
+  -v apinteract-cache:/cache \
+  -v /etc/apinteract/backend.yaml:/etc/apinteract/backend.yaml:ro \
+  apinteract/aio:0.1.0-alpha1
+```
+
+If you use an ingress or reverse proxy, publish the container only on a
+private interface and set `publicOrigin` to the external HTTPS origin. The
+value must not include a path (for example, use `https://example.com`, not
+`https://example.com/apinteract`). Recreate the container after changing it;
+the effective configuration is generated during startup.
 
 ## Administrator Configuration
 

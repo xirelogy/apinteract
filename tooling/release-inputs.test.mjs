@@ -14,6 +14,10 @@ const trivyIgnorePolicy = await readFile(
   new URL("../deploy/release/trivy-ignore.yaml", import.meta.url),
   "utf8",
 );
+const administratorHelper = await readFile(
+  new URL("../deploy/aio/apinteract-admin", import.meta.url),
+  "utf8",
+);
 
 test("pins release build inputs and verifies downloaded supervisor archives", () => {
   assert.match(
@@ -25,6 +29,9 @@ test("pins release build inputs and verifies downloaded supervisor archives", ()
   assert.match(dockerfile, /^ARG S6_OVERLAY_AARCH64_SHA256=[a-f0-9]{64}$/m);
   assert.match(dockerfile, /sha256sum --check --strict/);
   assert.match(dockerfile, /\/usr\/local\/lib\/node_modules\/npm/);
+  assert.match(dockerfile, /COPY --chmod=0755 deploy\/aio\/apinteract-admin/);
+  assert.match(administratorHelper, /admin init/);
+  assert.match(administratorHelper, /admin reset-password/);
 });
 
 test("uses exact scanner versions instead of floating latest tags", () => {

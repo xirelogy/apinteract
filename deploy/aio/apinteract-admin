@@ -1,0 +1,28 @@
+#!/bin/sh
+
+set -eu
+
+usage() {
+  printf '%s\n' \
+    'Usage: apinteract-admin init' \
+    '       apinteract-admin reset-password USER' >&2
+}
+
+command="${1:-}"
+case "${command}" in
+  init)
+    [ "$#" -eq 1 ] || { usage; exit 2; }
+    exec node /opt/apinteract/backend/dist/cli.js admin init \
+      --config /run/apinteract/backend.yaml
+    ;;
+  reset-password)
+    [ "$#" -eq 2 ] || { usage; exit 2; }
+    exec node /opt/apinteract/backend/dist/cli.js admin reset-password \
+      --user "$2" \
+      --config /run/apinteract/backend.yaml
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

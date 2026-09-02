@@ -13,6 +13,9 @@ bounded WebSocket message schemas used by the web frontend.
 - HTTP provides authentication, session refresh, health reporting, and exact
   response-body transfer.
 - WebSocket provides authenticated commands, replies, and execution events.
+- The backend sends a native WebSocket ping every 25 seconds and expects a
+  pong, keeping idle connections alive through common ingress timeouts and
+  terminating peers that no longer respond.
 - Binary payloads are transferred over HTTP rather than embedded in WebSocket
   JSON messages.
 
