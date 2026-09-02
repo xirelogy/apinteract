@@ -53,6 +53,9 @@ pre-publication build.
 
 The release build:
 
+- force-materializes the exact locked dependency graph without running
+  dependency lifecycle scripts, so installed-package audits do not depend on
+  stale or incomplete local pnpm metadata;
 - runs full and production-only pnpm vulnerability audits;
 - inventories full and production dependency licenses and enforces the
   reviewed policy in [`license-policy.json`](license-policy.json);
@@ -70,6 +73,10 @@ The release build:
 Evidence is written to `var/release/0.1.0-alpha1/`, which is ignored by Git. An
 existing evidence directory is never overwritten. Preserve a failed attempt
 for diagnosis or move it before rerunning the gate.
+
+The dependency, license, and source gates run before the image build. A failed
+gate leaves diagnostic evidence but no release image. The image is complete
+only when the command prints `Release image built and verified`.
 
 The resulting approved image remains in the local Docker image store as
 `apinteract/aio:0.1.0-alpha1`. A portable copy is retained at

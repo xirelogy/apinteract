@@ -242,6 +242,10 @@ build_release() {
   local image_archive_name="apinteract-aio-${version}.tar"
   commit="$(git -C "${repository_root}" rev-parse --verify HEAD)"
   tag_state="$(check_tag_state "${version}" "${commit}")"
+
+  printf 'Materializing dependencies from the frozen lockfile...\n'
+  pnpm install --frozen-lockfile --ignore-scripts --force ||
+    die "The frozen dependency installation failed."
   evidence_directory="$(create_evidence_directory "${version}")"
 
   : >"${evidence_directory}/tool-images.txt"
@@ -249,29 +253,48 @@ build_release() {
   pull_tool_image trivy "${trivy_image}" "${evidence_directory}"
   pull_tool_image syft "${syft_image}" "${evidence_directory}"
 
-  pnpm audit --json >"${evidence_directory}/pnpm-audit-all.json"
-  pnpm audit --prod --json >"${evidence_directory}/pnpm-audit-production.json"
+  printf 'Auditing all dependencies...\n'
+  pnpm audit --json >"${evidence_directory}/pnpm-audit-all.json" ||
+    die "The full dependency audit failed. Review ${evidence_directory}/pnpm-audit-all.json."
+  printf 'Auditing production dependencies...\n'
+  pnpm audit --prod --json >"${evidence_directory}/pnpm-audit-production.json" ||
+    die "The production dependency audit failed. Review ${evidence_directory}/pnpm-audit-production.json."
+  printf 'Inventorying all dependency licenses...\n'
   pnpm licenses list --json \
     >"${evidence_directory}/licenses-all.json" \
-    2>"${evidence_directory}/licenses-all.log"
+    2>"${evidence_directory}/licenses-all.log" ||
+    die "The full license inventory failed. Review ${evidence_directory}/licenses-all.log."
+  printf 'Inventorying production dependency licenses...\n'
   pnpm licenses list --prod --json \
     >"${evidence_directory}/licenses-production.json" \
-    2>"${evidence_directory}/licenses-production.log"
+    2>"${evidence_directory}/licenses-production.log" ||
+    die "The production license inventory failed. Review ${evidence_directory}/licenses-production.log."
+  printf 'Enforcing the dependency license policy...\n'
   node "${license_checker}" "${license_policy}" \
     "${evidence_directory}/licenses-all.json"
   node "${license_checker}" "${license_policy}" \
     "${evidence_directory}/licenses-production.json"
 
-  run_gitleaks "${evidence_directory}"
-  run_source_scan "${evidence_directory}"
+  printf 'Scanning Git history for secrets...\n'
+  run_gitleaks "${evidence_directory}" ||
+    die "The Git secret scan failed. Review ${evidence_directory}/gitleaks.json."
+  printf 'Scanning source dependencies and configuration...\n'
+  run_source_scan "${evidence_directory}" ||
+    die "The source scan failed. Review ${evidence_directory}/trivy-source.json."
+  printf 'Generating the source SBOM...\n'
   generate_sbom "dir:/scan" source.spdx.json "${evidence_directory}" \
-    "${repository_root}"
+    "${repository_root}" ||
+    die "Source SBOM generation failed."
 
-  APINTERACT_VERSION="${version}" \
+  printf 'Building and verifying the AIO image...\n'
+  if ! APINTERACT_VERSION="${version}" \
     APINTERACT_SOURCE_COMMIT="${commit}" \
-    "${repository_root}/deploy/aio/verify" 2>&1 |
-    tee "${evidence_directory}/aio-verification.log"
+    "${repository_root}/deploy/aio/verify" 2>&1 | \
+    tee "${evidence_directory}/aio-verification.log"; then
+    die "The AIO build or runtime verification failed. Review ${evidence_directory}/aio-verification.log."
+  fi
 
+  printf 'Retaining and inspecting the verified image...\n'
   docker image tag "${local_image}" "${release_image}"
   local image_id
   local architecture
@@ -284,10 +307,14 @@ build_release() {
   docker image inspect "${release_image}" >"${evidence_directory}/image-inspect.json"
   docker image save --output "${evidence_directory}/${image_archive_name}" \
     "${release_image}"
+  printf 'Scanning the verified image archive...\n'
   run_image_scan "${evidence_directory}/${image_archive_name}" \
-    trivy-image.json "${evidence_directory}"
+    trivy-image.json "${evidence_directory}" ||
+    die "The image scan failed. Review ${evidence_directory}/trivy-image.json."
+  printf 'Generating the image SBOM...\n'
   generate_sbom "docker-archive:/scan/${image_archive_name}" image.spdx.json \
-    "${evidence_directory}" "${evidence_directory}"
+    "${evidence_directory}" "${evidence_directory}" ||
+    die "Image SBOM generation failed."
 
   record_release_manifest "${evidence_directory}" "${version}" "${commit}" \
     "${tag_state}" "${release_image}" "${image_id}" "${architecture}" \

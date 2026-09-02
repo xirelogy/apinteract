@@ -38,10 +38,16 @@ test("exposes the gated image operation as a release build", () => {
   assert.match(releaseScript, /^\s*build\)$/m);
   assert.match(
     releaseScript,
+    /pnpm install --frozen-lockfile --ignore-scripts --force/,
+  );
+  assert.match(
+    releaseScript,
     /local image_archive_name="apinteract-aio-\$\{version\}\.tar"/,
   );
   assert.match(
     releaseScript,
     /docker image save --output "\$\{evidence_directory\}\/\$\{image_archive_name\}"/,
   );
+  assert.match(releaseScript, /Building and verifying the AIO image/);
+  assert.match(releaseScript, /The AIO build or runtime verification failed/);
 });
