@@ -133,6 +133,7 @@ describe("AppHeader", () => {
       "General",
       "Defaults",
       "Plugins",
+      "Versions",
     ]);
     expect(optionTabs[0]?.attributes("aria-selected")).toBe("true");
     expect(optionsDialog.findAll("label").map((label) => label.text())).toEqual(
