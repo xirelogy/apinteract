@@ -64,15 +64,20 @@ The release build:
 - runs the complete isolated AIO runtime verification against that image;
 - scans the same image archive for high or critical vulnerabilities and
   secrets; and
-- emits an SPDX JSON image SBOM, image metadata, tool digests, and checksums.
+- retains that exact Docker image archive and emits an SPDX JSON image SBOM,
+  image metadata, tool digests, and checksums.
 
 Evidence is written to `var/release/0.1.0-alpha1/`, which is ignored by Git. An
 existing evidence directory is never overwritten. Preserve a failed attempt
 for diagnosis or move it before rerunning the gate.
 
 The resulting approved image remains in the local Docker image store as
-`apinteract/aio:0.1.0-alpha1`, and the command prints its immutable local image
-ID. Publication is a separate, explicit operator action: this script does not
+`apinteract/aio:0.1.0-alpha1`. A portable copy is retained at
+`var/release/0.1.0-alpha1/apinteract-aio-0.1.0-alpha1.tar`; `docker load` can
+restore the same tag and image ID on another host. The command prints both the
+immutable local image ID and archive path.
+
+Publication is a separate, explicit operator action: this script does not
 authenticate to a registry, push an image, create a Git tag, or sign anything.
 
 ## License Policy

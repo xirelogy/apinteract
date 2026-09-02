@@ -209,12 +209,14 @@ record_release_manifest() {
   local image="$5"
   local image_id="$6"
   local architecture="$7"
+  local image_archive="$8"
   node --input-type=module --eval '
     import { writeFileSync } from "node:fs";
-    const [path, version, commit, tagState, image, imageId, architecture] = process.argv.slice(1);
-    writeFileSync(path, `${JSON.stringify({ version, commit, tag: `v${version}`, tagState, image, imageId, architecture }, null, 2)}\n`);
+    const [path, version, commit, tagState, image, imageId, architecture, imageArchive] = process.argv.slice(1);
+    writeFileSync(path, `${JSON.stringify({ version, commit, tag: `v${version}`, tagState, image, imageId, architecture, imageArchive }, null, 2)}\n`);
   ' "${evidence_directory}/release.json" "${version}" "${commit}" \
-    "${tag_state}" "${image}" "${image_id}" "${architecture}"
+    "${tag_state}" "${image}" "${image_id}" "${architecture}" \
+    "${image_archive}"
 }
 
 write_checksums() {
@@ -237,10 +239,10 @@ build_release() {
   local tag_state
   local evidence_directory
   local release_image="apinteract/aio:${version}"
+  local image_archive_name="apinteract-aio-${version}.tar"
   commit="$(git -C "${repository_root}" rev-parse --verify HEAD)"
   tag_state="$(check_tag_state "${version}" "${commit}")"
   evidence_directory="$(create_evidence_directory "${version}")"
-  release_temporary_directory="$(mktemp -d /tmp/apinteract-release.XXXXXXXX)"
 
   : >"${evidence_directory}/tool-images.txt"
   pull_tool_image gitleaks "${gitleaks_image}" "${evidence_directory}"
@@ -280,18 +282,20 @@ build_release() {
   [[ "$(docker image inspect "${release_image}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" == "${commit}" ]] ||
     die "The built image has an incorrect OCI source revision label."
   docker image inspect "${release_image}" >"${evidence_directory}/image-inspect.json"
-  docker image save --output "${release_temporary_directory}/aio-image.tar" \
+  docker image save --output "${evidence_directory}/${image_archive_name}" \
     "${release_image}"
-  run_image_scan "${release_temporary_directory}/aio-image.tar" \
+  run_image_scan "${evidence_directory}/${image_archive_name}" \
     trivy-image.json "${evidence_directory}"
-  generate_sbom "docker-archive:/scan/aio-image.tar" image.spdx.json \
-    "${evidence_directory}" "${release_temporary_directory}"
+  generate_sbom "docker-archive:/scan/${image_archive_name}" image.spdx.json \
+    "${evidence_directory}" "${evidence_directory}"
 
   record_release_manifest "${evidence_directory}" "${version}" "${commit}" \
-    "${tag_state}" "${release_image}" "${image_id}" "${architecture}"
+    "${tag_state}" "${release_image}" "${image_id}" "${architecture}" \
+    "${image_archive_name}"
   write_checksums "${evidence_directory}"
-  printf 'Release image built and verified: %s (%s)\nEvidence: %s\n' \
-    "${release_image}" "${image_id}" "${evidence_directory}"
+  printf 'Release image built and verified: %s (%s)\nImage archive: %s\nEvidence: %s\n' \
+    "${release_image}" "${image_id}" \
+    "${evidence_directory}/${image_archive_name}" "${evidence_directory}"
 }
 
 read_release_field() {

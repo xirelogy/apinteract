@@ -36,4 +36,12 @@ test("exposes the gated image operation as a release build", () => {
   assert.match(releaseScript, /deploy\/scripts\/release build VERSION/);
   assert.doesNotMatch(releaseScript, /deploy\/scripts\/release check VERSION/);
   assert.match(releaseScript, /^\s*build\)$/m);
+  assert.match(
+    releaseScript,
+    /local image_archive_name="apinteract-aio-\$\{version\}\.tar"/,
+  );
+  assert.match(
+    releaseScript,
+    /docker image save --output "\$\{evidence_directory\}\/\$\{image_archive_name\}"/,
+  );
 });
