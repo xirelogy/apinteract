@@ -18,6 +18,8 @@ gitleaks_image="ghcr.io/gitleaks/gitleaks:v8.24.3"
 trivy_image="aquasec/trivy:0.59.1"
 syft_image="anchore/syft:v1.20.0"
 cosign_image="ghcr.io/sigstore/cosign/cosign:v2.4.1"
+tool_image_pull_attempts=3
+tool_image_pull_retry_delay_seconds=5
 
 # Removes only the private temporary directory created by this invocation.
 cleanup_release_temporary_directory() {
@@ -124,7 +126,19 @@ pull_tool_image() {
   local name="$1"
   local image="$2"
   local evidence_directory="$3"
-  docker pull "${image}"
+  local attempt
+  for ((attempt = 1; attempt <= tool_image_pull_attempts; attempt++)); do
+    if docker pull "${image}"; then
+      break
+    fi
+    if ((attempt == tool_image_pull_attempts)); then
+      die "Failed to pull release tool image after ${tool_image_pull_attempts} attempts: ${image}"
+    fi
+    printf 'Tool image pull failed; retrying %s in %s seconds (attempt %s of %s).\n' \
+      "${image}" "${tool_image_pull_retry_delay_seconds}" \
+      "$((attempt + 1))" "${tool_image_pull_attempts}" >&2
+    sleep "${tool_image_pull_retry_delay_seconds}"
+  done
   local resolved
   resolved="$(docker image inspect "${image}" --format '{{index .RepoDigests 0}}')"
   [[ -n "${resolved}" ]] || die "Could not resolve an immutable digest for ${image}."
@@ -199,12 +213,23 @@ generate_sbom() {
   local output_name="$2"
   local evidence_directory="$3"
   local mount_source="$4"
-  docker run --rm \
+  local output_path="${evidence_directory}/${output_name}"
+  local partial_output_path="${output_path}.partial"
+  local log_path="${output_path%.json}.log"
+  if ! docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "${mount_source}:/scan:ro" \
-    --volume "${evidence_directory}:/reports" \
     "${syft_image}" scan "${source}" \
-    --output "spdx-json=/reports/${output_name}"
+    --output spdx-json >"${partial_output_path}" \
+    2> >(tee "${log_path}" >&2); then
+    return 1
+  fi
+  if [[ ! -s "${partial_output_path}" ]]; then
+    printf 'Syft produced an empty SBOM: %s\n' "${output_name}" | \
+      tee -a "${log_path}" >&2
+    return 1
+  fi
+  mv -- "${partial_output_path}" "${output_path}"
 }
 
 record_release_manifest() {
@@ -290,7 +315,7 @@ build_release() {
   printf 'Generating the source SBOM...\n'
   generate_sbom "dir:/scan" source.spdx.json "${evidence_directory}" \
     "${repository_root}" ||
-    die "Source SBOM generation failed."
+    die "Source SBOM generation failed. Review ${evidence_directory}/source.spdx.log."
 
   # Dependency lifecycle scripts stay disabled until the dependency and source
   # gates above have passed. The repository checks then need the locked native
@@ -334,7 +359,7 @@ build_release() {
   printf 'Generating the image SBOM...\n'
   generate_sbom "docker-archive:/scan/${image_archive_name}" image.spdx.json \
     "${evidence_directory}" "${evidence_directory}" ||
-    die "Image SBOM generation failed."
+    die "Image SBOM generation failed. Review ${evidence_directory}/image.spdx.log."
 
   record_release_manifest "${evidence_directory}" "${version}" "${commit}" \
     "${tag_state}" "${release_image}" "${image_id}" "${architecture}" \

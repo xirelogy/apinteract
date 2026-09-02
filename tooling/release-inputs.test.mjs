@@ -48,6 +48,35 @@ test("uses exact scanner versions instead of floating latest tags", () => {
   }
 });
 
+test("retries transient tool pulls and writes SBOMs atomically", () => {
+  const generateSbomFunction = releaseScript.match(
+    /^generate_sbom\(\) \{[^]*?^\}$/m,
+  );
+  assert.ok(generateSbomFunction);
+  assert.match(releaseScript, /^tool_image_pull_attempts=3$/m);
+  assert.match(
+    releaseScript,
+    /for \(\(attempt = 1; attempt <= tool_image_pull_attempts; attempt\+\+\)\)/,
+  );
+  assert.match(
+    releaseScript,
+    /sleep "\$\{tool_image_pull_retry_delay_seconds\}"/,
+  );
+  assert.match(
+    releaseScript,
+    /--output spdx-json >"\$\{partial_output_path\}"/,
+  );
+  assert.match(releaseScript, /\[\[ ! -s "\$\{partial_output_path\}" \]\]/);
+  assert.match(
+    releaseScript,
+    /mv -- "\$\{partial_output_path\}" "\$\{output_path\}"/,
+  );
+  assert.doesNotMatch(
+    generateSbomFunction[0],
+    /--volume "\$\{evidence_directory\}:\/reports"/,
+  );
+});
+
 test("keeps Trivy exceptions path-scoped and visible in release evidence", () => {
   assert.match(
     releaseScript,

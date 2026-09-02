@@ -18,7 +18,8 @@ version without a leading `v`. The corresponding Git release tag is
 The release host requires Git, Node.js, pnpm, Docker Engine, and network access
 to the package and container registries used by the project. The script runs
 Gitleaks, Trivy, Syft, and Cosign from exact versioned container images and
-records their resolved registry digests with the evidence.
+records their resolved registry digests with the evidence. Tool-image pulls
+retry brief registry failures three times before the gate fails closed.
 
 Run the gate only from a trusted release host. Scanner containers receive
 read-only repository or image-archive mounts; they are not added to the
@@ -79,7 +80,9 @@ The release build:
   the pinned base or affected dependency must then be refreshed;
 - scans the same image archive for secrets; and
 - retains that exact Docker image archive and emits an SPDX JSON image SBOM,
-  image metadata, tool digests, and checksums.
+  image metadata, tool digests, and checksums. SBOM files are moved into place
+  only after Syft succeeds and produces non-empty output; the corresponding
+  `source.spdx.log` and `image.spdx.log` files retain its diagnostics.
 
 Evidence is written to `var/release/VERSION/`, which is ignored by Git. An
 existing evidence directory is never overwritten. Preserve a failed attempt
