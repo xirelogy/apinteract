@@ -74,6 +74,7 @@ const zhHansMessages = {
       general: "常规",
       defaults: "默认值",
       plugins: "插件",
+      versions: "版本",
     },
     plugins: {
       label: "已启用的插件",
@@ -82,6 +83,14 @@ const zhHansMessages = {
       unavailable: "后端插件信息暂时不可用。",
       targets: { frontend: "前端", backend: "后端" },
       sources: { "built-in": "内置", user: "用户" },
+    },
+    versions: {
+      application: "应用程序",
+      proxyApi: "代理 API",
+      loading: "正在加载组件版本…",
+      unavailable: "版本信息暂时不可用。",
+      unknown: "未知",
+      unavailableValue: "不可用",
     },
     displayStyle: {
       label: "显示样式",
@@ -615,6 +624,7 @@ const zhHantMessages = {
       general: "一般",
       defaults: "預設值",
       plugins: "外掛程式",
+      versions: "版本",
     },
     plugins: {
       label: "已啟用的外掛程式",
@@ -623,6 +633,14 @@ const zhHantMessages = {
       unavailable: "後端外掛程式資訊暫時無法使用。",
       targets: { frontend: "前端", backend: "後端" },
       sources: { "built-in": "內建", user: "使用者" },
+    },
+    versions: {
+      application: "應用程式",
+      proxyApi: "代理 API",
+      loading: "正在載入元件版本…",
+      unavailable: "版本資訊暫時無法使用。",
+      unknown: "未知",
+      unavailableValue: "無法使用",
     },
     displayStyle: {
       label: "顯示樣式",

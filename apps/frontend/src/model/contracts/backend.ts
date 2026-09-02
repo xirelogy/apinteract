@@ -1,6 +1,7 @@
 import type { components } from "@apinteract/api-contracts/backend";
 
 export type AccessCredential = components["schemas"]["AccessCredential"];
+export type BackendHealth = components["schemas"]["BackendHealth"];
 export type CurrentSession = components["schemas"]["CurrentSession"];
 export type WorkspaceSummary = components["schemas"]["WorkspaceSummary"];
 export type WorkspaceView = components["schemas"]["WorkspaceView"];

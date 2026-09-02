@@ -44,7 +44,9 @@ const store = useApplicationStore();
 const headerPreferences = useHeaderPreferences();
 const displayStylePreference = useDisplayStylePreference();
 const dateTimeFormatPreference = useDateTimeFormatPreference();
-const activeSection = ref<"general" | "defaults" | "plugins">("general");
+const activeSection = ref<"general" | "defaults" | "plugins" | "versions">(
+  "general",
+);
 const displayStyle = ref<DisplayStyle>("system");
 const dateTimeFormat = ref<DateTimeFormat>("locale");
 const appendingHeaders = ref("");
@@ -96,6 +98,7 @@ watch(
       appendingHeaders.value =
         headerPreferences.appendingHeaderNames.value.join("\n");
       void controller?.loadPlugins();
+      void controller?.loadVersions();
     }
   },
   { immediate: true },
@@ -153,6 +156,9 @@ function selectDateTimeFormat(value: string): void {
             </TabsTrigger>
             <TabsTrigger class="tab-button" value="plugins">
               {{ t("header.optionsSections.plugins") }}
+            </TabsTrigger>
+            <TabsTrigger class="tab-button" value="versions">
+              {{ t("header.optionsSections.versions") }}
             </TabsTrigger>
           </TabsList>
           <TabsPanel value="general" class="account-options-section">
@@ -277,6 +283,35 @@ function selectDateTimeFormat(value: string): void {
                 }}</span>
               </li>
             </ul>
+          </TabsPanel>
+          <TabsPanel value="versions" class="account-options-section">
+            <p v-if="store.versionState === 'loading'" role="status">
+              {{ t("header.versions.loading") }}
+            </p>
+            <p
+              v-else-if="store.versionState === 'unavailable'"
+              class="plugin-list-notice"
+              role="status"
+            >
+              {{ t("header.versions.unavailable") }}
+            </p>
+            <dl v-else class="versions-list">
+              <div class="versions-list-row">
+                <dt>{{ t("header.versions.application") }}</dt>
+                <dd>
+                  {{ store.backendVersion ?? t("header.versions.unknown") }}
+                </dd>
+              </div>
+              <div class="versions-list-row">
+                <dt>{{ t("header.versions.proxyApi") }}</dt>
+                <dd>
+                  {{
+                    store.proxyProtocolVersion ??
+                    t("header.versions.unavailableValue")
+                  }}
+                </dd>
+              </div>
+            </dl>
           </TabsPanel>
         </TabsRoot>
         <footer class="resource-dialog-actions">

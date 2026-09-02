@@ -45,5 +45,8 @@ export const useApplicationStore = defineStore("application", {
     error: null as ApplicationError | null,
     plugins: [] as EnabledPlugin[],
     pluginListState: "idle" as "idle" | "loading" | "ready" | "unavailable",
+    backendVersion: null as string | null,
+    proxyProtocolVersion: null as string | null,
+    versionState: "idle" as "idle" | "loading" | "ready" | "unavailable",
   }),
 });

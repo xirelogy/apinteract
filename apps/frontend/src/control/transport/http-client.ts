@@ -1,5 +1,6 @@
 import type {
   AccessCredential,
+  BackendHealth,
   CurrentSession,
   Problem,
   RequestAttachment,
@@ -25,6 +26,16 @@ export class BackendUnavailableError extends Error {}
  * for browser-cookie exchange and byte-oriented transfers.
  */
 export class BackendHttpClient {
+  /** Reads backend and proxy readiness metadata for the options view. */
+  async health(): Promise<BackendHealth> {
+    const response = await this.#fetch("/health", {});
+    const health = (await response.json()) as BackendHealth;
+    if (!response.ok && response.status < 500) {
+      throw await this.#problem(response);
+    }
+    return health;
+  }
+
   /** Exchanges local-password input for access and refresh credentials. */
   async login(username: string, password: string): Promise<AccessCredential> {
     return this.#request<AccessCredential>("/auth/login", {

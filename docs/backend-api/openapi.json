@@ -63,6 +63,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Backend is not ready; the response includes component versions and dependency checks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackendHealth"
+                }
+              }
+            }
           }
         }
       }
@@ -597,7 +607,7 @@
       "BackendHealth": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["status", "version", "checks"],
+        "required": ["status", "version", "proxyProtocolVersion", "checks"],
         "properties": {
           "status": {
             "type": "string",
@@ -605,6 +615,17 @@
           },
           "version": {
             "type": "string"
+          },
+          "proxyProtocolVersion": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Proxy API protocol version, or null when the proxy health endpoint is unavailable."
           },
           "checks": {
             "type": "object",

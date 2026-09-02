@@ -1,4 +1,5 @@
 import type {
+  BackendHealth,
   CurrentSession,
   RequestAttachment,
 } from "@/model/contracts/backend";
@@ -112,6 +113,11 @@ export class SessionController {
   async login(username: string, password: string): Promise<void> {
     const credential = await this.#http.login(username, password);
     await this.#establish(credential.accessToken, credential.session);
+  }
+
+  /** Loads backend and proxy product versions through the HTTP health endpoint. */
+  async health(): Promise<BackendHealth> {
+    return this.#http.health();
   }
 
   /** Revokes the backend session and clears all local authenticated state. */

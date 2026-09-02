@@ -165,6 +165,20 @@ export class ApplicationController {
     }
   }
 
+  /** Loads backend and proxy versions for the account options dialog. */
+  async loadVersions(): Promise<void> {
+    const store = useApplicationStore();
+    store.versionState = "loading";
+    try {
+      const health = await this.session.health();
+      store.backendVersion = health.version;
+      store.proxyProtocolVersion = health.proxyProtocolVersion;
+      store.versionState = "ready";
+    } catch {
+      store.versionState = "unavailable";
+    }
+  }
+
   /** Logs out and removes request drafts retained for the current local user. */
   async logout(): Promise<void> {
     const userId = useApplicationStore().session?.user.userId ?? null;

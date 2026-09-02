@@ -39,6 +39,28 @@ describe("ProxyClient readiness", () => {
     ).resolves.toBe(false);
   });
 
+  it("returns the proxy protocol version with readiness details", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            status: "ready",
+            apiVersion: "0.1.1",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(
+      new ProxyClient("http://127.0.0.1:8081", "token").healthDetails(),
+    ).resolves.toEqual({
+      ready: true,
+      protocolVersion: "0.1.1",
+    });
+  });
+
   it("uploads a present empty body with a zero-length stream descriptor", async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

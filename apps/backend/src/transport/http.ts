@@ -64,19 +64,32 @@ export async function registerHttpRoutes(
 
   /** Reports backend readiness, including proxy and audit-outbox dependencies. */
   server.get("/health", async (_request, reply) => {
-    const proxyReady = await application.proxy.health();
+    // Keep health checks compatible with lightweight adapters used by callers
+    // while the concrete proxy client exposes version metadata.
+    const proxyHealth =
+      typeof application.proxy.healthDetails === "function"
+        ? await application.proxy.healthDetails()
+        : {
+            ready: await application.proxy.health(),
+            protocolVersion: null,
+          };
+    const proxyReady = proxyHealth.ready;
     const auditReady = (await application.audit.pendingCount()) < 10_000;
     const status = proxyReady && auditReady ? "ready" : "not_ready";
-    return reply.code(status === "ready" ? 200 : 503).send({
-      status,
-      version: BACKEND_APPLICATION_VERSION,
-      checks: {
-        database: "ready",
-        blobs: "ready",
-        proxy: proxyReady ? "ready" : "not_ready",
-        audit: auditReady ? "ready" : "not_ready",
-      },
-    });
+    return reply
+      .code(status === "ready" ? 200 : 503)
+      .header("Cache-Control", "no-store")
+      .send({
+        status,
+        version: BACKEND_APPLICATION_VERSION,
+        proxyProtocolVersion: proxyHealth.protocolVersion,
+        checks: {
+          database: "ready",
+          blobs: "ready",
+          proxy: proxyReady ? "ready" : "not_ready",
+          audit: auditReady ? "ready" : "not_ready",
+        },
+      });
   });
 
   /** Authenticates provider input and issues access plus refresh credentials. */

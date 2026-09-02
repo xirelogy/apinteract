@@ -26,7 +26,14 @@ describe("backend static frontend hosting", () => {
       "self.addEventListener('fetch', () => {});",
     );
     const application = {
-      proxy: { health: () => Promise.resolve(true) },
+      proxy: {
+        health: () => Promise.resolve(true),
+        healthDetails: () =>
+          Promise.resolve({
+            ready: true,
+            protocolVersion: "test-protocol-version",
+          }),
+      },
       audit: {
         pendingCount: () => Promise.resolve(0),
         publishPending: () => Promise.resolve(0),
@@ -131,6 +138,7 @@ describe("backend static frontend hosting", () => {
       expect(health.json()).toMatchObject({
         status: "ready",
         version: BACKEND_APPLICATION_VERSION,
+        proxyProtocolVersion: "test-protocol-version",
       });
 
       const redirect = await server.inject({

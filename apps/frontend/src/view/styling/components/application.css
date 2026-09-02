@@ -2959,6 +2959,32 @@
   color: var(--text-secondary);
 }
 
+.versions-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.versions-list-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+}
+
+.versions-list-row dt {
+  font-weight: 600;
+}
+
+.versions-list-row dd {
+  margin: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
 .plugin-badge {
   width: fit-content;
   padding: 0 var(--space-2);

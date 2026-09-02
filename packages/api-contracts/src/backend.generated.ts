@@ -225,6 +225,8 @@ export interface components {
       /** @enum {string} */
       status: "ready" | "not_ready";
       version: string;
+      /** @description Proxy API protocol version, or null when the proxy health endpoint is unavailable. */
+      proxyProtocolVersion: string | null;
       checks: {
         [key: string]: "ready" | "not_ready";
       };
@@ -1720,6 +1722,15 @@ export interface operations {
     responses: {
       /** @description Backend health state. */
       200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BackendHealth"];
+        };
+      };
+      /** @description Backend is not ready; the response includes component versions and dependency checks. */
+      503: {
         headers: {
           [name: string]: unknown;
         };

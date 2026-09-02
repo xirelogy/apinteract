@@ -38,6 +38,12 @@ export interface ProxyResponseSink {
   complete(value: ResponseComplete): Promise<void>;
 }
 
+/** Readiness and protocol metadata returned by the configured proxy health endpoint. */
+export interface ProxyHealthDetails {
+  readonly ready: boolean;
+  readonly protocolVersion: string | null;
+}
+
 /** A terminal execution failure reported by the proxy data plane. */
 export class ProxyExecutionError extends Error {
   readonly detail: StreamError;
@@ -65,20 +71,32 @@ export class ProxyClient {
 
   /** Reports whether the configured proxy health endpoint is reachable and ready. */
   async health(): Promise<boolean> {
+    return (await this.healthDetails()).ready;
+  }
+
+  /** Reads proxy readiness and protocol version without exposing transport errors. */
+  async healthDetails(): Promise<ProxyHealthDetails> {
     try {
       const response = await fetch(`${this.#endpoint}/health`, {
         signal: AbortSignal.timeout(3000),
       });
-      if (!response.ok) {
-        return false;
-      }
       const health = (await response.json()) as {
         readonly status?: unknown;
         readonly apiVersion?: unknown;
       };
-      return health.status === "ready" && health.apiVersion === "0.1.1";
+      return {
+        ready:
+          response.ok &&
+          health.status === "ready" &&
+          health.apiVersion === "0.1.1",
+        protocolVersion:
+          typeof health.apiVersion === "string" ? health.apiVersion : null,
+      };
     } catch {
-      return false;
+      return {
+        ready: false,
+        protocolVersion: null,
+      };
     }
   }
 

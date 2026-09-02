@@ -5,7 +5,7 @@ import {
   BackendUnavailableError,
 } from "../src/control/transport/http-client";
 
-describe("BackendHttpClient byte transfers", () => {
+describe("BackendHttpClient", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("authorizes and returns exact response bytes", async () => {
@@ -57,6 +57,31 @@ describe("BackendHttpClient byte transfers", () => {
     ).rejects.toMatchObject({
       problem: { code: "execution_body_not_found" },
     });
+  });
+
+  it("returns health metadata even when dependencies make the backend not ready", async () => {
+    const health = {
+      status: "not_ready",
+      version: "test-backend-version",
+      proxyProtocolVersion: null,
+      checks: {
+        database: "ready",
+        blobs: "ready",
+        proxy: "not_ready",
+        audit: "ready",
+      },
+    } as const;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(health), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(new BackendHttpClient().health()).resolves.toEqual(health);
   });
 
   it("uploads exact attachment bytes with percent-encoded metadata", async () => {

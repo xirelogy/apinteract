@@ -75,6 +75,7 @@ export const enUsMessages = {
       general: "General",
       defaults: "Defaults",
       plugins: "Plugins",
+      versions: "Versions",
     },
     plugins: {
       label: "Enabled plugins",
@@ -83,6 +84,14 @@ export const enUsMessages = {
       unavailable: "Backend plugin information is temporarily unavailable.",
       targets: { frontend: "Frontend", backend: "Backend" },
       sources: { "built-in": "Built-in", user: "User" },
+    },
+    versions: {
+      application: "Application",
+      proxyApi: "Proxy API",
+      loading: "Loading component versions…",
+      unavailable: "Version information is temporarily unavailable.",
+      unknown: "Unknown",
+      unavailableValue: "Unavailable",
     },
     displayStyle: {
       label: "Display style",
