@@ -101,6 +101,11 @@ test("publishes only validated version tags as immutable and latest images", () 
   assert.match(publishWorkflow, /secrets\.DOCKERHUB_TOKEN/);
   assert.match(publishWorkflow, /docker login docker\.io/);
   assert.doesNotMatch(publishWorkflow, /packages:\s*write/);
+  assert.doesNotMatch(publishWorkflow, /\$\{\{\s*runner\.temp\s*\}\}/);
+  assert.match(
+    publishWorkflow,
+    /mktemp -d "\$\{RUNNER_TEMP\}\/apinteract-docker\.XXXXXXXX"/,
+  );
   assert.match(publishWorkflow, /Refuse to overwrite an immutable version tag/);
   assert.match(publishWorkflow, /docker push "\$\{IMAGE\}:\$\{VERSION\}"/);
   assert.match(publishWorkflow, /docker push "\$\{IMAGE\}:latest"/);

@@ -20,7 +20,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
-      DOCKER_CONFIG: ${{ runner.temp }}/apinteract-docker
       COSIGN_IMAGE: ghcr.io/sigstore/cosign/cosign:v2.4.1
 
     steps:
@@ -38,6 +37,12 @@ jobs:
         run: |
           corepack enable
           corepack install --global pnpm@8.15.0
+
+      - name: Prepare temporary Docker configuration
+        run: |
+          set -euo pipefail
+          docker_config="$(mktemp -d "${RUNNER_TEMP}/apinteract-docker.XXXXXXXX")"
+          printf 'DOCKER_CONFIG=%s\n' "${docker_config}" >>"${GITHUB_ENV}"
 
       - name: Validate release tag and manifests
         id: release
