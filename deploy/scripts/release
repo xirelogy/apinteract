@@ -1,0 +1,414 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="$(cd -- "${script_directory}/../.." && pwd)"
+license_policy="${repository_root}/deploy/release/license-policy.json"
+license_checker="${repository_root}/tooling/check-release-licenses.mjs"
+local_image="apinteract/aio:local"
+release_temporary_directory=""
+
+cd -- "${repository_root}"
+
+# These exact scanner versions are part of the release procedure. Each run
+# records the registry digest actually used so its evidence remains auditable.
+gitleaks_image="ghcr.io/gitleaks/gitleaks:v8.24.3"
+trivy_image="aquasec/trivy:0.59.1"
+syft_image="anchore/syft:v1.20.0"
+cosign_image="ghcr.io/sigstore/cosign/cosign:v2.4.1"
+
+# Removes only the private temporary directory created by this invocation.
+cleanup_release_temporary_directory() {
+  case "${release_temporary_directory}" in
+    /tmp/apinteract-release.* | /tmp/apinteract-published.*)
+      rm -rf -- "${release_temporary_directory}"
+      ;;
+    "") ;;
+    *)
+      printf 'Refusing to remove unexpected temporary path: %s\n' \
+        "${release_temporary_directory}" >&2
+      ;;
+  esac
+}
+
+trap cleanup_release_temporary_directory EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  deploy/scripts/release check VERSION
+  deploy/scripts/release verify-published IMAGE_REFERENCE VERSION
+
+Commands:
+  check VERSION
+      Audit source dependencies and licenses, scan Git history and repository
+      configuration, build and exercise the release-labelled AIO image, scan
+      that exact image, and emit SBOMs and evidence under var/release/VERSION.
+
+  verify-published IMAGE_REFERENCE VERSION
+      Pull a published image, prove it is the image approved by check, rescan
+      it, and verify its Cosign signature, provenance, and SBOM attestations.
+
+Cosign verification requires either APINTERACT_COSIGN_PUBLIC_KEY or both
+APINTERACT_COSIGN_CERTIFICATE_IDENTITY and
+APINTERACT_COSIGN_CERTIFICATE_OIDC_ISSUER.
+USAGE
+}
+
+die() {
+  printf '%s\n' "$1" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+}
+
+validate_version() {
+  local version="$1"
+  [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+)?$ ]] ||
+    die "VERSION must look like 0.1.0, 0.1.0-alpha1, or 0.1.0-rc2."
+}
+
+require_clean_release_source() {
+  local status
+  status="$(git -C "${repository_root}" status --porcelain --untracked-files=normal)"
+  [[ -z "${status}" ]] ||
+    die "The release check requires a clean worktree. Commit or remove local changes first."
+}
+
+require_release_version() {
+  local expected_version="$1"
+  local package_version
+  package_version="$(node --input-type=module --eval \
+    'import { readFileSync } from "node:fs"; process.stdout.write(JSON.parse(readFileSync("package.json", "utf8")).version);')"
+  [[ "${package_version}" == "${expected_version}" ]] ||
+    die "package.json is ${package_version}; expected release version ${expected_version}."
+}
+
+check_tag_state() {
+  local version="$1"
+  local commit="$2"
+  local tag="v${version}"
+  local tagged_commit
+  if tagged_commit="$(git -C "${repository_root}" rev-list --max-count=1 "${tag}" 2>/dev/null)"; then
+    [[ "${tagged_commit}" == "${commit}" ]] ||
+      die "Existing tag ${tag} does not point to release commit ${commit}."
+    printf '%s' "present"
+  else
+    printf '%s' "absent"
+  fi
+}
+
+create_evidence_directory() {
+  local version="$1"
+  local directory="${repository_root}/var/release/${version}"
+  if [[ -e "${directory}" ]]; then
+    die "Release evidence already exists at ${directory}; preserve or move it before rerunning."
+  fi
+  mkdir -p -- "${directory}"
+  printf '%s' "${directory}"
+}
+
+pull_tool_image() {
+  local name="$1"
+  local image="$2"
+  local evidence_directory="$3"
+  docker pull "${image}"
+  local resolved
+  resolved="$(docker image inspect "${image}" --format '{{index .RepoDigests 0}}')"
+  [[ -n "${resolved}" ]] || die "Could not resolve an immutable digest for ${image}."
+  printf '%s=%s\n' "${name}" "${resolved}" \
+    >>"${evidence_directory}/tool-images.txt"
+}
+
+run_gitleaks() {
+  local evidence_directory="$1"
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    --volume "${repository_root}:/repo:ro" \
+    --volume "${evidence_directory}:/reports" \
+    --workdir /repo \
+    "${gitleaks_image}" detect \
+    --source /repo \
+    --log-opts="--all" \
+    --no-banner \
+    --redact \
+    --report-format json \
+    --report-path /reports/gitleaks.json
+}
+
+run_source_scan() {
+  local evidence_directory="$1"
+  local cache_directory="${repository_root}/var/release-cache/trivy"
+  mkdir -p -- "${cache_directory}"
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    --env TRIVY_CACHE_DIR=/cache \
+    --volume "${cache_directory}:/cache" \
+    --volume "${repository_root}:/repo:ro" \
+    --volume "${evidence_directory}:/reports" \
+    "${trivy_image}" filesystem \
+    --scanners vuln,misconfig \
+    --severity HIGH,CRITICAL \
+    --exit-code 1 \
+    --skip-dirs /repo/var \
+    --format json \
+    --output /reports/trivy-source.json \
+    /repo
+}
+
+run_image_scan() {
+  local image_archive="$1"
+  local report_path="$2"
+  local evidence_directory="$3"
+  local cache_directory="${repository_root}/var/release-cache/trivy"
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    --env TRIVY_CACHE_DIR=/cache \
+    --volume "${cache_directory}:/cache" \
+    --volume "$(dirname -- "${image_archive}"):/image:ro" \
+    --volume "${evidence_directory}:/reports" \
+    "${trivy_image}" image \
+    --input "/image/$(basename -- "${image_archive}")" \
+    --scanners vuln,secret \
+    --severity HIGH,CRITICAL \
+    --exit-code 1 \
+    --format json \
+    --output "/reports/${report_path}"
+}
+
+generate_sbom() {
+  local source="$1"
+  local output_name="$2"
+  local evidence_directory="$3"
+  local mount_source="$4"
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    --volume "${mount_source}:/scan:ro" \
+    --volume "${evidence_directory}:/reports" \
+    "${syft_image}" scan "${source}" \
+    --output "spdx-json=/reports/${output_name}"
+}
+
+record_release_manifest() {
+  local evidence_directory="$1"
+  local version="$2"
+  local commit="$3"
+  local tag_state="$4"
+  local image="$5"
+  local image_id="$6"
+  local architecture="$7"
+  node --input-type=module --eval '
+    import { writeFileSync } from "node:fs";
+    const [path, version, commit, tagState, image, imageId, architecture] = process.argv.slice(1);
+    writeFileSync(path, `${JSON.stringify({ version, commit, tag: `v${version}`, tagState, image, imageId, architecture }, null, 2)}\n`);
+  ' "${evidence_directory}/release.json" "${version}" "${commit}" \
+    "${tag_state}" "${image}" "${image_id}" "${architecture}"
+}
+
+write_checksums() {
+  local evidence_directory="$1"
+  (
+    cd -- "${evidence_directory}"
+    find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 |
+      sort -z |
+      xargs -0 --no-run-if-empty sha256sum >SHA256SUMS
+  )
+}
+
+check_release() {
+  local version="$1"
+  validate_version "${version}"
+  require_clean_release_source
+  require_release_version "${version}"
+
+  local commit
+  local tag_state
+  local evidence_directory
+  local release_image="apinteract/aio:${version}"
+  commit="$(git -C "${repository_root}" rev-parse --verify HEAD)"
+  tag_state="$(check_tag_state "${version}" "${commit}")"
+  evidence_directory="$(create_evidence_directory "${version}")"
+  release_temporary_directory="$(mktemp -d /tmp/apinteract-release.XXXXXXXX)"
+
+  : >"${evidence_directory}/tool-images.txt"
+  pull_tool_image gitleaks "${gitleaks_image}" "${evidence_directory}"
+  pull_tool_image trivy "${trivy_image}" "${evidence_directory}"
+  pull_tool_image syft "${syft_image}" "${evidence_directory}"
+
+  pnpm audit --json >"${evidence_directory}/pnpm-audit-all.json"
+  pnpm audit --prod --json >"${evidence_directory}/pnpm-audit-production.json"
+  pnpm licenses list --json \
+    >"${evidence_directory}/licenses-all.json" \
+    2>"${evidence_directory}/licenses-all.log"
+  pnpm licenses list --prod --json \
+    >"${evidence_directory}/licenses-production.json" \
+    2>"${evidence_directory}/licenses-production.log"
+  node "${license_checker}" "${license_policy}" \
+    "${evidence_directory}/licenses-all.json"
+  node "${license_checker}" "${license_policy}" \
+    "${evidence_directory}/licenses-production.json"
+
+  run_gitleaks "${evidence_directory}"
+  run_source_scan "${evidence_directory}"
+  generate_sbom "dir:/scan" source.spdx.json "${evidence_directory}" \
+    "${repository_root}"
+
+  APINTERACT_VERSION="${version}" \
+    APINTERACT_SOURCE_COMMIT="${commit}" \
+    "${repository_root}/deploy/aio/verify" 2>&1 |
+    tee "${evidence_directory}/aio-verification.log"
+
+  docker image tag "${local_image}" "${release_image}"
+  local image_id
+  local architecture
+  image_id="$(docker image inspect "${release_image}" --format '{{.Id}}')"
+  architecture="$(docker image inspect "${release_image}" --format '{{.Architecture}}')"
+  [[ "$(docker image inspect "${release_image}" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')" == "${version}" ]] ||
+    die "The built image has an incorrect OCI version label."
+  [[ "$(docker image inspect "${release_image}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" == "${commit}" ]] ||
+    die "The built image has an incorrect OCI source revision label."
+  docker image inspect "${release_image}" >"${evidence_directory}/image-inspect.json"
+  docker image save --output "${release_temporary_directory}/aio-image.tar" \
+    "${release_image}"
+  run_image_scan "${release_temporary_directory}/aio-image.tar" \
+    trivy-image.json "${evidence_directory}"
+  generate_sbom "docker-archive:/scan/aio-image.tar" image.spdx.json \
+    "${evidence_directory}" "${release_temporary_directory}"
+
+  record_release_manifest "${evidence_directory}" "${version}" "${commit}" \
+    "${tag_state}" "${release_image}" "${image_id}" "${architecture}"
+  write_checksums "${evidence_directory}"
+  printf 'Release supply-chain check passed. Evidence: %s\n' \
+    "${evidence_directory}"
+}
+
+read_release_field() {
+  local manifest="$1"
+  local field="$2"
+  node --input-type=module --eval '
+    import { readFileSync } from "node:fs";
+    const [path, field] = process.argv.slice(1);
+    const value = JSON.parse(readFileSync(path, "utf8"))[field];
+    if (typeof value !== "string" || value.length === 0) process.exit(1);
+    process.stdout.write(value);
+  ' "${manifest}" "${field}"
+}
+
+run_cosign_verification() {
+  local image_reference="$1"
+  local evidence_directory="$2"
+  local arguments=()
+  local mounts=()
+
+  if [[ -n "${APINTERACT_COSIGN_PUBLIC_KEY:-}" ]]; then
+    local key_path
+    key_path="$(realpath -- "${APINTERACT_COSIGN_PUBLIC_KEY}")"
+    [[ -f "${key_path}" ]] || die "Cosign public key not found: ${key_path}"
+    mounts+=(--volume "$(dirname -- "${key_path}"):/keys:ro")
+    arguments+=(--key "/keys/$(basename -- "${key_path}")")
+  elif [[ -n "${APINTERACT_COSIGN_CERTIFICATE_IDENTITY:-}" && -n "${APINTERACT_COSIGN_CERTIFICATE_OIDC_ISSUER:-}" ]]; then
+    arguments+=(
+      --certificate-identity "${APINTERACT_COSIGN_CERTIFICATE_IDENTITY}"
+      --certificate-oidc-issuer "${APINTERACT_COSIGN_CERTIFICATE_OIDC_ISSUER}"
+    )
+  else
+    die "Configure a Cosign public key or certificate identity and OIDC issuer."
+  fi
+
+  docker run --rm "${mounts[@]}" "${cosign_image}" verify \
+    "${arguments[@]}" --output json "${image_reference}" \
+    >"${evidence_directory}/cosign-signature.json"
+  docker run --rm "${mounts[@]}" "${cosign_image}" verify-attestation \
+    "${arguments[@]}" --type "${APINTERACT_PROVENANCE_TYPE:-slsaprovenance}" \
+    "${image_reference}" \
+    >"${evidence_directory}/cosign-provenance.json"
+  docker run --rm "${mounts[@]}" "${cosign_image}" verify-attestation \
+    "${arguments[@]}" --type "${APINTERACT_SBOM_TYPE:-spdxjson}" \
+    "${image_reference}" \
+    >"${evidence_directory}/cosign-sbom.json"
+}
+
+verify_published() {
+  local image_reference="$1"
+  local version="$2"
+  validate_version "${version}"
+  [[ "${image_reference}" == *@sha256:* ]] ||
+    die "IMAGE_REFERENCE must include its immutable @sha256 digest."
+
+  local check_directory="${repository_root}/var/release/${version}"
+  local manifest="${check_directory}/release.json"
+  [[ -f "${manifest}" ]] ||
+    die "Pre-release evidence is missing: ${manifest}"
+  local evidence_directory="${check_directory}/published"
+  [[ ! -e "${evidence_directory}" ]] ||
+    die "Published verification evidence already exists at ${evidence_directory}."
+  mkdir -p -- "${evidence_directory}"
+
+  release_temporary_directory="$(mktemp -d /tmp/apinteract-published.XXXXXXXX)"
+  : >"${evidence_directory}/tool-images.txt"
+  pull_tool_image trivy "${trivy_image}" "${evidence_directory}"
+  pull_tool_image syft "${syft_image}" "${evidence_directory}"
+  pull_tool_image cosign "${cosign_image}" "${evidence_directory}"
+
+  docker pull "${image_reference}"
+  local expected_image_id
+  local expected_commit
+  local expected_architecture
+  local actual_image_id
+  expected_image_id="$(read_release_field "${manifest}" imageId)"
+  expected_commit="$(read_release_field "${manifest}" commit)"
+  expected_architecture="$(read_release_field "${manifest}" architecture)"
+  actual_image_id="$(docker image inspect "${image_reference}" --format '{{.Id}}')"
+  [[ "${actual_image_id}" == "${expected_image_id}" ]] ||
+    die "Published image config ${actual_image_id} differs from approved ${expected_image_id}."
+  [[ "$(docker image inspect "${image_reference}" --format '{{.Architecture}}')" == "${expected_architecture}" ]] ||
+    die "Published image architecture differs from the approved image."
+  [[ "$(docker image inspect "${image_reference}" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')" == "${version}" ]] ||
+    die "Published image has an incorrect OCI version label."
+  [[ "$(docker image inspect "${image_reference}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" == "${expected_commit}" ]] ||
+    die "Published image has an incorrect OCI source revision label."
+
+  docker image inspect "${image_reference}" \
+    >"${evidence_directory}/image-inspect.json"
+  docker image save --output "${release_temporary_directory}/aio-image.tar" \
+    "${image_reference}"
+  run_image_scan "${release_temporary_directory}/aio-image.tar" \
+    trivy-image.json "${evidence_directory}"
+  generate_sbom "docker-archive:/scan/aio-image.tar" image.spdx.json \
+    "${evidence_directory}" "${release_temporary_directory}"
+  run_cosign_verification "${image_reference}" "${evidence_directory}"
+  write_checksums "${evidence_directory}"
+  printf 'Published release verification passed. Evidence: %s\n' \
+    "${evidence_directory}"
+}
+
+for required_command in git docker node pnpm sha256sum; do
+  require_command "${required_command}"
+done
+
+command_name="${1:-}"
+case "${command_name}" in
+  check)
+    [[ "$#" -eq 2 ]] || {
+      usage
+      exit 2
+    }
+    check_release "$2"
+    ;;
+  verify-published)
+    [[ "$#" -eq 3 ]] || {
+      usage
+      exit 2
+    }
+    verify_published "$2" "$3"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

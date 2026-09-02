@@ -23,7 +23,7 @@
     "lint": "eslint . --max-warnings 0 && stylelint \"apps/frontend/src/**/*.css\"",
     "plugins:build": "pnpm --filter './plugins/**' build",
     "source-docs:check": "node tooling/check-source-documentation.mjs",
-    "test": "pnpm --filter @apinteract/plugin-api build && pnpm -r --if-present test && node --test deploy/aio/runtime/*.test.mjs",
+    "test": "pnpm --filter @apinteract/plugin-api build && pnpm -r --if-present test && node --test deploy/aio/runtime/*.test.mjs tooling/*.test.mjs",
     "test:e2e": "playwright test",
     "typecheck": "pnpm contracts:generate && pnpm -r --if-present typecheck"
   },

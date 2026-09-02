@@ -187,3 +187,8 @@ deploy/scripts/aio verify
 
 Verification uses an isolated Compose project, temporary named volumes, and a
 random high host port. Its cleanup removes only those verification resources.
+
+Before publishing a release image, run the broader
+[release supply-chain verification](../release/README.md). It applies the AIO
+runtime checks to a release-labelled image and retains dependency, secret,
+license, vulnerability, SBOM, and artifact-identity evidence.
