@@ -1,6 +1,6 @@
 import websocket from "@fastify/websocket";
 import type { FastifyInstance } from "fastify";
-import type { RawData } from "ws";
+import type { RawData, WebSocket } from "ws";
 
 import type { Application } from "../bootstrap/application.js";
 import type { BackendConfiguration } from "../config.js";
@@ -57,6 +57,32 @@ interface Command {
   readonly payload: Record<string, unknown>;
 }
 
+/** Sends transport-level pings often enough to keep upgraded connections alive. */
+const WEBSOCKET_HEARTBEAT_INTERVAL_MS = 25_000;
+
+/** Installs a native ping/pong watchdog and returns its cleanup function. */
+export function installWebSocketHeartbeat(socket: WebSocket): () => void {
+  let alive = true;
+  const markAlive = (): void => {
+    alive = true;
+  };
+  const timer = setInterval(() => {
+    if (socket.readyState !== socket.OPEN) return;
+    if (!alive) {
+      socket.terminate();
+      return;
+    }
+    alive = false;
+    socket.ping();
+  }, WEBSOCKET_HEARTBEAT_INTERVAL_MS);
+  timer.unref();
+  socket.on("pong", markAlive);
+  return () => {
+    clearInterval(timer);
+    socket.off("pong", markAlive);
+  };
+}
+
 /**
  * Registers the authenticated frontend control channel.
  *
@@ -83,6 +109,7 @@ export async function registerWebSocketRoute(
       socket.close(1008, "Origin not allowed");
       return;
     }
+    const stopHeartbeat = installWebSocketHeartbeat(socket);
     let identity: SessionIdentity | undefined;
     const authenticationTimeout = setTimeout(() => {
       if (identity === undefined) {
@@ -102,7 +129,10 @@ export async function registerWebSocketRoute(
       }
       void handleMessage(rawDataToText(data));
     });
-    socket.once("close", () => clearTimeout(authenticationTimeout));
+    socket.once("close", () => {
+      stopHeartbeat();
+      clearTimeout(authenticationTimeout);
+    });
 
     /** Validates, authenticates, dispatches, and replies to one control command. */
     const handleMessage = async (text: string): Promise<void> => {
