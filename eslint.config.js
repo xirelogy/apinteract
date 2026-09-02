@@ -12,6 +12,7 @@ export default tseslint.config(
       "**/*.generated.ts",
       "playwright-report/**",
       "test-results/**",
+      "var/**",
     ],
   },
   eslint.configs.recommended,

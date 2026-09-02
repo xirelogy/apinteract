@@ -120,6 +120,17 @@ RUN mkdir -p /etc/ssl/certs \
       /tmp/s6-overlay.sha256 \
     && apt-get purge --yes --auto-remove curl xz-utils \
     && rm -rf /var/lib/apt/lists/* \
+    && rm -rf \
+      /usr/local/lib/node_modules/corepack \
+      /usr/local/lib/node_modules/npm \
+    && rm -f \
+      /usr/local/bin/corepack \
+      /usr/local/bin/npm \
+      /usr/local/bin/npx \
+      /usr/local/bin/pnpm \
+      /usr/local/bin/pnpx \
+      /usr/local/bin/yarn \
+      /usr/local/bin/yarnpkg \
     && groupadd --gid 10001 apinteract \
     && useradd --uid 10001 --gid apinteract --no-create-home \
       --home-dir /nonexistent --shell /usr/sbin/nologin apinteract \

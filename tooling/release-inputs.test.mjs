@@ -24,6 +24,7 @@ test("pins release build inputs and verifies downloaded supervisor archives", ()
   assert.match(dockerfile, /^ARG S6_OVERLAY_X86_64_SHA256=[a-f0-9]{64}$/m);
   assert.match(dockerfile, /^ARG S6_OVERLAY_AARCH64_SHA256=[a-f0-9]{64}$/m);
   assert.match(dockerfile, /sha256sum --check --strict/);
+  assert.match(dockerfile, /\/usr\/local\/lib\/node_modules\/npm/);
 });
 
 test("uses exact scanner versions instead of floating latest tags", () => {
@@ -70,4 +71,6 @@ test("exposes the gated image operation as a release build", () => {
   );
   assert.match(releaseScript, /Building and verifying the AIO image/);
   assert.match(releaseScript, /The AIO build or runtime verification failed/);
+  assert.match(releaseScript, /trivy-image\.json[^]* 0/);
+  assert.match(releaseScript, /trivy-image-gate\.json[^]* 1 --ignore-unfixed/);
 });

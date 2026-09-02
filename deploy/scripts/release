@@ -170,10 +170,13 @@ run_source_scan() {
     /repo
 }
 
+# Writes one image scan report; remaining arguments select Trivy gate filters.
 run_image_scan() {
   local image_archive="$1"
   local report_path="$2"
   local evidence_directory="$3"
+  local exit_code="$4"
+  shift 4
   local cache_directory="${repository_root}/var/release-cache/trivy"
   docker run --rm \
     --user "$(id -u):$(id -g)" \
@@ -185,7 +188,8 @@ run_image_scan() {
     --input "/image/$(basename -- "${image_archive}")" \
     --scanners vuln,secret \
     --severity HIGH,CRITICAL \
-    --exit-code 1 \
+    --exit-code "${exit_code}" \
+    "$@" \
     --format json \
     --output "/reports/${report_path}"
 }
@@ -309,10 +313,14 @@ build_release() {
   docker image inspect "${release_image}" >"${evidence_directory}/image-inspect.json"
   docker image save --output "${evidence_directory}/${image_archive_name}" \
     "${release_image}"
-  printf 'Scanning the verified image archive...\n'
+  printf 'Recording all high and critical image findings...\n'
   run_image_scan "${evidence_directory}/${image_archive_name}" \
-    trivy-image.json "${evidence_directory}" ||
-    die "The image scan failed. Review ${evidence_directory}/trivy-image.json."
+    trivy-image.json "${evidence_directory}" 0 ||
+    die "The full image scan failed. Review ${evidence_directory}/trivy-image.json."
+  printf 'Gating on fixable high and critical image findings...\n'
+  run_image_scan "${evidence_directory}/${image_archive_name}" \
+    trivy-image-gate.json "${evidence_directory}" 1 --ignore-unfixed ||
+    die "The image vulnerability gate failed. Review ${evidence_directory}/trivy-image-gate.json."
   printf 'Generating the image SBOM...\n'
   generate_sbom "docker-archive:/scan/${image_archive_name}" image.spdx.json \
     "${evidence_directory}" "${evidence_directory}" ||
@@ -418,7 +426,9 @@ verify_published() {
   docker image save --output "${release_temporary_directory}/aio-image.tar" \
     "${image_reference}"
   run_image_scan "${release_temporary_directory}/aio-image.tar" \
-    trivy-image.json "${evidence_directory}"
+    trivy-image.json "${evidence_directory}" 0
+  run_image_scan "${release_temporary_directory}/aio-image.tar" \
+    trivy-image-gate.json "${evidence_directory}" 1 --ignore-unfixed
   generate_sbom "docker-archive:/scan/aio-image.tar" image.spdx.json \
     "${evidence_directory}" "${release_temporary_directory}"
   run_cosign_verification "${image_reference}" "${evidence_directory}"

@@ -65,8 +65,11 @@ The release build:
 - emits an SPDX JSON source SBOM;
 - builds the AIO image with exact version and source-revision labels;
 - runs the complete isolated AIO runtime verification against that image;
-- scans the same image archive for high or critical vulnerabilities and
-  secrets; and
+- records all high or critical image findings, including findings for which
+  the pinned distribution currently provides no fix;
+- fails when a high or critical image finding has an available fix, ensuring
+  the pinned base or affected dependency must then be refreshed;
+- scans the same image archive for secrets; and
 - retains that exact Docker image archive and emits an SPDX JSON image SBOM,
   image metadata, tool digests, and checksums.
 
