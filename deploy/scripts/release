@@ -41,7 +41,7 @@ usage() {
   cat <<'USAGE'
 Usage:
   deploy/scripts/release prepare VERSION
-  deploy/scripts/release check VERSION
+  deploy/scripts/release build VERSION
   deploy/scripts/release verify-published IMAGE_REFERENCE VERSION
 
 Commands:
@@ -49,14 +49,14 @@ Commands:
       Update the product package manifests and AIO image defaults from one
       consistent current version. Leave the result uncommitted for review.
 
-  check VERSION
+  build VERSION
       Audit source dependencies and licenses, scan Git history and repository
-      configuration, build and exercise the release-labelled AIO image, scan
-      that exact image, and emit SBOMs and evidence under var/release/VERSION.
+      configuration, build and exercise a release-labelled AIO image, retain it
+      as apinteract/aio:VERSION, and emit scans, SBOMs, and release evidence.
 
   verify-published IMAGE_REFERENCE VERSION
-      Pull a published image, prove it is the image approved by check, rescan
-      it, and verify its Cosign signature, provenance, and SBOM attestations.
+      Pull a published image, prove it is the approved release build, rescan it,
+      and verify its Cosign signature, provenance, and SBOM attestations.
 
 Cosign verification requires either APINTERACT_COSIGN_PUBLIC_KEY or both
 APINTERACT_COSIGN_CERTIFICATE_IDENTITY and
@@ -93,7 +93,7 @@ prepare_release() {
   require_clean_worktree "Release version preparation"
   node "${release_version_tool}" prepare "${version}"
   git -C "${repository_root}" diff --check
-  printf 'Review and commit the release version changes before running check.\n'
+  printf 'Review and commit the release version changes before running build.\n'
 }
 
 check_tag_state() {
@@ -227,10 +227,10 @@ write_checksums() {
   )
 }
 
-check_release() {
+build_release() {
   local version="$1"
   validate_version "${version}"
-  require_clean_worktree "The release check"
+  require_clean_worktree "The release build"
   node "${release_version_tool}" check "${version}"
 
   local commit
@@ -290,8 +290,8 @@ check_release() {
   record_release_manifest "${evidence_directory}" "${version}" "${commit}" \
     "${tag_state}" "${release_image}" "${image_id}" "${architecture}"
   write_checksums "${evidence_directory}"
-  printf 'Release supply-chain check passed. Evidence: %s\n' \
-    "${evidence_directory}"
+  printf 'Release image built and verified: %s (%s)\nEvidence: %s\n' \
+    "${release_image}" "${image_id}" "${evidence_directory}"
 }
 
 read_release_field() {
@@ -407,7 +407,7 @@ case "${command_name}" in
     }
     prepare_release "$2"
     ;;
-  check)
+  build)
     [[ "$#" -eq 2 ]] || {
       usage
       exit 2
@@ -415,7 +415,7 @@ case "${command_name}" in
     for required_command in docker pnpm sha256sum; do
       require_command "${required_command}"
     done
-    check_release "$2"
+    build_release "$2"
     ;;
   verify-published)
     [[ "$#" -eq 3 ]] || {

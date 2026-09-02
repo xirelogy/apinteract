@@ -1,9 +1,10 @@
 # Release Supply-Chain Verification
 
-APInteract uses a two-phase release gate. The first phase examines a clean
-source revision and its locally built all-in-one image. The second phase proves
-that an immutable published image is the image that passed the first phase and
-verifies its signature and attestations.
+APInteract uses a two-phase release workflow. The build phase examines a clean
+source revision, produces a release-labelled all-in-one image, and verifies
+that exact local image. The published-verification phase proves that an
+immutable registry image is the approved local image and verifies its
+signature and attestations.
 
 This process currently covers the AIO release artifact. A future standalone
 proxy image must pass the same image-level checks independently.
@@ -24,7 +25,7 @@ pins each supported s6 archive by its upstream SHA-256 value. Updating Node or
 s6 requires reviewing and updating those immutable inputs; tests reject a
 return to a floating base tag or unchecked supervisor archive.
 
-## Prepare And Check A Release Candidate
+## Prepare And Build A Release Candidate
 
 Prepare the release version from a clean worktree:
 
@@ -42,15 +43,15 @@ Review and commit the release metadata together with all intended source
 changes. From the resulting clean worktree, run:
 
 ```sh
-deploy/scripts/release check 0.1.0-alpha1
+deploy/scripts/release build 0.1.0-alpha1
 ```
 
 The version must exactly match all four product package manifests and both AIO
 defaults. The worktree must be clean. If `v0.1.0-alpha1` already exists, it must
-point to the checked commit; the tag may also be created after this
-pre-publication check.
+point to the release commit; the tag may also be created after this
+pre-publication build.
 
-The command:
+The release build:
 
 - runs full and production-only pnpm vulnerability audits;
 - inventories full and production dependency licenses and enforces the
@@ -69,9 +70,10 @@ Evidence is written to `var/release/0.1.0-alpha1/`, which is ignored by Git. An
 existing evidence directory is never overwritten. Preserve a failed attempt
 for diagnosis or move it before rerunning the gate.
 
-The local approved image is tagged `apinteract/aio:0.1.0-alpha1`. Publication
-is a separate, explicit operator action: this script does not authenticate to a
-registry, push an image, create a Git tag, or sign anything.
+The resulting approved image remains in the local Docker image store as
+`apinteract/aio:0.1.0-alpha1`, and the command prints its immutable local image
+ID. Publication is a separate, explicit operator action: this script does not
+authenticate to a registry, push an image, create a Git tag, or sign anything.
 
 ## License Policy
 
@@ -116,9 +118,8 @@ release systems using different Cosign predicate names may set
 `APINTERACT_PROVENANCE_TYPE` and `APINTERACT_SBOM_TYPE` explicitly.
 
 The config-digest comparison is architecture-specific. A future multi-platform
-release must run and retain the pre-publication check separately for every
-supported platform or extend the evidence format to record each platform
-manifest.
+release must run and retain the release build separately for every supported
+platform or extend the evidence format to record each platform manifest.
 
 ## Failure Policy
 

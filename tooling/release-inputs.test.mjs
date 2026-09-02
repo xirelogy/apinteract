@@ -31,3 +31,9 @@ test("uses exact scanner versions instead of floating latest tags", () => {
     );
   }
 });
+
+test("exposes the gated image operation as a release build", () => {
+  assert.match(releaseScript, /deploy\/scripts\/release build VERSION/);
+  assert.doesNotMatch(releaseScript, /deploy\/scripts\/release check VERSION/);
+  assert.match(releaseScript, /^\s*build\)$/m);
+});
