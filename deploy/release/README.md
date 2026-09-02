@@ -24,17 +24,31 @@ pins each supported s6 archive by its upstream SHA-256 value. Updating Node or
 s6 requires reviewing and updating those immutable inputs; tests reject a
 return to a floating base tag or unchecked supervisor archive.
 
-## Check A Release Candidate
+## Prepare And Check A Release Candidate
 
-Commit the release metadata and all intended source changes, then run:
+Prepare the release version from a clean worktree:
+
+```sh
+deploy/scripts/release prepare 0.1.0-alpha1
+```
+
+This updates only the root, backend, frontend, and proxy package manifests plus
+the Dockerfile and Compose AIO version defaults. It requires all six sources to
+start on one version, verifies all written values, and leaves the changes
+uncommitted for review. It deliberately does not change the independently
+versioned backend API, proxy API, plugin contracts, or plugin packages.
+
+Review and commit the release metadata together with all intended source
+changes. From the resulting clean worktree, run:
 
 ```sh
 deploy/scripts/release check 0.1.0-alpha1
 ```
 
-The version must exactly match `package.json`. The worktree must be clean. If
-`v0.1.0-alpha1` already exists, it must point to the checked commit; the tag may
-also be created after this pre-publication check.
+The version must exactly match all four product package manifests and both AIO
+defaults. The worktree must be clean. If `v0.1.0-alpha1` already exists, it must
+point to the checked commit; the tag may also be created after this
+pre-publication check.
 
 The command:
 

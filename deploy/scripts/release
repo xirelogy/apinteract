@@ -6,6 +6,7 @@ script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "${script_directory}/../.." && pwd)"
 license_policy="${repository_root}/deploy/release/license-policy.json"
 license_checker="${repository_root}/tooling/check-release-licenses.mjs"
+release_version_tool="${repository_root}/tooling/release-version.mjs"
 local_image="apinteract/aio:local"
 release_temporary_directory=""
 
@@ -39,10 +40,15 @@ trap 'exit 143' TERM
 usage() {
   cat <<'USAGE'
 Usage:
+  deploy/scripts/release prepare VERSION
   deploy/scripts/release check VERSION
   deploy/scripts/release verify-published IMAGE_REFERENCE VERSION
 
 Commands:
+  prepare VERSION
+      Update the product package manifests and AIO image defaults from one
+      consistent current version. Leave the result uncommitted for review.
+
   check VERSION
       Audit source dependencies and licenses, scan Git history and repository
       configuration, build and exercise the release-labelled AIO image, scan
@@ -73,20 +79,21 @@ validate_version() {
     die "VERSION must look like 0.1.0, 0.1.0-alpha1, or 0.1.0-rc2."
 }
 
-require_clean_release_source() {
+require_clean_worktree() {
+  local operation="$1"
   local status
   status="$(git -C "${repository_root}" status --porcelain --untracked-files=normal)"
   [[ -z "${status}" ]] ||
-    die "The release check requires a clean worktree. Commit or remove local changes first."
+    die "${operation} requires a clean worktree. Commit or remove local changes first."
 }
 
-require_release_version() {
-  local expected_version="$1"
-  local package_version
-  package_version="$(node --input-type=module --eval \
-    'import { readFileSync } from "node:fs"; process.stdout.write(JSON.parse(readFileSync("package.json", "utf8")).version);')"
-  [[ "${package_version}" == "${expected_version}" ]] ||
-    die "package.json is ${package_version}; expected release version ${expected_version}."
+prepare_release() {
+  local version="$1"
+  validate_version "${version}"
+  require_clean_worktree "Release version preparation"
+  node "${release_version_tool}" prepare "${version}"
+  git -C "${repository_root}" diff --check
+  printf 'Review and commit the release version changes before running check.\n'
 }
 
 check_tag_state() {
@@ -223,8 +230,8 @@ write_checksums() {
 check_release() {
   local version="$1"
   validate_version "${version}"
-  require_clean_release_source
-  require_release_version "${version}"
+  require_clean_worktree "The release check"
+  node "${release_version_tool}" check "${version}"
 
   local commit
   local tag_state
@@ -387,17 +394,27 @@ verify_published() {
     "${evidence_directory}"
 }
 
-for required_command in git docker node pnpm sha256sum; do
+for required_command in git node; do
   require_command "${required_command}"
 done
 
 command_name="${1:-}"
 case "${command_name}" in
+  prepare)
+    [[ "$#" -eq 2 ]] || {
+      usage
+      exit 2
+    }
+    prepare_release "$2"
+    ;;
   check)
     [[ "$#" -eq 2 ]] || {
       usage
       exit 2
     }
+    for required_command in docker pnpm sha256sum; do
+      require_command "${required_command}"
+    done
     check_release "$2"
     ;;
   verify-published)
@@ -405,6 +422,9 @@ case "${command_name}" in
       usage
       exit 2
     }
+    for required_command in docker sha256sum; do
+      require_command "${required_command}"
+    done
     verify_published "$2" "$3"
     ;;
   *)

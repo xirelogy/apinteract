@@ -27,7 +27,7 @@ test("uses exact scanner versions instead of floating latest tags", () => {
   for (const tool of ["gitleaks", "trivy", "syft", "cosign"]) {
     assert.match(
       releaseScript,
-      new RegExp(`^${tool}_image="[^\"]+:v?\\d+\\.\\d+\\.\\d+"$`, "m"),
+      new RegExp(`^${tool}_image="[^"]+:v?\\d+\\.\\d+\\.\\d+"$`, "m"),
     );
   }
 });
