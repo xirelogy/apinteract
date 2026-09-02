@@ -82,7 +82,9 @@ The release build:
 - retains that exact Docker image archive and emits an SPDX JSON image SBOM,
   image metadata, tool digests, and checksums. SBOM files are moved into place
   only after Syft succeeds and produces non-empty output; the corresponding
-  `source.spdx.log` and `image.spdx.log` files retain its diagnostics.
+  `source.spdx.log` and `image.spdx.log` files retain its diagnostics. Syft gets
+  an isolated writable temporary filesystem while its source mount remains
+  read-only, allowing its unprivileged process to unpack image archives.
 
 Evidence is written to `var/release/VERSION/`, which is ignored by Git. An
 existing evidence directory is never overwritten. Preserve a failed attempt

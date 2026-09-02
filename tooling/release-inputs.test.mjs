@@ -66,6 +66,12 @@ test("retries transient tool pulls and writes SBOMs atomically", () => {
     releaseScript,
     /--output spdx-json >"\$\{partial_output_path\}"/,
   );
+  assert.match(generateSbomFunction[0], /--env HOME=\/tmp/);
+  assert.match(generateSbomFunction[0], /--env XDG_CACHE_HOME=\/tmp\/\.cache/);
+  assert.match(
+    generateSbomFunction[0],
+    /--tmpfs \/tmp:rw,nosuid,nodev,mode=1777/,
+  );
   assert.match(releaseScript, /\[\[ ! -s "\$\{partial_output_path\}" \]\]/);
   assert.match(
     releaseScript,

@@ -218,6 +218,9 @@ generate_sbom() {
   local log_path="${output_path%.json}.log"
   if ! docker run --rm \
     --user "$(id -u):$(id -g)" \
+    --env HOME=/tmp \
+    --env XDG_CACHE_HOME=/tmp/.cache \
+    --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
     --volume "${mount_source}:/scan:ro" \
     "${syft_image}" scan "${source}" \
     --output spdx-json >"${partial_output_path}" \
