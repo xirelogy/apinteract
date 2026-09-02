@@ -67,6 +67,10 @@ The release build:
 - scans repository dependencies and configuration for high or critical
   findings;
 - emits an SPDX JSON source SBOM;
+- installs the locked dependencies with their required native build steps only
+  after the dependency and source gates pass;
+- runs the repository's format, generated-contract, source-documentation,
+  lint, type, and test checks and confirms they left the worktree clean;
 - builds the AIO image with exact version and source-revision labels;
 - runs the complete isolated AIO runtime verification against that image;
 - records all high or critical image findings, including findings for which
@@ -102,11 +106,10 @@ git push origin vVERSION
 
 The tag must be `v` followed by a version accepted by the release script, and
 the commit's product manifests and AIO defaults must contain that exact version.
-The workflow first runs the repository's format, contract, documentation,
-lint, type, and test checks, then runs this complete release build on
-`linux/amd64`. It publishes the verified image to
-`docker.io/xirelogy/apinteract` with both the version without its leading `v` and
-`latest`, and refuses to overwrite an existing version tag.
+The workflow runs this complete release build on `linux/amd64`. It publishes
+the verified image to `docker.io/xirelogy/apinteract` with both the version
+without its leading `v` and `latest`, and refuses to overwrite an existing
+version tag.
 Pre-release tags intentionally advance `latest`; pin the version tag or digest
 when deployments must not follow that moving alias.
 

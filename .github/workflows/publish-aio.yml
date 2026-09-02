@@ -58,12 +58,6 @@ jobs:
           node tooling/release-version.mjs check "${version}"
           printf 'version=%s\nimage=%s\n' "${version}" "${image}" >>"${GITHUB_OUTPUT}"
 
-      - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run repository checks
-        run: pnpm check
-
       - name: Authenticate to Docker Hub
         env:
           REGISTRY_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -164,8 +158,20 @@ jobs:
             exit 1
           fi
 
-      - name: Upload release evidence
+      - name: Locate release evidence
         if: ${{ always() && steps.release.outputs.version != '' }}
+        id: evidence
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          if [[ -d "var/release/${VERSION}" ]]; then
+            printf 'available=true\n' >>"${GITHUB_OUTPUT}"
+          else
+            printf 'available=false\n' >>"${GITHUB_OUTPUT}"
+          fi
+
+      - name: Upload release evidence
+        if: ${{ always() && steps.evidence.outputs.available == 'true' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: aio-release-${{ steps.release.outputs.version }}

@@ -292,6 +292,16 @@ build_release() {
     "${repository_root}" ||
     die "Source SBOM generation failed."
 
+  # Dependency lifecycle scripts stay disabled until the dependency and source
+  # gates above have passed. The repository checks then need the locked native
+  # modules and build tools, including better-sqlite3 and esbuild.
+  printf 'Installing locked dependencies for repository checks...\n'
+  pnpm install --frozen-lockfile --force ||
+    die "The dependency installation required by repository checks failed."
+  printf 'Running format, contract, documentation, lint, type, and test checks...\n'
+  pnpm check || die "The repository checks failed."
+  require_clean_worktree "The verified release build"
+
   printf 'Building and verifying the AIO image...\n'
   if ! APINTERACT_VERSION="${version}" \
     APINTERACT_SOURCE_COMMIT="${commit}" \

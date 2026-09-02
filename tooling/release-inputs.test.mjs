@@ -72,6 +72,8 @@ test("exposes the gated image operation as a release build", () => {
     releaseScript,
     /pnpm install --frozen-lockfile --ignore-scripts --force/,
   );
+  assert.match(releaseScript, /pnpm install --frozen-lockfile --force/);
+  assert.match(releaseScript, /pnpm check \|\| die/);
   assert.match(
     releaseScript,
     /local image_archive_name="apinteract-aio-\$\{version\}\.tar"/,
@@ -96,7 +98,7 @@ test("publishes only validated version tags as immutable and latest images", () 
     /\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\(-\[0-9A-Za-z\]\+\)\?\$/,
   );
   assert.match(publishWorkflow, /deploy\/scripts\/release build/);
-  assert.match(publishWorkflow, /run: pnpm check/);
+  assert.doesNotMatch(publishWorkflow, /run: pnpm check/);
   assert.match(publishWorkflow, /image="docker\.io\/xirelogy\/apinteract"/);
   assert.match(publishWorkflow, /secrets\.DOCKERHUB_TOKEN/);
   assert.match(publishWorkflow, /docker login docker\.io/);
@@ -112,6 +114,11 @@ test("publishes only validated version tags as immutable and latest images", () 
   assert.match(publishWorkflow, /cosign sign --yes/);
   assert.match(publishWorkflow, /--type slsaprovenance/);
   assert.match(publishWorkflow, /--type spdxjson/);
+  assert.match(publishWorkflow, /\[\[ -d "var\/release\/\$\{VERSION\}" \]\]/);
+  assert.match(
+    publishWorkflow,
+    /steps\.evidence\.outputs\.available == 'true'/,
+  );
   assert.doesNotMatch(publishWorkflow, /uses:\s+[^\s]+@v\d+/);
   for (const action of ["checkout", "setup-node", "upload-artifact"]) {
     assert.match(

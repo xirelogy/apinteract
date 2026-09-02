@@ -87,6 +87,9 @@ const appendingHeadersError = computed(() =>
 const pluginsEmpty = computed(
   () => store.plugins.length === 0 && store.pluginListState !== "loading",
 );
+const proxyApiVersion = computed(
+  () => store.proxyProtocolVersion ?? t("header.versions.unavailableValue"),
+);
 
 watch(
   () => props.open,
@@ -304,12 +307,7 @@ function selectDateTimeFormat(value: string): void {
               </div>
               <div class="versions-list-row">
                 <dt>{{ t("header.versions.proxyApi") }}</dt>
-                <dd>
-                  {{
-                    store.proxyProtocolVersion ??
-                    t("header.versions.unavailableValue")
-                  }}
-                </dd>
+                <dd>{{ proxyApiVersion }}</dd>
               </div>
             </dl>
           </TabsPanel>
