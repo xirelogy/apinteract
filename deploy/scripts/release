@@ -162,6 +162,8 @@ run_source_scan() {
     --scanners vuln,misconfig \
     --severity HIGH,CRITICAL \
     --exit-code 1 \
+    --ignorefile /repo/deploy/release/trivy-ignore.yaml \
+    --show-suppressed \
     --skip-dirs /repo/var \
     --format json \
     --output /reports/trivy-source.json \

@@ -99,6 +99,11 @@ actual license text, distribution obligations, notices, and compatibility with
 the APInteract artifact before recording an approval. Do not treat package
 metadata or an SBOM as legal review by itself.
 
+Trivy misconfiguration exceptions are similarly narrow and documented in
+[`trivy-ignore.yaml`](trivy-ignore.yaml). They are scoped to exact paths and
+retained as suppressed findings in the scan evidence. Adding or widening an
+exception requires review of the affected runtime privilege boundary.
+
 ## Verify The Published Image
 
 After publishing, signing, and attaching provenance and SPDX SBOM attestations,

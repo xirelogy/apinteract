@@ -1,0 +1,23 @@
+misconfigurations:
+  - id: AVD-DS-0002
+    paths:
+      - "deploy/aio/Dockerfile"
+    statement: >-
+      The AIO image requires s6-overlay to run as root for PID 1 and its
+      one-shot ownership preparation. Backend and proxy services are executed
+      as the unprivileged apinteract user, and runtime verification checks
+      component ownership and a read-only root filesystem. The published
+      Compose configuration also applies no-new-privileges.
+  - id: AVD-DS-0002
+    paths:
+      - "deploy/development/Dockerfile"
+    statement: >-
+      This development-only image starts as root to repair mounted dependency
+      volume ownership, then its entrypoint executes the requested command as
+      the unprivileged node user. It is not included in release artifacts.
+  - id: AVD-DS-0002
+    paths:
+      - "deploy/development/Dockerfile.browser"
+    statement: >-
+      This is an ephemeral Playwright development test runner with writable
+      workspace mounts. It is not included in release artifacts.

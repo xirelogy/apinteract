@@ -10,6 +10,10 @@ const releaseScript = await readFile(
   new URL("../deploy/scripts/release", import.meta.url),
   "utf8",
 );
+const trivyIgnorePolicy = await readFile(
+  new URL("../deploy/release/trivy-ignore.yaml", import.meta.url),
+  "utf8",
+);
 
 test("pins release build inputs and verifies downloaded supervisor archives", () => {
   assert.match(
@@ -30,6 +34,22 @@ test("uses exact scanner versions instead of floating latest tags", () => {
       new RegExp(`^${tool}_image="[^"]+:v?\\d+\\.\\d+\\.\\d+"$`, "m"),
     );
   }
+});
+
+test("keeps Trivy exceptions path-scoped and visible in release evidence", () => {
+  assert.match(
+    releaseScript,
+    /--ignorefile \/repo\/deploy\/release\/trivy-ignore\.yaml/,
+  );
+  assert.match(releaseScript, /--show-suppressed/);
+  for (const path of [
+    "deploy/aio/Dockerfile",
+    "deploy/development/Dockerfile",
+    "deploy/development/Dockerfile.browser",
+  ]) {
+    assert.match(trivyIgnorePolicy, new RegExp(`- "${path}"`));
+  }
+  assert.equal([...trivyIgnorePolicy.matchAll(/- id: AVD-DS-0002/g)].length, 3);
 });
 
 test("exposes the gated image operation as a release build", () => {
