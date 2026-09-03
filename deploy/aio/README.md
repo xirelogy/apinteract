@@ -205,6 +205,26 @@ Adjust the override's host path if the configuration directory is outside
 `deploy/aio/`. Configuration files are strict YAML 1.2 and begin with
 `configVersion: 1`.
 
+Post-response scripts can save ordinary and secret variable values in all
+available scopes by default. Administrators can narrow this automation policy
+in `backend.yaml`; an empty `allowedScopes` list disables persistent writes:
+
+```yaml
+configVersion: 1
+server:
+  publicOrigin: https://apinteract.example.com
+scripts:
+  variableWrites:
+    allowedScopes:
+      - request
+      - selected-environment
+    allowSecrets: false
+```
+
+Supported scopes are `request`, `parent-collection`, `workspace`, and
+`selected-environment`. This policy is an upper bound and does not bypass the
+executing user's access to a workspace or resource.
+
 The initializer always owns these AIO-specific values:
 
 - backend listener `0.0.0.0:8080`;

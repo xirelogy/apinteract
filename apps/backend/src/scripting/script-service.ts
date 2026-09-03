@@ -13,6 +13,7 @@ import {
   validateLocal,
   validateLogs,
   validateTests,
+  validateVariableWrites,
   type WorkerSuccess,
 } from "./script-protocol.js";
 import {
@@ -36,6 +37,8 @@ const MAX_SCRIPT_LIMITS: ScriptLimits = {
   logBytes: 1_048_576,
   localVariableCount: 1000,
   localVariableBytes: 1_048_576,
+  variableWriteCount: 1000,
+  variableWriteBytes: 1_048_576,
   wallTimeMilliseconds: 10_000,
   memoryBytes: 134_217_728,
 };
@@ -92,6 +95,7 @@ export class ScriptService {
       local: validateLocal(result.local),
       logs: validateLogs(result.logs),
       tests: validateTests(result.tests),
+      variableWrites: validateVariableWrites(result.variableWrites),
       durationMilliseconds: Date.now() - started,
     };
   }
@@ -132,6 +136,10 @@ export class ScriptService {
       limits,
       request: toWireRequest(input.request, phase),
       variables: input.variables.map(toWireVariable),
+      variableWritePolicy: input.variableWritePolicy ?? {
+        allowedScopes: [],
+        allowSecrets: false,
+      },
       ...(input.local === undefined ? {} : { local: input.local }),
       ...(phase === "post-response" && input.response !== undefined
         ? { response: toWireResponse(input.response, limits) }

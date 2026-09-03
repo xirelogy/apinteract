@@ -71,6 +71,8 @@ const scriptFailureCodes = new Set([
   "memory_limit_exceeded",
   "time_limit_exceeded",
   "output_limit_exceeded",
+  "variable_write_conflict",
+  "variable_write_denied",
   "cancelled",
 ]);
 const scriptTestMessageCodes = new Set([

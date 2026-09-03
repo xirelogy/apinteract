@@ -594,4 +594,127 @@ describe("persisted variable scopes", () => {
       await rm(rootPath, { recursive: true, force: true });
     }
   });
+
+  it("rolls back every script write when a pinned profile changed", async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), "apinteract-script-write-"));
+    const database = await SqliteDatabase.open(
+      join(rootPath, "database.sqlite"),
+    );
+    try {
+      const userId = createEntityId();
+      const now = Date.now();
+      await database.db
+        .insertInto("users")
+        .values({
+          id: idToBytes(userId),
+          status: "active",
+          username: "script-write-test",
+          display_name: "Script Write Test",
+          is_instance_admin: 0,
+          created_at: now,
+          deleted_at: null,
+        })
+        .execute();
+      const audit = new AuditService(database.db, join(rootPath, "audit"));
+      const workspaces = new WorkspaceService(database.db, audit);
+      const environments = new EnvironmentService(
+        database.db,
+        workspaces,
+        audit,
+      );
+      const variables = new VariableService(
+        database.db,
+        workspaces,
+        environments,
+        audit,
+      );
+      const requests = new RequestService(
+        database.db,
+        workspaces,
+        variables,
+        audit,
+      );
+      const workspace = await workspaces.create(userId, "Automation");
+      const initial = await variables.update(
+        userId,
+        "workspace",
+        workspace.workspaceId,
+        0,
+        [{ name: "seed", kind: "value", value: "before" }],
+      );
+      const request = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        null,
+        "Chained request",
+        "GET",
+        "https://example.test",
+        [],
+        [],
+        "",
+      );
+      const prepared = await requests.prepareExecution(
+        userId,
+        createEntityId(),
+        request.requestId,
+      );
+      await variables.update(
+        userId,
+        "workspace",
+        workspace.workspaceId,
+        initial.revision,
+        [
+          {
+            variableId: initial.variables[0]!.variableId,
+            name: "seed",
+            kind: "value",
+            value: "concurrent-edit",
+          },
+        ],
+      );
+
+      await expect(
+        database.db.transaction().execute((transaction) =>
+          variables.applyScriptWritesInTransaction(
+            transaction,
+            userId,
+            prepared.executionId,
+            prepared.variableWriteTargets,
+            [
+              {
+                scope: "request",
+                name: "temporaryResult",
+                kind: "value",
+                value: "must-roll-back",
+              },
+              {
+                scope: "workspace",
+                name: "result",
+                kind: "value",
+                value: "stale",
+              },
+            ],
+            {
+              allowedScopes: ["request", "workspace"],
+              allowSecrets: true,
+            },
+          ),
+        ),
+      ).rejects.toMatchObject({ code: "variable_write_conflict" });
+      await expect(
+        variables.get(userId, "request", request.requestId),
+      ).resolves.toMatchObject({ revision: 0, variables: [] });
+      await expect(
+        variables.get(userId, "workspace", workspace.workspaceId),
+      ).resolves.toMatchObject({
+        revision: 2,
+        variables: [
+          expect.objectContaining({ name: "seed", value: "concurrent-edit" }),
+        ],
+      });
+    } finally {
+      await database.close();
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
 });

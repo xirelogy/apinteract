@@ -460,6 +460,8 @@ const zhHansMessages = {
       memory_limit_exceeded: "脚本超出了内存限制",
       time_limit_exceeded: "脚本超出了时间限制",
       output_limit_exceeded: "脚本超出了输出限制",
+      variable_write_conflict: "变量已更改，脚本无法保存其值",
+      variable_write_denied: "无法保存变量值",
       cancelled: "脚本已取消",
     },
     phase: {
@@ -1008,6 +1010,8 @@ const zhHantMessages = {
       memory_limit_exceeded: "腳本超過記憶體限制",
       time_limit_exceeded: "腳本超過時間限制",
       output_limit_exceeded: "腳本超過輸出限制",
+      variable_write_conflict: "變數已變更，腳本無法儲存其值",
+      variable_write_denied: "無法儲存變數值",
       cancelled: "腳本已取消",
     },
     phase: {

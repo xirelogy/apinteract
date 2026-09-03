@@ -13,6 +13,7 @@ import {
   type ScriptTextBody,
   type ScriptTextValue,
   type ScriptVariable,
+  type ScriptVariableWrite,
 } from "./script-types.js";
 
 /** JSON-safe request body exchanged with the isolated script worker. */
@@ -72,6 +73,7 @@ export interface WorkerSuccess {
     readonly local: Readonly<Record<string, string>>;
     readonly logs: readonly unknown[];
     readonly tests?: readonly unknown[];
+    readonly variableWrites?: readonly unknown[];
   };
 }
 
@@ -335,6 +337,47 @@ export function validateTests(
   });
 }
 
+/** Validates persistent variable intents returned by the isolated worker. */
+export function validateVariableWrites(
+  value: readonly unknown[] | undefined,
+): readonly ScriptVariableWrite[] {
+  if (!Array.isArray(value)) {
+    throw new ScriptExecutionError(
+      "runtime_error",
+      "Script variable writes are invalid",
+    );
+  }
+  const scopes = new Set([
+    "request",
+    "parent-collection",
+    "workspace",
+    "selected-environment",
+  ]);
+  return value.map((entry) => {
+    const item = isRecord(entry) ? entry : undefined;
+    if (
+      item === undefined ||
+      typeof item.scope !== "string" ||
+      !scopes.has(item.scope) ||
+      typeof item.name !== "string" ||
+      !/^[A-Za-z_][A-Za-z0-9_.-]*$/u.test(item.name) ||
+      (item.kind !== "value" && item.kind !== "secret") ||
+      typeof item.value !== "string"
+    ) {
+      throw new ScriptExecutionError(
+        "runtime_error",
+        "Script variable write is invalid",
+      );
+    }
+    return {
+      scope: item.scope as ScriptVariableWrite["scope"],
+      name: item.name,
+      kind: item.kind,
+      value: item.value,
+    };
+  });
+}
+
 /** Validates optional scalar log fields returned by the worker. */
 function validateLogFields(
   value: unknown,
@@ -494,6 +537,8 @@ export function isWorkerResponse(value: unknown): value is WorkerResponse {
     isRecord(value.result.local) &&
     Array.isArray(value.result.logs) &&
     (value.result.tests === undefined || Array.isArray(value.result.tests)) &&
+    (value.result.variableWrites === undefined ||
+      Array.isArray(value.result.variableWrites)) &&
     (value.result.request === undefined || isWireRequest(value.result.request))
   );
 }

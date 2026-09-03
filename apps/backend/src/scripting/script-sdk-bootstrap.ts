@@ -397,7 +397,54 @@ export const SCRIPT_SDK_BOOTSTRAP = String.raw`
   }
   Object.freeze(request);
 
-  const variableApi = Object.freeze({
+  const variableWriteScopes = new Set(input.variableWritePolicy.allowedScopes);
+  const variableWrites = new Map();
+  const sensitiveWriteValues = new Set();
+
+  function variableWriteBytes() {
+    return utf8Encode(JSON.stringify(Array.from(variableWrites.values()))).byteLength;
+  }
+
+  function queueVariableWrite(name, value, options, kind) {
+    const checkedName = requireNonEmptyString(name, "variable name");
+    const checkedValue = requireString(value, "variable value");
+    if (!variableName.test(checkedName)) {
+      throw sdkError("sdk_invalid_argument", "Variable name is invalid");
+    }
+    if (options === null || typeof options !== "object" || Array.isArray(options)) {
+      throw sdkError("sdk_invalid_argument", "variable write options must be an object");
+    }
+    const scope = requireNonEmptyString(options.scope, "variable write scope");
+    if (!variableWriteScopes.has(scope)) {
+      throw sdkError(
+        "sdk_permission_denied",
+        "Persistent variable writes to " + scope + " are not allowed",
+      );
+    }
+    if (kind === "secret" && !input.variableWritePolicy.allowSecrets) {
+      throw sdkError("sdk_permission_denied", "Persistent secret writes are not allowed");
+    }
+    const key = scope + "\u0000" + checkedName;
+    const previous = variableWrites.get(key);
+    variableWrites.set(key, { scope, name: checkedName, kind, value: checkedValue });
+    try {
+      if (variableWrites.size > input.limits.variableWriteCount) {
+        throw sdkError("output_limit_exceeded", "Too many persistent variable writes");
+      }
+      if (variableWriteBytes() > input.limits.variableWriteBytes) {
+        throw sdkError("output_limit_exceeded", "Persistent variable writes are too large");
+      }
+    } catch (error) {
+      if (previous === undefined) variableWrites.delete(key);
+      else variableWrites.set(key, previous);
+      throw error;
+    }
+    if (kind === "secret" && checkedValue.length > 0) {
+      sensitiveWriteValues.add(checkedValue);
+    }
+  }
+
+  const variableApi = {
     has(name) {
       const item = variables.get(requireNonEmptyString(name, "variable name"));
       return item !== undefined && item.status === "resolved";
@@ -451,7 +498,16 @@ export const SCRIPT_SDK_BOOTSTRAP = String.raw`
       }
       return "<<" + checked + ">>";
     },
-  });
+  };
+  if (input.phase === "post-response") {
+    variableApi.set = function set(name, value, options) {
+      queueVariableWrite(name, value, options, "value");
+    };
+    variableApi.setSecret = function setSecret(name, value, options) {
+      queueVariableWrite(name, value, options, "secret");
+    };
+  }
+  Object.freeze(variableApi);
 
   const localState = Object.assign(Object.create(null), input.local || {});
   function localBytes(state) {
@@ -710,12 +766,34 @@ export const SCRIPT_SDK_BOOTSTRAP = String.raw`
   function exportResult() {
     const result = {
       sdkVersion: input.sdkVersion,
-      local: cloneJson(localState),
-      logs: cloneJson(logs),
+      local: redactSensitiveWrites(cloneJson(localState)),
+      logs: redactSensitiveWrites(cloneJson(logs)),
     };
     if (input.phase === "pre-request") result.request = serializeRequest();
-    else result.tests = cloneJson(tests);
+    else {
+      result.tests = redactSensitiveWrites(cloneJson(tests));
+      result.variableWrites = cloneJson(Array.from(variableWrites.values()));
+    }
     return result;
+  }
+
+  function redactSensitiveWrites(value) {
+    if (typeof value === "string") {
+      let redacted = value;
+      for (const secret of sensitiveWriteValues) {
+        redacted = redacted.split(secret).join("[secret]");
+      }
+      return redacted;
+    }
+    if (Array.isArray(value)) return value.map(redactSensitiveWrites);
+    if (value !== null && typeof value === "object") {
+      for (const key of Object.keys(value)) value[key] = redactSensitiveWrites(value[key]);
+    }
+    return value;
+  }
+
+  function redactText(value) {
+    return redactSensitiveWrites(requireString(value, "text"));
   }
 
   function removeDynamicConstructor(value) {
@@ -793,6 +871,6 @@ export const SCRIPT_SDK_BOOTSTRAP = String.raw`
     protectGlobal(name);
   }
 
-  return Object.freeze({ sdk, exportResult });
+  return Object.freeze({ sdk, exportResult, redactText });
 })
 `;

@@ -11,6 +11,8 @@ export const DEFAULT_SCRIPT_LIMITS: ScriptLimits = {
   logBytes: 65_536,
   localVariableCount: 100,
   localVariableBytes: 65_536,
+  variableWriteCount: 100,
+  variableWriteBytes: 65_536,
   wallTimeMilliseconds: 1000,
   memoryBytes: 16_777_216,
 };
@@ -25,8 +27,45 @@ export interface ScriptLimits {
   readonly logBytes: number;
   readonly localVariableCount: number;
   readonly localVariableBytes: number;
+  readonly variableWriteCount: number;
+  readonly variableWriteBytes: number;
   readonly wallTimeMilliseconds: number;
   readonly memoryBytes: number;
+}
+
+/** Persisted destinations that a post-response script can address explicitly. */
+export type ScriptVariableWriteScope =
+  | "request"
+  | "parent-collection"
+  | "workspace"
+  | "selected-environment";
+
+/** Complete scope set used when deployment configuration does not narrow writes. */
+export const SCRIPT_VARIABLE_WRITE_SCOPES = [
+  "request",
+  "parent-collection",
+  "workspace",
+  "selected-environment",
+] as const satisfies readonly ScriptVariableWriteScope[];
+
+/** Default deployment policy for post-response persistence automation. */
+export const DEFAULT_SCRIPT_VARIABLE_WRITE_POLICY: ScriptVariableWritePolicy = {
+  allowedScopes: SCRIPT_VARIABLE_WRITE_SCOPES,
+  allowSecrets: true,
+};
+
+/** Deployment policy copied into a script invocation and rechecked by the host. */
+export interface ScriptVariableWritePolicy {
+  readonly allowedScopes: readonly ScriptVariableWriteScope[];
+  readonly allowSecrets: boolean;
+}
+
+/** One validated persistent mutation requested by a post-response script. */
+export interface ScriptVariableWrite {
+  readonly scope: ScriptVariableWriteScope;
+  readonly name: string;
+  readonly kind: "value" | "secret";
+  readonly value: string;
 }
 
 /** Safe execution metadata visible to workspace JavaScript. */
@@ -156,6 +195,7 @@ export interface CommonScriptInput {
   readonly variables: readonly ScriptVariable[];
   readonly local?: Readonly<Record<string, string>>;
   readonly limits?: Partial<ScriptLimits>;
+  readonly variableWritePolicy?: ScriptVariableWritePolicy;
 }
 
 /** Copied input for a pre-request script. */
@@ -181,6 +221,7 @@ export interface PostResponseScriptResult {
   readonly local: Readonly<Record<string, string>>;
   readonly logs: readonly ScriptLogEntry[];
   readonly tests: readonly ScriptTestResult[];
+  readonly variableWrites: readonly ScriptVariableWrite[];
   readonly durationMilliseconds: number;
 }
 
@@ -196,6 +237,8 @@ export type ScriptFailureCode =
   | "memory_limit_exceeded"
   | "time_limit_exceeded"
   | "output_limit_exceeded"
+  | "variable_write_conflict"
+  | "variable_write_denied"
   | "cancelled";
 
 /** Sanitized script failure safe to return through an application contract. */

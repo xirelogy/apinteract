@@ -10,8 +10,17 @@ import {
   type EntityId,
 } from "../foundation/id.js";
 import type { DatabaseSchema } from "../persistence/schema.js";
+import {
+  ScriptExecutionError,
+  type ScriptVariableWrite,
+  type ScriptVariableWritePolicy,
+  type ScriptVariableWriteScope,
+} from "../scripting/script-types.js";
 import type { WorkspaceService } from "../workspaces/workspace-service.js";
-import { ResourceNotFoundError } from "../workspaces/workspace-service.js";
+import {
+  AccessDeniedError,
+  ResourceNotFoundError,
+} from "../workspaces/workspace-service.js";
 import {
   type ResolvedVariable,
   type SecretMutation,
@@ -76,6 +85,23 @@ export interface EffectiveVariableProfile {
   readonly variables: readonly ResolvedVariable[];
   readonly sources: ReadonlyMap<string, VariablePreviewSource>;
   readonly evidence: readonly VariableProfileEvidence[];
+  /** Pins the selected root environment used for this execution, if any. */
+  readonly selectedEnvironmentId: EntityId | null;
+}
+
+/** Pins every durable variable destination available to one execution. */
+export interface ScriptVariableWriteTargets {
+  readonly workspace: ScriptVariableWriteTarget;
+  readonly parentCollection?: ScriptVariableWriteTarget;
+  readonly request?: ScriptVariableWriteTarget;
+  readonly selectedEnvironment?: ScriptVariableWriteTarget;
+}
+
+/** Identifies one persistent profile without exposing any of its values. */
+export interface ScriptVariableWriteTarget {
+  readonly scopeKind: VariableScopeKind;
+  readonly scopeId: EntityId;
+  readonly revision: number;
 }
 
 /** Identifies an in-memory request profile layered above persisted scopes. */
@@ -118,6 +144,13 @@ interface VariableUpdateOptions {
   readonly allowUnconfiguredSecrets: boolean;
 }
 
+/** Scope-neutral identity used only by trusted script mutation orchestration. */
+interface ScriptWriteIdentity {
+  readonly workspaceId: EntityId;
+  readonly scopeKind: VariableScopeKind;
+  readonly scopeId: EntityId;
+}
+
 /** Owns persisted workspace, collection, and request variable profiles. */
 export class VariableService {
   readonly #database: Kysely<DatabaseSchema>;
@@ -137,6 +170,91 @@ export class VariableService {
     this.#environments = environments;
     this.#audit = audit;
     this.#profiles = new VariableProfileStore(database);
+  }
+
+  /** Applies all authorized post-response writes in the caller's transaction. */
+  async applyScriptWritesInTransaction(
+    transaction: Transaction<DatabaseSchema>,
+    userId: EntityId,
+    executionId: EntityId,
+    targets: ScriptVariableWriteTargets,
+    writes: readonly ScriptVariableWrite[],
+    policy: ScriptVariableWritePolicy,
+  ): Promise<void> {
+    if (writes.length === 0) return;
+    const allowedScopes = new Set(policy.allowedScopes);
+    const grouped = new Map<ScriptVariableWriteScope, ScriptVariableWrite[]>();
+    for (const write of writes) {
+      if (
+        !allowedScopes.has(write.scope) ||
+        (write.kind === "secret" && !policy.allowSecrets)
+      ) {
+        throw new ScriptExecutionError(
+          "variable_write_denied",
+          `Persistent variable writes to ${write.scope} are not allowed`,
+        );
+      }
+      const group = grouped.get(write.scope) ?? [];
+      group.push(write);
+      grouped.set(write.scope, group);
+    }
+    try {
+      await this.#workspaces.requireCanEdit(
+        transaction,
+        userId,
+        targets.workspace.scopeId,
+      );
+    } catch (cause) {
+      if (
+        cause instanceof AccessDeniedError ||
+        cause instanceof ResourceNotFoundError
+      ) {
+        throw new ScriptExecutionError(
+          "variable_write_denied",
+          "The user cannot edit the persistent variable target",
+        );
+      }
+      throw cause;
+    }
+    for (const [scope, scopeWrites] of grouped) {
+      const target = scriptWriteTarget(targets, scope);
+      if (target === undefined) {
+        throw new ScriptExecutionError(
+          "variable_write_denied",
+          `Persistent variable writes to ${scope} are unavailable for this execution`,
+        );
+      }
+      let identity: ScriptWriteIdentity;
+      try {
+        identity = await this.#scriptWriteIdentity(
+          transaction,
+          target.scopeKind,
+          target.scopeId,
+        );
+      } catch (cause) {
+        if (cause instanceof ResourceNotFoundError) {
+          throw new ScriptExecutionError(
+            "variable_write_denied",
+            "The persistent variable target is no longer available",
+          );
+        }
+        throw cause;
+      }
+      if (identity.workspaceId !== targets.workspace.scopeId) {
+        throw new ScriptExecutionError(
+          "variable_write_denied",
+          "The persistent variable target is outside the execution workspace",
+        );
+      }
+      await this.#applyScriptWriteGroup(
+        transaction,
+        userId,
+        executionId,
+        identity,
+        target.revision,
+        scopeWrites,
+      );
+    }
   }
 
   /** Loads one authorized profile with secret values redacted. */
@@ -253,6 +371,214 @@ export class VariableService {
       variables,
       { sessionId: null, allowUnconfiguredSecrets: true },
     );
+  }
+
+  /** Updates one pinned profile while preserving its unrelated ordered entries. */
+  async #applyScriptWriteGroup(
+    transaction: Transaction<DatabaseSchema>,
+    userId: EntityId,
+    executionId: EntityId,
+    identity: ScriptWriteIdentity,
+    expectedRevision: number,
+    writes: readonly ScriptVariableWrite[],
+  ): Promise<void> {
+    const metadata = await this.#profiles.metadata(
+      transaction,
+      identity.scopeKind,
+      identity.scopeId,
+    );
+    if ((metadata?.revision ?? 0) !== expectedRevision) {
+      throw new ScriptExecutionError(
+        "variable_write_conflict",
+        "The variable profile changed while the request was running",
+      );
+    }
+    if (identity.scopeKind === "environment") {
+      const environment = await transaction
+        .selectFrom("environments")
+        .select("revision")
+        .where("id", "=", idToBytes(identity.scopeId))
+        .where("workspace_id", "=", idToBytes(identity.workspaceId))
+        .executeTakeFirst();
+      if (
+        environment === undefined ||
+        environment.revision !== expectedRevision
+      ) {
+        throw new ScriptExecutionError(
+          "variable_write_conflict",
+          "The selected environment changed while the request was running",
+        );
+      }
+    }
+    const current = await this.#profiles.redactedVariables(
+      transaction,
+      identity.scopeKind,
+      identity.scopeId,
+    );
+    const pending = new Map(
+      writes.map((write) => [write.name, write] as const),
+    );
+    const changed: { write: ScriptVariableWrite; created: boolean }[] = [];
+    const next: VariableWrite[] = current.map((variable) => {
+      const write = pending.get(variable.name);
+      if (write === undefined) return preservedVariableWrite(variable);
+      pending.delete(variable.name);
+      changed.push({ write, created: false });
+      if (
+        variable.kind === "alias" ||
+        (variable.kind !== "unset" && variable.kind !== write.kind)
+      ) {
+        throw new ScriptExecutionError(
+          "variable_write_conflict",
+          `Variable ${write.name} cannot be changed from ${variable.kind} to ${write.kind}`,
+        );
+      }
+      return {
+        ...(variable.kind === write.kind
+          ? { variableId: variable.variableId }
+          : {}),
+        name: write.name,
+        description: variable.description,
+        kind: write.kind,
+        value: write.value,
+      };
+    });
+    for (const write of pending.values()) {
+      changed.push({ write, created: true });
+      next.push({
+        name: write.name,
+        kind: write.kind,
+        value: write.value,
+      });
+    }
+    let revision: number;
+    let secretMutations: readonly SecretMutation[];
+    try {
+      if (metadata === null) {
+        revision = 1;
+        secretMutations = await this.#profiles.create(
+          transaction,
+          identity.workspaceId,
+          identity.scopeKind,
+          identity.scopeId,
+          revision,
+          userId,
+          next,
+        );
+      } else {
+        ({ revision, mutations: secretMutations } =
+          await this.#profiles.replace(
+            transaction,
+            identity.scopeKind,
+            identity.scopeId,
+            expectedRevision,
+            userId,
+            next,
+          ));
+      }
+    } catch (cause) {
+      if (cause instanceof VariableProfileConflictError) {
+        throw new ScriptExecutionError(
+          "variable_write_conflict",
+          "The variable profile changed while the request was running",
+        );
+      }
+      throw cause;
+    }
+    if (identity.scopeKind === "environment") {
+      const result = await transaction
+        .updateTable("environments")
+        .set({
+          revision,
+          updated_by: idToBytes(userId),
+          updated_at: Date.now(),
+        })
+        .where("id", "=", idToBytes(identity.scopeId))
+        .where("revision", "=", expectedRevision)
+        .executeTakeFirst();
+      if (result.numUpdatedRows !== 1n) {
+        throw new ScriptExecutionError(
+          "variable_write_conflict",
+          "The selected environment changed while the request was running",
+        );
+      }
+    }
+    await this.#audit.record(transaction, {
+      type: "variable_profile.updated",
+      actorUserId: userId,
+      workspaceId: identity.workspaceId,
+      data: {
+        scopeKind: identity.scopeKind,
+        scopeId: identity.scopeId,
+        revision,
+        source: "post-response-script",
+        executionId,
+      },
+    });
+    for (const mutation of changed) {
+      await this.#audit.record(transaction, {
+        type: "script_variable.updated",
+        actorUserId: userId,
+        workspaceId: identity.workspaceId,
+        data: {
+          executionId,
+          scopeKind: identity.scopeKind,
+          scopeId: identity.scopeId,
+          name: mutation.write.name,
+          kind: mutation.write.kind,
+          action: mutation.created ? "created" : "updated",
+          revision,
+        },
+      });
+    }
+    for (const mutation of secretMutations) {
+      await this.#audit.record(transaction, {
+        type: `secret_variable.${mutation.type}`,
+        actorUserId: userId,
+        workspaceId: identity.workspaceId,
+        data: {
+          scopeKind: identity.scopeKind,
+          scopeId: identity.scopeId,
+          variableId: mutation.variableId,
+          secretVersion: mutation.version,
+          source: "post-response-script",
+          executionId,
+        },
+      });
+    }
+  }
+
+  /** Resolves one pinned script destination and validates current ownership. */
+  async #scriptWriteIdentity(
+    transaction: Transaction<DatabaseSchema>,
+    scopeKind: VariableScopeKind,
+    scopeId: EntityId,
+  ): Promise<ScriptWriteIdentity> {
+    if (scopeKind !== "environment") {
+      const identity = await this.#scopeIdentity(
+        transaction,
+        scopeKind,
+        scopeId,
+      );
+      return {
+        workspaceId: identity.workspaceId,
+        scopeKind,
+        scopeId,
+      };
+    }
+    const row = await transaction
+      .selectFrom("environments")
+      .select("workspace_id")
+      .where("id", "=", idToBytes(scopeId))
+      .executeTakeFirst();
+    if (row === undefined) {
+      throw new ResourceNotFoundError("Environment not found");
+    }
+    return {
+      workspaceId: bytesToId(row.workspace_id),
+      scopeKind,
+      scopeId,
+    };
   }
 
   /**
@@ -565,6 +891,7 @@ export class VariableService {
       variables: [...variables.values()],
       sources,
       evidence,
+      selectedEnvironmentId: environment?.environmentId ?? null,
     };
   }
 
@@ -603,6 +930,7 @@ export class VariableService {
       variables: [...variables.values()],
       sources,
       evidence: inherited.evidence,
+      selectedEnvironmentId: inherited.selectedEnvironmentId,
     };
   }
 
@@ -857,6 +1185,42 @@ export class VariableService {
         },
       });
     }
+  }
+}
+
+/** Maps an SDK destination name to its execution-pinned persisted profile. */
+function scriptWriteTarget(
+  targets: ScriptVariableWriteTargets,
+  scope: ScriptVariableWriteScope,
+) {
+  switch (scope) {
+    case "workspace":
+      return targets.workspace;
+    case "parent-collection":
+      return targets.parentCollection;
+    case "request":
+      return targets.request;
+    case "selected-environment":
+      return targets.selectedEnvironment;
+  }
+}
+
+/** Converts a redacted view back into a non-destructive profile replacement. */
+function preservedVariableWrite(variable: VariableView): VariableWrite {
+  const common = {
+    variableId: variable.variableId,
+    name: variable.name,
+    description: variable.description,
+  };
+  switch (variable.kind) {
+    case "value":
+      return { ...common, kind: "value", value: variable.value };
+    case "alias":
+      return { ...common, kind: "alias", target: variable.target };
+    case "unset":
+      return { ...common, kind: "unset" };
+    case "secret":
+      return { ...common, kind: "secret" };
   }
 }
 

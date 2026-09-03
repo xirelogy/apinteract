@@ -13,8 +13,8 @@ There are two script phases:
   before it sends anything to the target. Use it to add headers, build a body,
   or set execution-local values.
 - A **post-response script** runs after a target response has been received.
-  Use it to check the status and body, record test results, or set
-  execution-local values for the rest of the execution.
+  Use it to check the status and body, record test results, or persist values
+  for later requests.
 
 Scripts are evaluated by the backend in a restricted environment. The browser
 editor never has access to your script's authoritative execution context, and
@@ -76,7 +76,7 @@ provides these helpers:
 | `execution` | Both          | Safe `id` and `startedAt` values for this execution.      |
 | `request`   | Both          | Read the request; mutate it only in pre-request scripts.  |
 | `response`  | Post-response | Read response status, headers, and a bounded body.        |
-| `variables` | Both          | Read ordinary variables and create safe references.       |
+| `variables` | Both          | Read variables; persist values after a response.          |
 | `local`     | Both          | Share small, temporary values between the two phases.     |
 | `log`       | Both          | Add bounded, structured messages to the execution result. |
 | `test`      | Post-response | Record a named response test.                             |
@@ -188,6 +188,50 @@ change the outbound request could send that secret to an arbitrary target.
 Secret-aware signing and other operations that need to use a secret without
 revealing it may be added later as separate, explicitly permissioned helpers.
 
+### Persist values for later requests
+
+A post-response script can extract response data and save it for subsequent
+requests. Choose the destination explicitly on every write:
+
+```js
+const payload = JSON.parse(asdk.response.body.text());
+
+asdk.variables.set("customerId", payload.customerId, {
+  scope: "workspace",
+});
+asdk.variables.setSecret("accessToken", payload.accessToken, {
+  scope: "selected-environment",
+});
+```
+
+`set(name, value, options)` saves an ordinary string. `setSecret` saves a
+string through secret storage so its plaintext is not returned by variable
+APIs, execution results, or audit events. Both setters are available only in
+post-response scripts and accept these destinations:
+
+| Scope                    | Destination                                     |
+| ------------------------ | ----------------------------------------------- |
+| `"request"`              | The current saved request                       |
+| `"parent-collection"`    | The request's immediate parent collection       |
+| `"workspace"`            | The request's workspace                         |
+| `"selected-environment"` | The environment selected when execution started |
+
+Temporary requests have no `request` destination. A root-level request has no
+`parent-collection` destination, and `selected-environment` requires an active
+selection. Calling a setter for an unavailable or administrator-disabled
+destination raises `sdk_permission_denied`.
+
+A missing variable is created at the end of the target profile. Existing
+ordinary values can be changed with `set`, and existing secrets with
+`setSecret`. An unset declaration can become either kind. Aliases and
+opposite-kind declarations are not converted implicitly.
+
+Writes are queued while the script runs and commit together with the completed
+execution. If the script throws, no queued value is saved. If a target profile
+changes while the request is running, all queued writes are discarded and the
+execution reports `variable_write_conflict` beside the response. Repeated
+writes to the same name and scope use the last value supplied by the script.
+
 ## Share temporary values
 
 `asdk.local` is an execution-only key/value store. It is useful when a
@@ -256,8 +300,9 @@ log credentials, tokens, or request bodies containing secrets.
 ## Limits and unavailable features
 
 Every script has limits for source size, input and output size, body size, log
-entries, local values, memory, and execution time. The effective values are
-available through `asdk.limits`; a script cannot increase them.
+entries, local values, persistent variable writes, memory, and execution time.
+The effective values are available through `asdk.limits`; a script cannot
+increase them.
 
 The scripting environment does not provide:
 
@@ -287,6 +332,8 @@ cpu_limit_exceeded
 memory_limit_exceeded
 time_limit_exceeded
 output_limit_exceeded
+variable_write_conflict
+variable_write_denied
 cancelled
 ```
 
@@ -295,9 +342,10 @@ credentials, stack traces from the backend, or secret values.
 
 ## Keeping scripts working
 
-Scripts are saved with their language, SDK version, phase, permissions, and a
-source revision. APInteract keeps those details with the execution so a later
-upgrade does not silently change the behavior of an earlier request version.
+Scripts are saved as part of the immutable request revision used by an
+execution. Persistent variable destinations and secret writes are subject to
+the backend's scripting policy and the executing user's access to the target
+resource.
 
 For portable scripts:
 

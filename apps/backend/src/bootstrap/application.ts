@@ -131,6 +131,12 @@ export async function createApplication(
     blobs,
     audit,
     scripts,
+    {
+      variables,
+      ...(configuration.scripts === undefined
+        ? {}
+        : { policy: configuration.scripts.variableWrites }),
+    },
   );
   const requestExchanges = new RequestExchangeService(
     database.db,

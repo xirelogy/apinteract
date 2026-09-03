@@ -2,6 +2,13 @@ import { readFile } from "node:fs/promises";
 
 import { parse } from "yaml";
 
+import {
+  DEFAULT_SCRIPT_VARIABLE_WRITE_POLICY,
+  SCRIPT_VARIABLE_WRITE_SCOPES,
+  type ScriptVariableWritePolicy,
+  type ScriptVariableWriteScope,
+} from "./scripting/script-types.js";
+
 export interface BackendConfiguration {
   readonly configVersion: 1;
   readonly server: {
@@ -36,6 +43,9 @@ export interface BackendConfiguration {
   readonly plugins?: {
     readonly builtinPath: string;
     readonly userPath: string;
+  };
+  readonly scripts?: {
+    readonly variableWrites: ScriptVariableWritePolicy;
   };
 }
 
@@ -73,6 +83,48 @@ function integer(
   return value as number;
 }
 
+/** Reads a boolean or applies its documented default. */
+function boolean(
+  value: unknown,
+  location: string,
+  defaultValue: boolean,
+): boolean {
+  if (value === undefined) return defaultValue;
+  if (typeof value !== "boolean") {
+    throw new Error(`${location} must be a boolean`);
+  }
+  return value;
+}
+
+/** Reads the unique allowlisted scopes accepted by script variable setters. */
+function variableWriteScopes(
+  value: unknown,
+): readonly ScriptVariableWriteScope[] {
+  if (value === undefined) {
+    return DEFAULT_SCRIPT_VARIABLE_WRITE_POLICY.allowedScopes;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(
+      "config.scripts.variableWrites.allowedScopes must be an array",
+    );
+  }
+  const allowed = new Set<string>(SCRIPT_VARIABLE_WRITE_SCOPES);
+  const scopes = value.map((scope) => {
+    if (typeof scope !== "string" || !allowed.has(scope)) {
+      throw new Error(
+        "config.scripts.variableWrites.allowedScopes contains an unsupported scope",
+      );
+    }
+    return scope as ScriptVariableWriteScope;
+  });
+  if (new Set(scopes).size !== scopes.length) {
+    throw new Error(
+      "config.scripts.variableWrites.allowedScopes must not contain duplicates",
+    );
+  }
+  return scopes;
+}
+
 /**
  * Loads the backend's complete strict-YAML configuration.
  *
@@ -95,6 +147,11 @@ export async function loadBackendConfiguration(
   const sessions = record(document.sessions ?? {}, "config.sessions");
   const frontend = record(document.frontend ?? {}, "config.frontend");
   const plugins = record(document.plugins ?? {}, "config.plugins");
+  const scripts = record(document.scripts ?? {}, "config.scripts");
+  const variableWrites = record(
+    scripts.variableWrites ?? {},
+    "config.scripts.variableWrites",
+  );
 
   const secureCookie =
     sessions.secureCookie === undefined ? true : sessions.secureCookie;
@@ -176,6 +233,16 @@ export async function loadBackendConfiguration(
         "config.plugins.userPath",
         "/data/plugins",
       ),
+    },
+    scripts: {
+      variableWrites: {
+        allowedScopes: variableWriteScopes(variableWrites.allowedScopes),
+        allowSecrets: boolean(
+          variableWrites.allowSecrets,
+          "config.scripts.variableWrites.allowSecrets",
+          DEFAULT_SCRIPT_VARIABLE_WRITE_POLICY.allowSecrets,
+        ),
+      },
     },
   };
 }

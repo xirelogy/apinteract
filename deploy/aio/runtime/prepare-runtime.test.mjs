@@ -31,6 +31,12 @@ test("generates matching private AIO component credentials", async () => {
       configVersion: 1,
       server: { publicOrigin: "https://api.example.test" },
       sessions: { accessLifetimeSeconds: 300 },
+      scripts: {
+        variableWrites: {
+          allowedScopes: ["workspace", "selected-environment"],
+          allowSecrets: false,
+        },
+      },
       proxy: { bearerToken: "administrator-token-must-not-survive" },
     }),
   );
@@ -70,6 +76,10 @@ test("generates matching private AIO component credentials", async () => {
   );
   assert.equal(prepared.backend.sessions.secureCookie, true);
   assert.equal(prepared.backend.sessions.accessLifetimeSeconds, 300);
+  assert.deepEqual(prepared.backend.scripts.variableWrites, {
+    allowedScopes: ["workspace", "selected-environment"],
+    allowSecrets: false,
+  });
   assert.equal(prepared.backend.frontend.distPath, "/test/frontend");
   assert.equal(prepared.backend.proxy.endpoint, "http://127.0.0.1:8081");
   assert.equal(prepared.proxy.server.host, "127.0.0.1");

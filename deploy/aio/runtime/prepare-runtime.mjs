@@ -210,6 +210,7 @@ function validateBackendConfigurationKeys(configuration) {
     "proxy",
     "sessions",
     "frontend",
+    "scripts",
   ]);
   requireKnownKeys(
     recordOrEmpty(configuration.server, "config.server"),
@@ -250,6 +251,13 @@ function validateBackendConfigurationKeys(configuration) {
     recordOrEmpty(configuration.frontend, "config.frontend"),
     "config.frontend",
     ["distPath"],
+  );
+  const scripts = recordOrEmpty(configuration.scripts, "config.scripts");
+  requireKnownKeys(scripts, "config.scripts", ["variableWrites"]);
+  requireKnownKeys(
+    recordOrEmpty(scripts.variableWrites, "config.scripts.variableWrites"),
+    "config.scripts.variableWrites",
+    ["allowedScopes", "allowSecrets"],
   );
 }
 

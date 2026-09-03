@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import type { Kysely, Transaction } from "kysely";
 
 import type { components as ProxyComponents } from "@apinteract/api-contracts/proxy";
 
@@ -21,13 +21,19 @@ import type {
 import { composeWithVariables } from "../requests/request-service.js";
 import { ScriptService } from "../scripting/script-service.js";
 import {
+  DEFAULT_SCRIPT_VARIABLE_WRITE_POLICY,
   ScriptExecutionError,
   type ScriptRequest,
   type ScriptTestResult,
+  type ScriptVariableWrite,
+  type ScriptVariableWritePolicy,
 } from "../scripting/script-types.js";
 import type { WorkspaceService } from "../workspaces/workspace-service.js";
 import { ResourceNotFoundError } from "../workspaces/workspace-service.js";
-import type { TemporaryRequestVariableProfile } from "../variables/variable-service.js";
+import type {
+  TemporaryRequestVariableProfile,
+  VariableService,
+} from "../variables/variable-service.js";
 import { DEFAULT_BACKEND_USER_AGENT } from "../version.js";
 import {
   executionRequestFromScript,
@@ -111,6 +117,12 @@ export interface ExecutionBody {
   readonly sha256: string;
 }
 
+/** Optional persistence capability used by post-response automation. */
+export interface ExecutionVariableWriteOptions {
+  readonly variables?: VariableService;
+  readonly policy?: ScriptVariableWritePolicy;
+}
+
 /**
  * Orchestrates a saved request through the proxy and persists its response.
  *
@@ -126,6 +138,8 @@ export class ExecutionService {
   readonly #blobs: LocalBlobStore;
   readonly #audit: AuditService;
   readonly #scripts: ScriptService;
+  readonly #variables: VariableService | undefined;
+  readonly #variableWritePolicy: ScriptVariableWritePolicy;
   readonly #starting = new Set<Promise<ExecutionView>>();
   readonly #active = new Set<Promise<void>>();
   #accepting = true;
@@ -138,6 +152,7 @@ export class ExecutionService {
     blobs: LocalBlobStore,
     audit: AuditService,
     scripts = new ScriptService(),
+    variableWrites: ExecutionVariableWriteOptions = {},
   ) {
     this.#database = database;
     this.#requests = requests;
@@ -146,6 +161,9 @@ export class ExecutionService {
     this.#blobs = blobs;
     this.#audit = audit;
     this.#scripts = scripts;
+    this.#variables = variableWrites.variables;
+    this.#variableWritePolicy =
+      variableWrites.policy ?? DEFAULT_SCRIPT_VARIABLE_WRITE_POLICY;
   }
 
   /** Starts asynchronous proxy execution and returns its initial running view. */
@@ -497,6 +515,7 @@ export class ExecutionService {
       );
     }
     if (prepared.request.postResponseScript.trim() !== "") {
+      let variableWrites: readonly ScriptVariableWrite[] = [];
       try {
         let body: Buffer | undefined;
         try {
@@ -554,8 +573,10 @@ export class ExecutionService {
               new VariableResolver(prepared.variables),
             ),
             local,
+            variableWritePolicy: this.#effectiveVariableWritePolicy(prepared),
           },
         );
+        variableWrites = result.variableWrites;
         const sequenceOffset = scripts.logs.reduce(
           (latest, entry) => Math.max(latest, entry.sequence),
           0,
@@ -580,6 +601,31 @@ export class ExecutionService {
           error: scriptPhaseError(cause, "post-response"),
         };
       }
+      try {
+        const view = await this.#persistTerminal(
+          prepared,
+          userId,
+          blob,
+          head,
+          true,
+          null,
+          scripts,
+          outgoingRequest,
+          variableWrites,
+        );
+        publish({
+          type: "execution.completed",
+          executionId: prepared.executionId,
+          payload: view,
+        });
+        return;
+      } catch (cause) {
+        if (!(cause instanceof ScriptExecutionError)) throw cause;
+        scripts = {
+          ...scripts,
+          error: scriptPhaseError(cause, "post-response"),
+        };
+      }
     }
     const view = await this.#persistTerminal(
       prepared,
@@ -590,6 +636,7 @@ export class ExecutionService {
       null,
       scripts,
       outgoingRequest,
+      [],
     );
     publish({
       type: "execution.completed",
@@ -627,6 +674,7 @@ export class ExecutionService {
       error,
       scripts,
       outgoingRequest,
+      [],
     );
     publish({
       type: "execution.failed",
@@ -645,6 +693,7 @@ export class ExecutionService {
     error: { readonly code: string; readonly message: string } | null,
     scripts: ScriptSummary,
     outgoingRequest: OutgoingRequestView | undefined,
+    variableWrites: readonly ScriptVariableWrite[],
   ): Promise<ExecutionView> {
     const completedAt = Date.now();
     // The file is committed before this transaction. Blob metadata, its
@@ -652,6 +701,12 @@ export class ExecutionService {
     // committed atomically. Crash recovery may need to remove an orphan file
     // that was renamed before this transaction began.
     await this.#database.transaction().execute(async (transaction) => {
+      await this.#applyVariableWrites(
+        transaction,
+        prepared,
+        userId,
+        variableWrites,
+      );
       if (blob !== undefined) {
         await transaction
           .insertInto("blobs")
@@ -734,6 +789,57 @@ export class ExecutionService {
       scriptTests: scripts.tests,
       ...(scripts.error === undefined ? {} : { scriptError: scripts.error }),
     };
+  }
+
+  /** Restricts configured writes to destinations pinned for this execution. */
+  #effectiveVariableWritePolicy(
+    prepared: PreparedExecution,
+  ): ScriptVariableWritePolicy {
+    if (this.#variables === undefined) {
+      return { allowedScopes: [], allowSecrets: false };
+    }
+    const available = new Set([
+      "workspace",
+      ...(prepared.variableWriteTargets.parentCollection === undefined
+        ? []
+        : ["parent-collection"]),
+      ...(prepared.variableWriteTargets.request === undefined
+        ? []
+        : ["request"]),
+      ...(prepared.variableWriteTargets.selectedEnvironment === undefined
+        ? []
+        : ["selected-environment"]),
+    ]);
+    return {
+      allowedScopes: this.#variableWritePolicy.allowedScopes.filter((scope) =>
+        available.has(scope),
+      ),
+      allowSecrets: this.#variableWritePolicy.allowSecrets,
+    };
+  }
+
+  /** Rechecks and applies worker-requested writes inside terminal persistence. */
+  async #applyVariableWrites(
+    transaction: Transaction<DatabaseSchema>,
+    prepared: PreparedExecution,
+    userId: EntityId,
+    writes: readonly ScriptVariableWrite[],
+  ): Promise<void> {
+    if (writes.length === 0) return;
+    if (this.#variables === undefined) {
+      throw new ScriptExecutionError(
+        "variable_write_denied",
+        "Persistent variable writes are unavailable",
+      );
+    }
+    await this.#variables.applyScriptWritesInTransaction(
+      transaction,
+      userId,
+      prepared.executionId,
+      prepared.variableWriteTargets,
+      writes,
+      this.#variableWritePolicy,
+    );
   }
 }
 

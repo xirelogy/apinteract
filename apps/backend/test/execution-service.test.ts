@@ -233,10 +233,42 @@ describe("ExecutionService shutdown", () => {
         },
         { name: "token", kind: "secret", value: "top-secret" },
       ]);
-      const request = await requests.createRequest(
+      const collection = await requests.createCollection(
         userId,
         workspace.workspaceId,
         null,
+        "Automation",
+      );
+      const environment = await environments.create(
+        userId,
+        workspace.workspaceId,
+        "Development",
+        [],
+      );
+      const sessionId = createEntityId();
+      const sessionCreatedAt = Date.now();
+      await database.db
+        .insertInto("sessions")
+        .values({
+          id: idToBytes(sessionId),
+          user_id: idToBytes(userId),
+          family_id: idToBytes(createEntityId()),
+          status: "active",
+          created_at: sessionCreatedAt,
+          last_seen_at: sessionCreatedAt,
+          absolute_expires_at: sessionCreatedAt + 60_000,
+        })
+        .execute();
+      await environments.select(
+        userId,
+        sessionId,
+        workspace.workspaceId,
+        environment.environmentId,
+      );
+      const request = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        collection.nodeId,
         "Scripted request",
         "GET",
         "<<test-host>>/test",
@@ -266,11 +298,26 @@ describe("ExecutionService shutdown", () => {
           asdk.log.info("checked response", {
             url: asdk.request.url.get(),
           });
+          const payload = JSON.parse(asdk.response.body.text());
+          asdk.variables.set("createdResult", String(payload.created), {
+            scope: "workspace",
+          });
+          asdk.variables.setSecret("nextToken", "response-token", {
+            scope: "request",
+          });
+          asdk.variables.set("collectionResult", "ready", {
+            scope: "parent-collection",
+          });
+          asdk.variables.setSecret("environmentToken", "environment-secret", {
+            scope: "selected-environment",
+          });
         `,
       );
       const responseBody = Buffer.from('{"created":true}');
       let sentMethod = "";
       let sentUrl = "";
+      let chainedUrl = "";
+      let chainedAuthorization = "";
       let sentBody: Uint8Array = new Uint8Array();
       let sentHeaders: readonly {
         readonly name: string;
@@ -298,6 +345,13 @@ describe("ExecutionService shutdown", () => {
             sentHeaders = headers;
             sentBody = body;
           }
+          if (url === "https://example.test/true") {
+            chainedUrl = url;
+            chainedAuthorization =
+              headers.find(
+                (header) => header.name.toLowerCase() === "authorization",
+              )?.value ?? "";
+          }
           await sink.responseHead({
             type: "response_head",
             status: 201,
@@ -320,14 +374,42 @@ describe("ExecutionService shutdown", () => {
         blobs,
         audit,
         scripts,
+        { variables },
       );
       const events: ExecutionEvent[] = [];
+      /** Releases the chained request only after the producer committed its values. */
+      let resolveFirstCompletion: () => void = () => undefined;
+      const firstCompletion = new Promise<void>((resolvePromise) => {
+        resolveFirstCompletion = resolvePromise;
+      });
 
+      await executions.start(userId, sessionId, request.requestId, (event) => {
+        events.push(event);
+        if (event.type === "execution.completed") resolveFirstCompletion();
+      });
+      await firstCompletion;
+      const chainedRequest = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        collection.nodeId,
+        "Chained consumer",
+        "GET",
+        "https://example.test/<<createdResult>>",
+        [],
+        [
+          {
+            name: "Authorization",
+            value: "Bearer <<environmentToken>>",
+            enabled: true,
+          },
+        ],
+        "",
+      );
       await executions.start(
         userId,
-        createEntityId(),
-        request.requestId,
-        (event) => events.push(event),
+        sessionId,
+        chainedRequest.requestId,
+        () => undefined,
       );
       const failingRequest = await requests.createRequest(
         userId,
@@ -381,6 +463,8 @@ describe("ExecutionService shutdown", () => {
         value: "Bearer top-secret",
       });
       expect(sentHeaders).toContainEqual({ name: "X-Scripted", value: "yes" });
+      expect(chainedUrl).toBe("https://example.test/true");
+      expect(chainedAuthorization).toBe("Bearer environment-secret");
       expect(sentHeaders).toContainEqual({
         name: "User-Agent",
         value: DEFAULT_BACKEND_USER_AGENT,
@@ -458,6 +542,54 @@ describe("ExecutionService shutdown", () => {
       expect(transportFailingEvents.at(-1)?.payload).not.toHaveProperty(
         "scriptError",
       );
+      const workspaceVariables = await variables.get(
+        userId,
+        "workspace",
+        workspace.workspaceId,
+        null,
+      );
+      expect(workspaceVariables.revision).toBe(2);
+      expect(
+        workspaceVariables.variables.find(
+          (variable) => variable.name === "createdResult",
+        ),
+      ).toMatchObject({ name: "createdResult", kind: "value", value: "true" });
+      expect(
+        await variables.get(userId, "request", request.requestId, null),
+      ).toMatchObject({
+        revision: 1,
+        variables: [{ name: "nextToken", kind: "secret", hasValue: true }],
+      });
+      expect(
+        await variables.get(userId, "collection", collection.nodeId, null),
+      ).toMatchObject({
+        revision: 1,
+        variables: [
+          { name: "collectionResult", kind: "value", value: "ready" },
+        ],
+      });
+      expect(
+        await environments.get(userId, environment.environmentId),
+      ).toMatchObject({
+        revision: 1,
+        variables: [
+          { name: "environmentToken", kind: "secret", hasValue: true },
+        ],
+      });
+      const persistedExecution = await database.db
+        .selectFrom("executions")
+        .select("script_result_json")
+        .where("id", "=", idToBytes(events.at(-1)!.executionId))
+        .executeTakeFirstOrThrow();
+      const auditEvents = await database.db
+        .selectFrom("audit_outbox")
+        .select("event_json")
+        .execute();
+      expect(persistedExecution.script_result_json).not.toContain(
+        "response-token",
+      );
+      expect(JSON.stringify(auditEvents)).not.toContain("response-token");
+      expect(JSON.stringify(auditEvents)).not.toContain("environment-secret");
     } finally {
       await scripts.close();
       await database.close();

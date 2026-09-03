@@ -175,6 +175,107 @@ describe(
         { sequence: 1, name: "created", status: "passed" },
       ]);
       expect(result.local).toEqual({ result: "ok" });
+      expect(result.variableWrites).toEqual([]);
+    });
+
+    it("queues bounded persistent values and redacts declared secret output", async () => {
+      service = new ScriptService();
+
+      const result = await service.runPostResponse(
+        `
+        const payload = JSON.parse(asdk.response.body.text());
+        const secret = "response-secret";
+        asdk.log.info("received " + secret, { secret });
+        asdk.local.set("temporarySecret", secret);
+        asdk.variables.set("customerId", payload.id, { scope: "workspace" });
+        asdk.variables.set("customerId", "item-2", { scope: "workspace" });
+        asdk.variables.setSecret("accessToken", secret, {
+          scope: "selected-environment",
+        });
+      `,
+        {
+          ...postInput(),
+          variableWritePolicy: {
+            allowedScopes: ["workspace", "selected-environment"],
+            allowSecrets: true,
+          },
+        },
+      );
+
+      expect(result.variableWrites).toEqual([
+        {
+          scope: "workspace",
+          name: "customerId",
+          kind: "value",
+          value: "item-2",
+        },
+        {
+          scope: "selected-environment",
+          name: "accessToken",
+          kind: "secret",
+          value: "response-secret",
+        },
+      ]);
+      expect(result.logs).toEqual([
+        {
+          sequence: 1,
+          level: "info",
+          message: "received [secret]",
+          fields: { secret: "[secret]" },
+        },
+      ]);
+      expect(result.local).toEqual({ temporarySecret: "[secret]" });
+    });
+
+    it("enforces persistent write policy and limits inside the sandbox", async () => {
+      service = new ScriptService();
+
+      await expect(
+        service.runPostResponse(
+          'asdk.variables.set("id", "1", { scope: "workspace" });',
+          postInput(),
+        ),
+      ).rejects.toMatchObject({ code: "sdk_permission_denied" });
+      await expect(
+        service.runPostResponse(
+          `
+          asdk.variables.set("first", "1", { scope: "workspace" });
+          asdk.variables.set("second", "2", { scope: "workspace" });
+        `,
+          {
+            ...postInput(),
+            variableWritePolicy: {
+              allowedScopes: ["workspace"],
+              allowSecrets: true,
+            },
+            limits: { variableWriteCount: 1 },
+          },
+        ),
+      ).rejects.toMatchObject({ code: "output_limit_exceeded" });
+    });
+
+    it("redacts a declared secret from a later script failure", async () => {
+      service = new ScriptService();
+
+      await expect(
+        service.runPostResponse(
+          `
+          const secret = "failure-secret";
+          asdk.variables.setSecret("token", secret, { scope: "workspace" });
+          throw new Error("failed with " + secret);
+        `,
+          {
+            ...postInput(),
+            variableWritePolicy: {
+              allowedScopes: ["workspace"],
+              allowSecrets: true,
+            },
+          },
+        ),
+      ).rejects.toMatchObject({
+        code: "runtime_error",
+        message: "failed with [secret]",
+      });
     });
 
     it("does not provide ambient host capabilities", async () => {

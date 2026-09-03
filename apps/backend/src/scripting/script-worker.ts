@@ -187,8 +187,32 @@ async function execute(invocation: WorkerInvocation): Promise<unknown> {
         { type: "global" },
       );
       if (isFail(evaluated)) {
-        const failure = sanitizeGuestFailure(context.dump(evaluated.error));
+        let failure = sanitizeGuestFailure(context.dump(evaluated.error));
         evaluated.error.dispose();
+        const redactText = context.getProp(bridge, "redactText");
+        try {
+          const message = context.newString(failure.message);
+          try {
+            const redacted = context.callFunction(
+              redactText,
+              context.undefined,
+              [message],
+            );
+            if (isFail(redacted)) {
+              redacted.error.dispose();
+            } else {
+              const redactedMessage: unknown = context.dump(redacted.value);
+              redacted.value.dispose();
+              if (typeof redactedMessage === "string") {
+                failure = { ...failure, message: redactedMessage };
+              }
+            }
+          } finally {
+            message.dispose();
+          }
+        } finally {
+          redactText.dispose();
+        }
         throw new WorkerScriptError(failure);
       }
       evaluated.value.dispose();

@@ -27,6 +27,9 @@ import {
 import type { DatabaseSchema } from "../persistence/schema.js";
 import type { ScriptRequest } from "../scripting/script-types.js";
 import type {
+  EffectiveVariableProfile,
+  ScriptVariableWriteTarget,
+  ScriptVariableWriteTargets,
   TemporaryRequestVariableProfile,
   VariableService,
 } from "../variables/variable-service.js";
@@ -254,6 +257,7 @@ export interface PreparedExecution {
   readonly variables: readonly ResolvedVariable[];
   readonly variableSources: ReadonlyMap<string, VariablePreviewSource>;
   readonly variableEvidence: readonly VariableProfileEvidence[];
+  readonly variableWriteTargets: ScriptVariableWriteTargets;
   readonly postScriptRequest?: ScriptRequest;
   readonly materialized: boolean;
   readonly createdAt: number;
@@ -2086,6 +2090,12 @@ export class RequestService {
         variables: variableProfile.variables,
         variableSources: variableProfile.sources,
         variableEvidence: variableProfile.evidence,
+        variableWriteTargets: scriptVariableWriteTargets(
+          request.workspaceId,
+          request.parentCollectionId,
+          requestId,
+          variableProfile,
+        ),
         materialized: eagerlyComposed !== undefined,
         createdAt,
       };
@@ -2206,6 +2216,14 @@ export class RequestService {
         variables: variableProfile.variables,
         variableSources: variableProfile.sources,
         variableEvidence: variableProfile.evidence,
+        variableWriteTargets: scriptVariableWriteTargets(
+          workspaceId,
+          row.parent_collection_id === null
+            ? null
+            : bytesToId(row.parent_collection_id),
+          requestId,
+          variableProfile,
+        ),
         materialized: eagerlyComposed !== undefined,
         createdAt,
       };
@@ -2337,6 +2355,12 @@ export class RequestService {
         variables: variableProfile.variables,
         variableSources: variableProfile.sources,
         variableEvidence: variableProfile.evidence,
+        variableWriteTargets: scriptVariableWriteTargets(
+          workspaceId,
+          parentCollectionId,
+          null,
+          variableProfile,
+        ),
         materialized: eagerlyComposed !== undefined,
         createdAt,
       };
@@ -3731,6 +3755,57 @@ function validateScript(value: string): string {
     throw new Error("Request script is too large");
   }
   return value;
+}
+
+/** Captures writable profile identities before asynchronous proxy work begins. */
+function scriptVariableWriteTargets(
+  workspaceId: EntityId,
+  parentCollectionId: EntityId | null,
+  requestId: EntityId | null,
+  profile: EffectiveVariableProfile,
+): ScriptVariableWriteTargets {
+  /** Finds the baseline revision for one destination, including implicit profiles. */
+  const revision = (
+    scopeKind: ScriptVariableWriteTarget["scopeKind"],
+    scopeId: EntityId,
+  ): number =>
+    profile.evidence.find(
+      (item) => item.scope === scopeKind && item.scopeId === scopeId,
+    )?.revision ?? 0;
+  return {
+    workspace: {
+      scopeKind: "workspace",
+      scopeId: workspaceId,
+      revision: revision("workspace", workspaceId),
+    },
+    ...(parentCollectionId === null
+      ? {}
+      : {
+          parentCollection: {
+            scopeKind: "collection" as const,
+            scopeId: parentCollectionId,
+            revision: revision("collection", parentCollectionId),
+          },
+        }),
+    ...(requestId === null
+      ? {}
+      : {
+          request: {
+            scopeKind: "request" as const,
+            scopeId: requestId,
+            revision: revision("request", requestId),
+          },
+        }),
+    ...(profile.selectedEnvironmentId === null
+      ? {}
+      : {
+          selectedEnvironment: {
+            scopeKind: "environment" as const,
+            scopeId: profile.selectedEnvironmentId,
+            revision: revision("environment", profile.selectedEnvironmentId),
+          },
+        }),
+  };
 }
 
 /** Normalizes and validates content shared by saved and temporary executions. */
