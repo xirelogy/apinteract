@@ -149,7 +149,7 @@ test("publishes only validated version tags as immutable and latest images", () 
   assert.match(publishWorkflow, /cosign sign --yes/);
   assert.match(
     publishWorkflow,
-    /--volume "\$\{DOCKER_CONFIG\}\/config\.json:\/root\/\.docker\/config\.json:ro"/,
+    /--user "\$\(id -u\):\$\(id -g\)"[^]*--env DOCKER_CONFIG=\/docker-config[^]*--volume "\$\{DOCKER_CONFIG\}:\/docker-config:ro"/,
   );
   assert.match(
     publishWorkflow,

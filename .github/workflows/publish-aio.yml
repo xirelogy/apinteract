@@ -132,12 +132,12 @@ jobs:
           }
           cosign() {
             docker run --rm \
+              --user "$(id -u):$(id -g)" \
               --env ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               --env ACTIONS_ID_TOKEN_REQUEST_URL \
               --env COSIGN_EXPERIMENTAL=1 \
               --env DOCKER_CONFIG=/docker-config \
               --volume "${DOCKER_CONFIG}:/docker-config:ro" \
-              --volume "${DOCKER_CONFIG}/config.json:/root/.docker/config.json:ro" \
               --volume "${evidence}:/evidence:ro" \
               "${COSIGN_IMAGE}" "$@"
           }

@@ -121,6 +121,8 @@ when deployments must not follow that moving alias.
 The published digest is signed through GitHub's OIDC identity. The workflow
 also attaches its SLSA provenance and the release build's SPDX image SBOM, then
 retains the remaining release evidence as a workflow artifact for 30 days.
+The Cosign container runs with the runner's numeric user and group so it can
+read the runner-owned, mode-restricted temporary Docker credential directory.
 Configure a GitHub Actions repository secret named `DOCKERHUB_TOKEN` with a
 Docker Hub personal access token that can write to the `xirelogy/apinteract`
 repository. The Docker Hub repository controls whether anonymous users can pull
