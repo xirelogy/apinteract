@@ -653,7 +653,6 @@ function formatScriptLocation(error: ScriptError): string {
             <strong v-else-if="card.type === 'test'">
               {{ t(`scripting.testStatus.${card.test.status}`) }}
             </strong>
-            <strong v-else>{{ localizeScriptCode(card.error.code) }}</strong>
             <code v-if="card.type === 'error'" class="script-result-code">
               {{ card.error.code }}
             </code>
@@ -671,10 +670,17 @@ function formatScriptLocation(error: ScriptError): string {
             </small>
           </template>
           <template v-else>
-            <span class="script-result-message">{{ card.error.message }}</span>
-            <small v-if="card.error.line">
-              {{ formatScriptLocation(card.error) }}
-            </small>
+            <div class="script-result-error-details">
+              <strong class="script-result-summary">
+                {{ localizeScriptCode(card.error.code) }}
+              </strong>
+              <span class="script-result-message">
+                {{ ` — ${card.error.message}` }}
+              </span>
+              <small v-if="card.error.line">
+                · {{ formatScriptLocation(card.error) }}
+              </small>
+            </div>
           </template>
         </div>
         <div v-if="!scriptResultCards.length" class="response-detail-empty">

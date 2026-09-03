@@ -455,6 +455,17 @@ describe("ResponsePanel body transfer", () => {
     );
     expect(wrapper.get(".script-results").text()).toContain("runtime_error");
     expect(wrapper.get(".script-results").text()).toContain("Line 3, column 2");
+    const errorCard = wrapper
+      .findAll(".script-result-card")
+      .find((card) => card.attributes("data-kind") === "error");
+    expect(errorCard).toBeDefined();
+    expect(errorCard?.get(".script-result-card-header").text()).toBe(
+      "ErrorPost-responseruntime_error",
+    );
+    expect(errorCard?.get(".script-result-error-details").text()).toBe(
+      "Script failed while running — Example failure · Line 3, column 2",
+    );
+    expect(errorCard?.element.children).toHaveLength(2);
     expect(
       wrapper
         .findAll(".script-result-card")
