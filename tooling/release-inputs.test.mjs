@@ -22,6 +22,10 @@ const publishWorkflow = await readFile(
   new URL("../.github/workflows/publish-aio.yml", import.meta.url),
   "utf8",
 );
+const dockerHubReadme = await readFile(
+  new URL("../README.DockerHub.md", import.meta.url),
+  "utf8",
+);
 
 test("pins release build inputs and verifies downloaded supervisor archives", () => {
   assert.match(
@@ -182,4 +186,29 @@ test("publishes only validated version tags as immutable and latest images", () 
       new RegExp(`uses: actions/${action}@[a-f0-9]{40}`),
     );
   }
+});
+
+test("publishes the dedicated Docker Hub overview before mutating image tags", () => {
+  assert.match(
+    publishWorkflow,
+    /uses: peter-evans\/dockerhub-description@[a-f0-9]{40}/,
+  );
+  assert.match(
+    publishWorkflow,
+    /password: \$\{\{ secrets\.DOCKERHUB_TOKEN \}\}/,
+  );
+  assert.match(publishWorkflow, /repository: xirelogy\/apinteract/);
+  assert.match(publishWorkflow, /readme-filepath: \.\/README\.DockerHub\.md/);
+  assert.ok(
+    publishWorkflow.indexOf("Publish Docker Hub overview") <
+      publishWorkflow.indexOf("Publish immutable version tag"),
+  );
+  assert.match(dockerHubReadme, /^# APInteract All-In-One$/m);
+  assert.match(dockerHubReadme, /xirelogy\/apinteract:VERSION/);
+  assert.doesNotMatch(
+    dockerHubReadme,
+    /(?<![0-9.])v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?![0-9.])/,
+  );
+  assert.match(dockerHubReadme, /\.sig` and `\.att`/);
+  assert.match(dockerHubReadme, /release verification guide/);
 });
