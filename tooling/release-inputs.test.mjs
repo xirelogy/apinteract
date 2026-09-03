@@ -26,6 +26,10 @@ const dockerHubReadme = await readFile(
   new URL("../README.DockerHub.md", import.meta.url),
   "utf8",
 );
+const publicReadme = await readFile(
+  new URL("../README.md", import.meta.url),
+  "utf8",
+);
 
 test("pins release build inputs and verifies downloaded supervisor archives", () => {
   assert.match(
@@ -211,4 +215,24 @@ test("publishes the dedicated Docker Hub overview before mutating image tags", (
   );
   assert.match(dockerHubReadme, /\.sig` and `\.att`/);
   assert.match(dockerHubReadme, /release verification guide/);
+});
+
+test("shows automatically maintained release, Docker, and license badges", () => {
+  assert.match(
+    publicReadme,
+    /img\.shields\.io\/github\/v\/tag\/xirelogy\/apinteract\?include_prereleases&sort=semver&label=docker%20image/,
+  );
+  assert.match(
+    publicReadme,
+    /img\.shields\.io\/docker\/pulls\/xirelogy\/apinteract/,
+  );
+  assert.match(
+    publicReadme,
+    /img\.shields\.io\/github\/license\/xirelogy\/apinteract/,
+  );
+  assert.match(publicReadme, /hub\.docker\.com\/r\/xirelogy\/apinteract\/tags/);
+  assert.doesNotMatch(publicReadme, /public alpha|current alpha release/i);
+  assert.doesNotMatch(publicReadme, /planned shortly|proposed\s+\[/i);
+  assert.match(publicReadme, /APInteract is actively developed\./);
+  assert.match(publicReadme, /^## Develop From Source$/m);
 });
