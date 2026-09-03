@@ -421,8 +421,8 @@ describe("ResponsePanel body transfer", () => {
       ],
       scriptError: {
         phase: "post-response",
-        code: "runtime_error",
-        message: "Example failure",
+        code: "variable_write_conflict",
+        message: "Variable token cannot be changed from secret to value",
         line: 3,
         column: 2,
       },
@@ -449,21 +449,25 @@ describe("ResponsePanel body transfer", () => {
     expect(wrapper.get(".script-results").text()).not.toContain(
       "Unlocalized backend fallback",
     );
-    expect(wrapper.get(".script-results").text()).toContain("Example failure");
     expect(wrapper.get(".script-results").text()).toContain(
-      "Script failed while running",
+      "Variable token cannot be changed from secret to value",
     );
-    expect(wrapper.get(".script-results").text()).toContain("runtime_error");
+    expect(wrapper.get(".script-results").text()).toContain(
+      "The variable update conflicts with its current state",
+    );
+    expect(wrapper.get(".script-results").text()).toContain(
+      "variable_write_conflict",
+    );
     expect(wrapper.get(".script-results").text()).toContain("Line 3, column 2");
     const errorCard = wrapper
       .findAll(".script-result-card")
       .find((card) => card.attributes("data-kind") === "error");
     expect(errorCard).toBeDefined();
     expect(errorCard?.get(".script-result-card-header").text()).toBe(
-      "ErrorPost-responseruntime_error",
+      "ErrorPost-responsevariable_write_conflict",
     );
     expect(errorCard?.get(".script-result-error-details").text()).toBe(
-      "Script failed while running — Example failure · Line 3, column 2",
+      "The variable update conflicts with its current state — Variable token cannot be changed from secret to value · Line 3, column 2",
     );
     expect(errorCard?.element.children).toHaveLength(2);
     expect(

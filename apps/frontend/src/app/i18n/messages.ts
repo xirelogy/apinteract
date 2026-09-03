@@ -481,7 +481,7 @@ export const enUsMessages = {
       time_limit_exceeded: "The script time limit was exceeded",
       output_limit_exceeded: "The script output limit was exceeded",
       variable_write_conflict:
-        "A variable changed before the script could save its value",
+        "The variable update conflicts with its current state",
       variable_write_denied: "The variable value could not be saved",
       cancelled: "The script was cancelled",
     },
