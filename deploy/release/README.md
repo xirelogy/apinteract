@@ -123,6 +123,12 @@ also attaches its SLSA provenance and the release build's SPDX image SBOM, then
 retains the remaining release evidence as a workflow artifact for 30 days.
 The Cosign container runs with the runner's numeric user and group so it can
 read the runner-owned, mode-restricted temporary Docker credential directory.
+Its home, cache, and temporary paths use a separate runner-owned writable bind
+mount that persists across the signature and both attestation commands; the
+credential and release-evidence mounts remain read-only. This is required
+because the pinned distroless Cosign image normally runs as a different
+unprivileged user, while keyless signing caches Sigstore trust metadata below
+the invoking user's home directory.
 Configure a GitHub Actions repository secret named `DOCKERHUB_TOKEN` with a
 Docker Hub personal access token that can write to the `xirelogy/apinteract`
 repository. The Docker Hub repository controls whether anonymous users can pull

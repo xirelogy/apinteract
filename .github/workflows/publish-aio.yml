@@ -126,6 +126,8 @@ jobs:
         run: |
           set -euo pipefail
           evidence="$(pwd)/var/release/${VERSION}"
+          cosign_home="$(mktemp -d "${RUNNER_TEMP}/apinteract-cosign.XXXXXXXX")"
+          mkdir -p "${cosign_home}/.cache" "${cosign_home}/tmp"
           [[ -s "${DOCKER_CONFIG}/config.json" ]] || {
             printf 'Docker Hub credentials are missing from %s.\n' "${DOCKER_CONFIG}/config.json" >&2
             exit 1
@@ -137,7 +139,11 @@ jobs:
               --env ACTIONS_ID_TOKEN_REQUEST_URL \
               --env COSIGN_EXPERIMENTAL=1 \
               --env DOCKER_CONFIG=/docker-config \
+              --env HOME=/cosign-home \
+              --env TMPDIR=/cosign-home/tmp \
+              --env XDG_CACHE_HOME=/cosign-home/.cache \
               --volume "${DOCKER_CONFIG}:/docker-config:ro" \
+              --volume "${cosign_home}:/cosign-home" \
               --volume "${evidence}:/evidence:ro" \
               "${COSIGN_IMAGE}" "$@"
           }

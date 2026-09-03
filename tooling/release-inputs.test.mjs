@@ -153,6 +153,19 @@ test("publishes only validated version tags as immutable and latest images", () 
   );
   assert.match(
     publishWorkflow,
+    /cosign_home="\$\(mktemp -d "\$\{RUNNER_TEMP\}\/apinteract-cosign\.XXXXXXXX"\)"/,
+  );
+  for (const writablePath of [
+    "HOME=/cosign-home",
+    "TMPDIR=/cosign-home/tmp",
+    "XDG_CACHE_HOME=/cosign-home/.cache",
+  ]) {
+    assert.match(publishWorkflow, new RegExp(`--env ${writablePath}`));
+  }
+  assert.match(publishWorkflow, /--volume "\$\{cosign_home\}:\/cosign-home"/);
+  assert.doesNotMatch(publishWorkflow, /\/root\/\.docker\/config\.json/);
+  assert.match(
+    publishWorkflow,
     /\[\[ -s "\$\{DOCKER_CONFIG\}\/config\.json" \]\]/,
   );
   assert.match(publishWorkflow, /--type slsaprovenance/);
