@@ -126,6 +126,10 @@ jobs:
         run: |
           set -euo pipefail
           evidence="$(pwd)/var/release/${VERSION}"
+          [[ -s "${DOCKER_CONFIG}/config.json" ]] || {
+            printf 'Docker Hub credentials are missing from %s.\n' "${DOCKER_CONFIG}/config.json" >&2
+            exit 1
+          }
           cosign() {
             docker run --rm \
               --env ACTIONS_ID_TOKEN_REQUEST_TOKEN \
@@ -133,6 +137,7 @@ jobs:
               --env COSIGN_EXPERIMENTAL=1 \
               --env DOCKER_CONFIG=/docker-config \
               --volume "${DOCKER_CONFIG}:/docker-config:ro" \
+              --volume "${DOCKER_CONFIG}/config.json:/root/.docker/config.json:ro" \
               --volume "${evidence}:/evidence:ro" \
               "${COSIGN_IMAGE}" "$@"
           }

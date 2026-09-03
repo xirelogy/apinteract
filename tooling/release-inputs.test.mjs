@@ -147,6 +147,14 @@ test("publishes only validated version tags as immutable and latest images", () 
   assert.match(publishWorkflow, /docker push "\$\{IMAGE\}:\$\{VERSION\}"/);
   assert.match(publishWorkflow, /docker push "\$\{IMAGE\}:latest"/);
   assert.match(publishWorkflow, /cosign sign --yes/);
+  assert.match(
+    publishWorkflow,
+    /--volume "\$\{DOCKER_CONFIG\}\/config\.json:\/root\/\.docker\/config\.json:ro"/,
+  );
+  assert.match(
+    publishWorkflow,
+    /\[\[ -s "\$\{DOCKER_CONFIG\}\/config\.json" \]\]/,
+  );
   assert.match(publishWorkflow, /--type slsaprovenance/);
   assert.match(publishWorkflow, /--type spdxjson/);
   assert.match(publishWorkflow, /\[\[ -d "var\/release\/\$\{VERSION\}" \]\]/);
