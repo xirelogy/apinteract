@@ -4,7 +4,7 @@
 
 # APInteract
 
-[![Docker image](https://img.shields.io/github/v/tag/xirelogy/apinteract?filter=%5Ev&include_prereleases&sort=semver&label=docker%20image)](https://hub.docker.com/r/xirelogy/apinteract/tags)
+[![Docker image](https://img.shields.io/github/v/tag/xirelogy/apinteract?filter=v%2A&include_prereleases&sort=semver&label=docker%20image)](https://hub.docker.com/r/xirelogy/apinteract/tags)
 [![Docker pulls](https://img.shields.io/docker/pulls/xirelogy/apinteract)](https://hub.docker.com/r/xirelogy/apinteract)
 [![License](https://img.shields.io/github/license/xirelogy/apinteract)](LICENSE)
 
