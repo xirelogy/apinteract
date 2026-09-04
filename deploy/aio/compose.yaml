@@ -8,7 +8,7 @@ services:
       dockerfile: deploy/aio/Dockerfile
       args:
         APT_MIRROR_URL: "${APT_MIRROR_URL:-}"
-        APINTERACT_VERSION: "${APINTERACT_VERSION:-0.1.0-alpha7}"
+        APINTERACT_VERSION: "${APINTERACT_VERSION:-0.0.0-dev}"
         APINTERACT_SOURCE_COMMIT: "${APINTERACT_SOURCE_COMMIT:-unknown}"
     init: false
     read_only: true
