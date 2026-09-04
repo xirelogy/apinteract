@@ -21,6 +21,16 @@ cosign_image="ghcr.io/sigstore/cosign/cosign:v2.4.1"
 tool_image_pull_attempts=3
 tool_image_pull_retry_delay_seconds=5
 
+# Keep dependency-audit transport resilient to transient registry failures.
+# The registry itself remains selected by the release host's pnpm configuration.
+audit_fetch_retries=5
+audit_fetch_retry_factor=2
+audit_fetch_retry_min_timeout_milliseconds=10000
+audit_fetch_retry_max_timeout_milliseconds=120000
+audit_fetch_timeout_milliseconds=300000
+audit_attempts=3
+audit_retry_delay_seconds=15
+
 # Removes only the private temporary directory created by this invocation.
 cleanup_release_temporary_directory() {
   case "${release_temporary_directory}" in
@@ -208,6 +218,75 @@ run_image_scan() {
     --output "/reports/${report_path}"
 }
 
+# Returns success when an audit report describes a transient registry failure.
+is_transient_audit_failure() {
+  local report_path="$1"
+  node - "${report_path}" <<'NODE'
+const fs = require("node:fs");
+
+const transientCodes = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EAI_AGAIN",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ERR_SOCKET_TIMEOUT",
+  "ERR_PNPM_AUDIT_BAD_RESPONSE",
+  "ETIMEDOUT",
+  "EPIPE",
+]);
+try {
+  const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+  const error = report?.error;
+  const code = typeof error?.code === "string" ? error.code : "";
+  const message = typeof error?.message === "string" ? error.message : "";
+  process.exit(
+    transientCodes.has(code) ||
+      /socket hang up|timed? out|timeout|temporarily unavailable|bad gateway|gateway timeout|service unavailable|\b5\d{2}\b/i.test(
+        message,
+      )
+      ? 0
+      : 1,
+  );
+} catch {
+  process.exit(1);
+}
+NODE
+}
+
+# Runs one dependency audit with explicit command-level retries for transient
+# registry transport failures while preserving the caller's configured
+# registry. Command-level retries are needed because the audit request is a
+# POST and may fail before npm's fetch retry policy can replay it.
+run_dependency_audit() {
+  local output_path="$1"
+  shift
+  local partial_output_path="${output_path}.partial"
+  local audit_status
+  local attempt
+  for ((attempt = 1; attempt <= audit_attempts; attempt++)); do
+    if NPM_CONFIG_FETCH_RETRIES="${audit_fetch_retries}" \
+      NPM_CONFIG_FETCH_RETRY_FACTOR="${audit_fetch_retry_factor}" \
+      NPM_CONFIG_FETCH_RETRY_MINTIMEOUT="${audit_fetch_retry_min_timeout_milliseconds}" \
+      NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT="${audit_fetch_retry_max_timeout_milliseconds}" \
+      NPM_CONFIG_FETCH_TIMEOUT="${audit_fetch_timeout_milliseconds}" \
+      pnpm audit "$@" --json >"${partial_output_path}"; then
+      mv -- "${partial_output_path}" "${output_path}"
+      return 0
+    else
+      audit_status=$?
+    fi
+    if ! is_transient_audit_failure "${partial_output_path}" ||
+      ((attempt == audit_attempts)); then
+      mv -- "${partial_output_path}" "${output_path}"
+      return "${audit_status}"
+    fi
+    printf 'Dependency audit failed with a transient registry error; retrying in %s seconds (attempt %s of %s).\n' \
+      "${audit_retry_delay_seconds}" "$((attempt + 1))" "${audit_attempts}" >&2
+    sleep "${audit_retry_delay_seconds}"
+  done
+}
+
 generate_sbom() {
   local source="$1"
   local output_name="$2"
@@ -288,10 +367,10 @@ build_release() {
   pull_tool_image syft "${syft_image}" "${evidence_directory}"
 
   printf 'Auditing all dependencies...\n'
-  pnpm audit --json >"${evidence_directory}/pnpm-audit-all.json" ||
+  run_dependency_audit "${evidence_directory}/pnpm-audit-all.json" ||
     die "The full dependency audit failed. Review ${evidence_directory}/pnpm-audit-all.json."
   printf 'Auditing production dependencies...\n'
-  pnpm audit --prod --json >"${evidence_directory}/pnpm-audit-production.json" ||
+  run_dependency_audit "${evidence_directory}/pnpm-audit-production.json" --prod ||
     die "The production dependency audit failed. Review ${evidence_directory}/pnpm-audit-production.json."
   printf 'Inventorying all dependency licenses...\n'
   pnpm licenses list --json \

@@ -115,6 +115,46 @@ test("exposes the gated image operation as a release build", () => {
     releaseScript,
     /pnpm install --frozen-lockfile --ignore-scripts --force/,
   );
+  assert.match(releaseScript, /^audit_fetch_retries=5$/m);
+  assert.match(releaseScript, /^audit_fetch_retry_factor=2$/m);
+  assert.match(
+    releaseScript,
+    /^audit_fetch_retry_min_timeout_milliseconds=10000$/m,
+  );
+  assert.match(
+    releaseScript,
+    /^audit_fetch_retry_max_timeout_milliseconds=120000$/m,
+  );
+  assert.match(releaseScript, /^audit_fetch_timeout_milliseconds=300000$/m);
+  assert.match(releaseScript, /^audit_attempts=3$/m);
+  assert.match(releaseScript, /^audit_retry_delay_seconds=15$/m);
+  assert.match(releaseScript, /is_transient_audit_failure/);
+  assert.match(
+    releaseScript,
+    /for \(\(attempt = 1; attempt <= audit_attempts; attempt\+\+\)\)/,
+  );
+  assert.match(
+    releaseScript,
+    /socket hang up\|timed\? out\|timeout\|temporarily unavailable/,
+  );
+  assert.match(
+    releaseScript,
+    /run_dependency_audit "\$\{evidence_directory\}\/pnpm-audit-all\.json"/,
+  );
+  assert.match(
+    releaseScript,
+    /run_dependency_audit "\$\{evidence_directory\}\/pnpm-audit-production\.json" --prod/,
+  );
+  for (const setting of [
+    "NPM_CONFIG_FETCH_RETRIES",
+    "NPM_CONFIG_FETCH_RETRY_FACTOR",
+    "NPM_CONFIG_FETCH_RETRY_MINTIMEOUT",
+    "NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT",
+    "NPM_CONFIG_FETCH_TIMEOUT",
+  ]) {
+    assert.match(releaseScript, new RegExp(`${setting}=`));
+  }
+  assert.doesNotMatch(releaseScript, /NPM_CONFIG_REGISTRY|npm_config_registry/);
   assert.match(releaseScript, /pnpm install --frozen-lockfile --force/);
   assert.match(releaseScript, /pnpm check \|\| die/);
   assert.match(
