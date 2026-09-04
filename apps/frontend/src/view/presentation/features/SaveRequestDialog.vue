@@ -4,7 +4,10 @@ import { X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type { TreeNode } from "@/model/contracts/backend";
-import type { RequestTab } from "@/model/domain/application";
+import type {
+  CollectionChildrenState,
+  RequestTab,
+} from "@/model/domain/application";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import FormField from "@/view/presentation/controls/FormField.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
@@ -16,7 +19,7 @@ import CollectionPickerTreeNode from "./CollectionPickerTreeNode.vue";
 const props = defineProps<{
   tab: RequestTab;
   rootNodes: readonly TreeNode[];
-  collectionChildren: Readonly<Record<string, readonly TreeNode[]>>;
+  collectionChildren: Readonly<Record<string, CollectionChildrenState>>;
   busy: boolean;
 }>();
 const { t } = useI18n();
@@ -69,7 +72,8 @@ function toggleCollection(collectionId: string): void {
     return;
   }
   expandedCollectionIds.value = [...expandedCollectionIds.value, collectionId];
-  if (props.collectionChildren[collectionId] === undefined) {
+  const state = props.collectionChildren[collectionId];
+  if (state === undefined || state.status === "error") {
     emit("expandCollection", collectionId);
   }
 }
@@ -77,7 +81,7 @@ function toggleCollection(collectionId: string): void {
 /** Finds the loaded collection path leading to a selected destination. */
 function collectionPath(
   nodes: readonly TreeNode[],
-  children: Readonly<Record<string, readonly TreeNode[]>>,
+  children: Readonly<Record<string, CollectionChildrenState>>,
   collectionId: string,
 ): string[] {
   for (const node of nodes) {
@@ -88,7 +92,7 @@ function collectionPath(
       return [node.nodeId];
     }
     const childPath = collectionPath(
-      children[node.nodeId] ?? [],
+      children[node.nodeId]?.children ?? [],
       children,
       collectionId,
     );
@@ -156,6 +160,7 @@ function collectionPath(
                 :level="1"
                 @select="parentCollectionId = $event"
                 @toggle="toggleCollection"
+                @retry="emit('expandCollection', $event)"
               />
             </ul>
           </div>

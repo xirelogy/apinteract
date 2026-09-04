@@ -14,6 +14,7 @@ import type {
 } from "@/model/contracts/backend";
 import type {
   ApplicationError,
+  CollectionChildrenState,
   ConnectionState,
   ResourceEditorTab,
   RequestTab,
@@ -34,7 +35,7 @@ export const useApplicationStore = defineStore("application", {
     rootNodes: [] as TreeNode[],
     selectedCollectionId: null as string | null,
     selectedCollection: null as CollectionView | null,
-    collectionChildren: {} as Record<string, TreeNode[]>,
+    collectionChildren: {} as Record<string, CollectionChildrenState>,
     expandedCollectionIds: [] as string[],
     requestTabs: [] as RequestTab[],
     activeRequestTabId: null as string | null,

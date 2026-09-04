@@ -851,6 +851,7 @@ function discardActiveResourceTab(): void {
         "
         @select-collection="controller.selectCollection($event)"
         @toggle-collection="controller.toggleCollection($event)"
+        @retry-collection="controller.loadCollectionChildren($event)"
         @reorder-tree="
           (parentCollectionId, orderedNodeIds, expectedOrderRevision) =>
             controller.reorderTreeNodes(

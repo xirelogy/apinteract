@@ -4,6 +4,7 @@ import { FileUp, FolderPlus, Plus, Settings2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type { TreeNode, WorkspaceSummary } from "@/model/contracts/backend";
+import type { CollectionChildrenState } from "@/model/domain/application";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import { useTreeNavigation } from "@/view/presentation/controls/tree/useTreeNavigation";
@@ -23,7 +24,7 @@ const props = defineProps<{
   selectedWorkspaceId: string | null;
   rootNodes: readonly TreeNode[];
   selectedCollectionId: string | null;
-  collectionChildren: Readonly<Record<string, readonly TreeNode[]>>;
+  collectionChildren: Readonly<Record<string, CollectionChildrenState>>;
   expandedCollectionIds: readonly string[];
   selectedRequestId: string | null;
   busy: boolean;
@@ -38,6 +39,7 @@ const emit = defineEmits<{
   createCollection: [name: string, parentCollectionId: string | null];
   selectCollection: [collectionId: string];
   toggleCollection: [collectionId: string];
+  retryCollection: [collectionId: string];
   createRequest: [parentCollectionId: string];
   editCollectionProperties: [collectionId: string];
   editWorkspaceProperties: [workspaceId: string];
@@ -119,7 +121,7 @@ function reorderSiblings(
 ): readonly TreeNode[] {
   return parentCollectionId === null
     ? props.rootNodes
-    : (props.collectionChildren[parentCollectionId] ?? []);
+    : (props.collectionChildren[parentCollectionId]?.children ?? []);
 }
 
 /** Returns the shared optimistic revision for a loaded sibling list. */
@@ -449,7 +451,10 @@ function duplicateRequest(requestId: string, name: string): void {
 
 /** Finds a loaded collection name for creation-dialog context. */
 function findLoadedNodeName(nodeId: string): string | null {
-  const groups = [props.rootNodes, ...Object.values(props.collectionChildren)];
+  const groups = [
+    props.rootNodes,
+    ...Object.values(props.collectionChildren).map((state) => state.children),
+  ];
   for (const group of groups) {
     const match = group.find((node) => node.nodeId === nodeId);
     if (match !== undefined) {
@@ -462,10 +467,10 @@ function findLoadedNodeName(nodeId: string): string | null {
 /** Finds the parent boundary for a node already represented in the tree. */
 function findLoadedParentCollectionId(nodeId: string): string | null {
   if (props.rootNodes.some((node) => node.nodeId === nodeId)) return null;
-  for (const [parentCollectionId, children] of Object.entries(
+  for (const [parentCollectionId, state] of Object.entries(
     props.collectionChildren,
   )) {
-    if (children.some((node) => node.nodeId === nodeId)) {
+    if (state.children.some((node) => node.nodeId === nodeId)) {
       return parentCollectionId;
     }
   }
@@ -572,6 +577,7 @@ function findLoadedParentCollectionId(nodeId: string): string | null {
             "
             @select-collection="emit('selectCollection', $event)"
             @toggle-collection="emit('toggleCollection', $event)"
+            @retry-collection="emit('retryCollection', $event)"
             @select-request="emit('selectRequest', $event)"
             @duplicate-request="duplicateRequest"
             @delete-request="emit('deleteRequest', $event)"

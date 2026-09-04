@@ -8,12 +8,14 @@ import {
   FolderOpen,
   FolderPlus,
   GripVertical,
+  LoaderCircle,
   Settings2,
   Trash2,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type { TreeNode } from "@/model/contracts/backend";
+import type { CollectionChildrenState } from "@/model/domain/application";
 import ActionMenu, {
   type ActionMenuItem,
 } from "@/view/presentation/controls/ActionMenu.vue";
@@ -21,7 +23,7 @@ import { workspaceTreeReorderKey } from "./workspace-tree-reorder";
 
 const props = defineProps<{
   node: TreeNode;
-  collectionChildren: Readonly<Record<string, readonly TreeNode[]>>;
+  collectionChildren: Readonly<Record<string, CollectionChildrenState>>;
   expandedCollectionIds: readonly string[];
   selectedCollectionId: string | null;
   selectedRequestId: string | null;
@@ -44,6 +46,7 @@ const emit = defineEmits<{
   editCollectionProperties: [collectionId: string];
   selectCollection: [collectionId: string];
   toggleCollection: [collectionId: string];
+  retryCollection: [collectionId: string];
   selectRequest: [requestId: string];
   duplicateRequest: [requestId: string, name: string];
   deleteRequest: [requestId: string];
@@ -54,9 +57,8 @@ const expanded = computed(
     props.node.kind === "collection" &&
     props.expandedCollectionIds.includes(props.node.nodeId),
 );
-const children = computed(
-  () => props.collectionChildren[props.node.nodeId] ?? [],
-);
+const childState = computed(() => props.collectionChildren[props.node.nodeId]);
+const children = computed(() => childState.value?.children ?? []);
 const collectionActions = computed<readonly ActionMenuItem[]>(() => [
   {
     value: "create-request",
@@ -338,6 +340,7 @@ function handleTreeItemKeydown(event: KeyboardEvent): void {
       v-if="node.kind === 'collection' && expanded"
       class="workspace-tree-children"
       role="group"
+      :aria-busy="childState?.status === 'loading'"
     >
       <WorkspaceTreeNode
         v-for="child in children"
@@ -357,11 +360,44 @@ function handleTreeItemKeydown(event: KeyboardEvent): void {
         @edit-collection-properties="emit('editCollectionProperties', $event)"
         @select-collection="emit('selectCollection', $event)"
         @toggle-collection="emit('toggleCollection', $event)"
+        @retry-collection="emit('retryCollection', $event)"
         @select-request="emit('selectRequest', $event)"
         @duplicate-request="forwardRequestDuplication"
         @delete-request="emit('deleteRequest', $event)"
       />
-      <li v-if="children.length === 0" class="tree-empty">
+      <li
+        v-if="childState?.status === 'loading'"
+        class="tree-empty tree-branch-status"
+        role="status"
+      >
+        <LoaderCircle
+          class="tree-status-spinner"
+          :size="13"
+          aria-hidden="true"
+        />
+        {{
+          children.length === 0
+            ? t("collection.loading")
+            : t("collection.refreshing")
+        }}
+      </li>
+      <li
+        v-else-if="childState?.status === 'error'"
+        class="tree-empty tree-branch-status"
+      >
+        <span>{{ t("collection.loadFailed") }}</span>
+        <button
+          type="button"
+          class="tree-branch-retry"
+          @click="emit('retryCollection', node.nodeId)"
+        >
+          {{ t("collection.retry") }}
+        </button>
+      </li>
+      <li
+        v-else-if="childState?.status === 'ready' && children.length === 0"
+        class="tree-empty"
+      >
         {{ t("collection.empty") }}
       </li>
     </ul>

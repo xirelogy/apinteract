@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { enUsMessages } from "../src/app/i18n/messages";
 import type { TreeNode } from "../src/model/contracts/backend";
+import type { CollectionChildrenState } from "../src/model/domain/application";
 import WorkspaceNavigator from "../src/view/presentation/features/WorkspaceNavigator.vue";
 
 const workspaceId = "019fa8be-a510-76b9-b73b-69f4c7af7870";
@@ -35,6 +36,7 @@ function mountNavigator(options?: {
   selectedWorkspaceId?: string | null;
   rootNodes?: readonly TreeNode[];
   collectionChildren?: Readonly<Record<string, readonly TreeNode[]>>;
+  collectionChildStates?: Readonly<Record<string, CollectionChildrenState>>;
   expandedCollectionIds?: readonly string[];
   busy?: boolean;
   canEdit?: boolean;
@@ -58,7 +60,16 @@ function mountNavigator(options?: {
         requestNode(thirdNodeId, "Third", 2),
       ],
       selectedCollectionId: null,
-      collectionChildren: options?.collectionChildren ?? {},
+      collectionChildren:
+        options?.collectionChildStates ??
+        Object.fromEntries(
+          Object.entries(options?.collectionChildren ?? {}).map(
+            ([collectionId, children]) => [
+              collectionId,
+              { status: "ready" as const, children },
+            ],
+          ),
+        ),
       expandedCollectionIds: options?.expandedCollectionIds ?? [],
       selectedRequestId: null,
       busy: options?.busy ?? false,
@@ -133,6 +144,43 @@ describe("WorkspaceNavigator selection", () => {
       .trigger("click");
     expect(wrapper.emitted("editCollectionProperties")).toHaveLength(1);
     expect(wrapper.emitted("toggleCollection")).toEqual([[firstNodeId]]);
+    wrapper.unmount();
+  });
+
+  it("shows loading and failure states without claiming an unloaded branch is empty", async () => {
+    const collection: TreeNode = {
+      nodeId: firstNodeId,
+      kind: "collection",
+      name: "Examples",
+      position: 0,
+      orderRevision: 1,
+    };
+    const wrapper = mountNavigator({
+      rootNodes: [collection],
+      expandedCollectionIds: [firstNodeId],
+      collectionChildStates: {
+        [firstNodeId]: { status: "loading", children: [] },
+      },
+    });
+
+    expect(wrapper.text()).toContain("Loading collection");
+    expect(wrapper.text()).not.toContain("This collection is empty");
+
+    await wrapper.setProps({
+      collectionChildren: {
+        [firstNodeId]: { status: "error", children: [] },
+      },
+    });
+    expect(wrapper.text()).toContain("Could not load this collection");
+    await wrapper.get(".tree-branch-retry").trigger("click");
+    expect(wrapper.emitted("retryCollection")).toEqual([[firstNodeId]]);
+
+    await wrapper.setProps({
+      collectionChildren: {
+        [firstNodeId]: { status: "ready", children: [] },
+      },
+    });
+    expect(wrapper.text()).toContain("This collection is empty");
     wrapper.unmount();
   });
 });

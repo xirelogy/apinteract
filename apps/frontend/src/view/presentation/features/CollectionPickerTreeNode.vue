@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ChevronRight, Folder, FolderOpen } from "@lucide/vue";
+import { ChevronRight, Folder, FolderOpen, LoaderCircle } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type { TreeNode } from "@/model/contracts/backend";
+import type { CollectionChildrenState } from "@/model/domain/application";
 
 const props = defineProps<{
   node: TreeNode;
-  collectionChildren: Readonly<Record<string, readonly TreeNode[]>>;
+  collectionChildren: Readonly<Record<string, CollectionChildrenState>>;
   expandedCollectionIds: readonly string[];
   selectedCollectionId: string;
   busy: boolean;
@@ -19,13 +20,15 @@ const { t } = useI18n();
 const emit = defineEmits<{
   select: [collectionId: string];
   toggle: [collectionId: string];
+  retry: [collectionId: string];
 }>();
 
 const expanded = computed(() =>
   props.expandedCollectionIds.includes(props.node.nodeId),
 );
+const childState = computed(() => props.collectionChildren[props.node.nodeId]);
 const children = computed(() =>
-  (props.collectionChildren[props.node.nodeId] ?? []).filter(
+  (childState.value?.children ?? []).filter(
     (node) => node.kind === "collection",
   ),
 );
@@ -82,9 +85,10 @@ const children = computed(() =>
     </div>
 
     <ul
-      v-if="expanded && children.length > 0"
+      v-if="expanded"
       class="workspace-tree-children"
       role="group"
+      :aria-busy="childState?.status === 'loading'"
     >
       <CollectionPickerTreeNode
         v-for="child in children"
@@ -98,7 +102,37 @@ const children = computed(() =>
         :level="level + 1"
         @select="emit('select', $event)"
         @toggle="emit('toggle', $event)"
+        @retry="emit('retry', $event)"
       />
+      <li
+        v-if="childState?.status === 'loading'"
+        class="tree-empty tree-branch-status"
+        role="status"
+      >
+        <LoaderCircle
+          class="tree-status-spinner"
+          :size="13"
+          aria-hidden="true"
+        />
+        {{
+          children.length === 0
+            ? t("collection.loading")
+            : t("collection.refreshing")
+        }}
+      </li>
+      <li
+        v-else-if="childState?.status === 'error'"
+        class="tree-empty tree-branch-status"
+      >
+        <span>{{ t("collection.loadFailed") }}</span>
+        <button
+          type="button"
+          class="tree-branch-retry"
+          @click="emit('retry', node.nodeId)"
+        >
+          {{ t("collection.retry") }}
+        </button>
+      </li>
     </ul>
   </li>
 </template>

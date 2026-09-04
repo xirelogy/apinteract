@@ -37,6 +37,21 @@ export interface ApplicationError {
   readonly message: string | null;
 }
 
+/** Distinguishes an unconfirmed collection branch from a confirmed empty one. */
+export type CollectionChildrenState =
+  | {
+      readonly status: "loading";
+      readonly children: readonly TreeNode[];
+    }
+  | {
+      readonly status: "ready";
+      readonly children: readonly TreeNode[];
+    }
+  | {
+      readonly status: "error";
+      readonly children: readonly TreeNode[];
+    };
+
 export interface RequestDraftInput {
   readonly name: string;
   readonly description?: string;
@@ -204,7 +219,9 @@ export interface ApplicationSnapshot {
   readonly rootNodes: readonly TreeNode[];
   readonly selectedCollectionId: string | null;
   readonly selectedCollection: CollectionView | null;
-  readonly collectionChildren: Readonly<Record<string, readonly TreeNode[]>>;
+  readonly collectionChildren: Readonly<
+    Record<string, CollectionChildrenState>
+  >;
   readonly expandedCollectionIds: readonly string[];
   readonly requestTabs: readonly RequestTab[];
   readonly activeRequestTabId: string | null;

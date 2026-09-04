@@ -15,6 +15,17 @@ import {
   isResourceEditorTabDirty,
 } from "../src/model/domain/application";
 
+/** Creates a manually settled promise for command-ordering tests. */
+function deferred<Value>() {
+  let resolve!: (value: Value) => void;
+  let reject!: (cause: unknown) => void;
+  const promise = new Promise<Value>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 class FakeRequestSessionStorage implements RequestSessionStorage {
   readonly saves: LocalRequestSessionSnapshot[] = [];
   readonly clearedUserIds: string[] = [];
@@ -218,6 +229,181 @@ describe("ApplicationController workspaces", () => {
     );
     expect(store.activeWorkbenchTabId).toBe(store.resourceTabs[3]?.tabId);
     expect(store.activeRequestTabId).toBeNull();
+    expect(store.expandedCollectionIds).toEqual([]);
+  });
+
+  it("deduplicates collection loads and distinguishes loading from empty", async () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151ca7";
+    const collectionId = "019facab-1eee-765f-bd9f-ac2449151ca8";
+    const result = deferred<{ children: [] }>();
+    const command = vi.fn().mockReturnValue(result.promise);
+    const controller = new ApplicationController(
+      {} as SessionController,
+      { command, onEvent: vi.fn() } as unknown as BackendWebSocketClient,
+    );
+    const store = useApplicationStore();
+    store.selectedWorkspaceId = workspaceId;
+
+    const first = controller.loadCollectionChildren(collectionId);
+    const second = controller.loadCollectionChildren(collectionId);
+
+    expect(command).toHaveBeenCalledOnce();
+    expect(store.collectionChildren[collectionId]).toEqual({
+      status: "loading",
+      children: [],
+    });
+    result.resolve({ children: [] });
+    await Promise.all([first, second]);
+    expect(store.collectionChildren[collectionId]).toEqual({
+      status: "ready",
+      children: [],
+    });
+  });
+
+  it("keeps a collection collapsed when its pending expansion finishes", async () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151ca9";
+    const collectionId = "019facab-1eee-765f-bd9f-ac2449151caa";
+    const result = deferred<{ children: [] }>();
+    const controller = new ApplicationController(
+      {} as SessionController,
+      {
+        command: vi.fn().mockReturnValue(result.promise),
+        onEvent: vi.fn(),
+      } as unknown as BackendWebSocketClient,
+    );
+    const store = useApplicationStore();
+    store.selectedWorkspaceId = workspaceId;
+
+    const expansion = controller.toggleCollection(collectionId);
+    expect(store.expandedCollectionIds).toEqual([collectionId]);
+    await controller.toggleCollection(collectionId);
+    expect(store.expandedCollectionIds).toEqual([]);
+
+    result.resolve({ children: [] });
+    await expansion;
+    expect(store.expandedCollectionIds).toEqual([]);
+  });
+
+  it("discards a branch reply after the workspace tree is cleared", async () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151cb0";
+    const collectionId = "019facab-1eee-765f-bd9f-ac2449151cb1";
+    const result = deferred<{ children: [] }>();
+    const controller = new ApplicationController(
+      {} as SessionController,
+      {
+        command: vi.fn().mockReturnValue(result.promise),
+        onEvent: vi.fn(),
+      } as unknown as BackendWebSocketClient,
+    );
+    const store = useApplicationStore();
+    store.selectedWorkspaceId = workspaceId;
+
+    const loading = controller.loadCollectionChildren(collectionId);
+    await controller.selectWorkspace(null);
+    result.resolve({ children: [] });
+    await loading;
+
+    expect(store.selectedWorkspaceId).toBeNull();
+    expect(store.collectionChildren[collectionId]).toBeUndefined();
+  });
+
+  it("ignores an older branch reply after a mutation forces a refresh", async () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151cab";
+    const collectionId = "019facab-1eee-765f-bd9f-ac2449151cac";
+    const childId = "019facab-1eee-765f-bd9f-ac2449151cad";
+    const oldList = deferred<{ children: [] }>();
+    const refreshedList = deferred<{
+      children: Array<{
+        nodeId: string;
+        kind: "request";
+        name: string;
+        position: number;
+        orderRevision: number;
+        method: "GET";
+      }>;
+    }>();
+    let listCount = 0;
+    const command = vi.fn((type: string) => {
+      if (type === "tree.list") {
+        listCount += 1;
+        return listCount === 1 ? oldList.promise : refreshedList.promise;
+      }
+      if (type === "collection.create") return undefined;
+      if (type === "collection.get") {
+        return {
+          collectionId,
+          workspaceId,
+          parentCollectionId: null,
+          name: "Parent",
+          description: "",
+          notes: "",
+          pathPrefix: "",
+          inheritedTarget: "",
+          effectivePath: "",
+          headers: [],
+          inheritedHeaders: [],
+          effectiveHeaders: [],
+          revision: 1,
+        };
+      }
+      throw new Error(`Unexpected command ${type}`);
+    });
+    const controller = new ApplicationController(
+      {} as SessionController,
+      { command, onEvent: vi.fn() } as unknown as BackendWebSocketClient,
+    );
+    const store = useApplicationStore();
+    store.selectedWorkspaceId = workspaceId;
+
+    const initialLoad = controller.loadCollectionChildren(collectionId);
+    const creation = controller.createCollection("Child", collectionId);
+    await vi.waitFor(() => expect(listCount).toBe(2));
+    refreshedList.resolve({
+      children: [
+        {
+          nodeId: childId,
+          kind: "request",
+          name: "Imported",
+          position: 0,
+          orderRevision: 1,
+          method: "GET",
+        },
+      ],
+    });
+    await creation;
+    oldList.resolve({ children: [] });
+    await initialLoad;
+
+    expect(store.collectionChildren[collectionId]).toEqual({
+      status: "ready",
+      children: [expect.objectContaining({ nodeId: childId })],
+    });
+  });
+
+  it("keeps a failed branch distinct from a successfully loaded empty branch", async () => {
+    setActivePinia(createPinia());
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151cae";
+    const collectionId = "019facab-1eee-765f-bd9f-ac2449151caf";
+    const controller = new ApplicationController(
+      {} as SessionController,
+      {
+        command: vi.fn().mockRejectedValue(new Error("Unavailable")),
+        onEvent: vi.fn(),
+      } as unknown as BackendWebSocketClient,
+    );
+    const store = useApplicationStore();
+    store.selectedWorkspaceId = workspaceId;
+
+    await controller.loadCollectionChildren(collectionId);
+
+    expect(store.collectionChildren[collectionId]).toEqual({
+      status: "error",
+      children: [],
+    });
   });
 
   it("closes tabs from an unloaded collection subtree after deletion", async () => {
@@ -1163,7 +1349,9 @@ describe("ApplicationController requests", () => {
       });
     }
     expect(
-      store.collectionChildren[siblingCollectionId]?.map((node) => node.nodeId),
+      store.collectionChildren[siblingCollectionId]?.children.map(
+        (node) => node.nodeId,
+      ),
     ).toEqual([importedRequests[2]?.requestId]);
     expect(store.requestTabs.map((tab) => tab.request?.requestId)).toEqual([
       importedRequests[0]?.requestId,
