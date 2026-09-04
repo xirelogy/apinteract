@@ -891,6 +891,28 @@
   font-size: var(--font-size-xs);
 }
 
+.tree-branch-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tree-status-spinner {
+  flex: 0 0 auto;
+  animation: response-spin 800ms linear infinite;
+}
+
+.tree-branch-retry {
+  border: 0;
+  padding: 0;
+  color: var(--accent-primary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 .method-badge,
 .method-option {
   color: var(--success);

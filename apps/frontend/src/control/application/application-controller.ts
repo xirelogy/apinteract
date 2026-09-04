@@ -49,6 +49,7 @@ import {
   isResourceEditorTabDirty,
   type CollectionPropertiesDraft,
   type CollectionPropertiesTab,
+  type CollectionChildrenState,
   type EnvironmentDraft,
   type EnvironmentEditorTab,
   type ResourceEditorTab,
@@ -108,6 +109,20 @@ export class ApplicationController {
   #stopPersistenceSubscription: (() => void) | null = null;
   #persistenceQueue: Promise<void> = Promise.resolve();
   #lastPersistenceSignature: string | null = null;
+  #workspaceTreeGeneration = 0;
+  #workspaceSelectionSequence = 0;
+  #collectionLoadSequence = 0;
+  #rootReloadSequence = 0;
+  #foregroundOperationCount = 0;
+  readonly #collectionLoads = new Map<
+    string,
+    {
+      readonly workspaceId: string;
+      readonly generation: number;
+      readonly sequence: number;
+      readonly promise: Promise<void>;
+    }
+  >();
 
   constructor(
     session: SessionController,
@@ -590,6 +605,9 @@ export class ApplicationController {
   /** Clears workspace-derived state while preserving open request tabs. */
   #clearWorkspaceSelection(): void {
     const store = useApplicationStore();
+    this.#workspaceSelectionSequence += 1;
+    this.#workspaceTreeGeneration += 1;
+    this.#collectionLoads.clear();
     store.selectedWorkspaceId = null;
     store.selectedWorkspace = null;
     store.rootNodes = [];
@@ -610,6 +628,7 @@ export class ApplicationController {
 
   /** Loads a workspace root without nesting foreground busy state. */
   async #selectWorkspace(workspaceId: string): Promise<void> {
+    const selectionSequence = ++this.#workspaceSelectionSequence;
     const [result, environmentList, workspace] = await Promise.all([
       this.#webSocket.command<{ children: TreeNode[] }>("tree.list", {
         workspaceId,
@@ -620,7 +639,10 @@ export class ApplicationController {
       }),
       this.#webSocket.command<WorkspaceView>("workspace.get", { workspaceId }),
     ]);
+    if (selectionSequence !== this.#workspaceSelectionSequence) return;
     const store = useApplicationStore();
+    this.#workspaceTreeGeneration += 1;
+    this.#collectionLoads.clear();
     store.selectedWorkspaceId = workspaceId;
     store.selectedWorkspace = workspace;
     store.rootNodes = result.children;
@@ -843,6 +865,9 @@ export class ApplicationController {
       store.selectedCollection = null;
       store.collectionChildren = {};
       store.expandedCollectionIds = [];
+      this.#workspaceSelectionSequence += 1;
+      this.#workspaceTreeGeneration += 1;
+      this.#collectionLoads.clear();
       this.#previewNames = [];
       this.#previewContext = null;
       this.#previewSequence += 1;
@@ -1312,6 +1337,10 @@ export class ApplicationController {
   async #selectCollection(collectionId: string): Promise<void> {
     const store = useApplicationStore();
     const workspaceId = requireSelection(store.selectedWorkspaceId);
+    store.expandedCollectionIds = includeOnce(
+      store.expandedCollectionIds,
+      collectionId,
+    );
     const [, collection] = await Promise.all([
       this.#reloadCollection(workspaceId, collectionId),
       this.#webSocket.command<CollectionView>("collection.get", {
@@ -1322,10 +1351,6 @@ export class ApplicationController {
     store.selectedCollection = collection;
     store.activeRequestTabId = null;
     store.activeWorkbenchTabId = null;
-    store.expandedCollectionIds = includeOnce(
-      store.expandedCollectionIds,
-      collectionId,
-    );
   }
 
   /** Opens collection properties once and activates the existing editor on repeat. */
@@ -1363,10 +1388,6 @@ export class ApplicationController {
       };
       store.selectedCollectionId = collectionId;
       store.selectedCollection = collection;
-      store.expandedCollectionIds = includeOnce(
-        store.expandedCollectionIds,
-        collectionId,
-      );
       this.#appendResourceTab(tab);
     });
   }
@@ -1511,6 +1532,7 @@ export class ApplicationController {
         (id) => !deletedCollectionIds.has(id),
       );
       for (const id of deletedCollectionIds) {
+        this.#collectionLoads.delete(id);
         delete store.collectionChildren[id];
       }
       this.#previewNames = [];
@@ -1525,29 +1547,118 @@ export class ApplicationController {
     workspaceId: string,
     parentCollectionId: string | null,
   ): Promise<void> {
+    if (parentCollectionId !== null) {
+      await this.#loadCollectionBranch(workspaceId, parentCollectionId, true);
+      return;
+    }
+    const generation = this.#workspaceTreeGeneration;
+    const sequence = ++this.#rootReloadSequence;
     const result = await this.#webSocket.command<{ children: TreeNode[] }>(
       "tree.list",
       { workspaceId, parentCollectionId },
     );
     const store = useApplicationStore();
-    if (parentCollectionId === null) {
+    if (
+      store.selectedWorkspaceId === workspaceId &&
+      generation === this.#workspaceTreeGeneration &&
+      sequence === this.#rootReloadSequence
+    ) {
       store.rootNodes = result.children;
-    } else {
-      store.collectionChildren = {
-        ...store.collectionChildren,
-        [parentCollectionId]: result.children,
-      };
     }
+  }
+
+  /** Loads one branch while deduplicating callers and rejecting stale replies. */
+  async #loadCollectionBranch(
+    workspaceId: string,
+    collectionId: string,
+    force: boolean,
+  ): Promise<void> {
+    const generation = this.#workspaceTreeGeneration;
+    const pending = this.#collectionLoads.get(collectionId);
+    if (
+      !force &&
+      pending?.workspaceId === workspaceId &&
+      pending.generation === generation
+    ) {
+      await pending.promise;
+      return;
+    }
+
+    const store = useApplicationStore();
+    const previousChildren =
+      store.collectionChildren[collectionId]?.children ?? [];
+    const sequence = ++this.#collectionLoadSequence;
+    store.collectionChildren = {
+      ...store.collectionChildren,
+      [collectionId]: {
+        status: "loading",
+        children: previousChildren,
+      },
+    };
+    const promise = (async () => {
+      try {
+        const result = await this.#webSocket.command<{ children: TreeNode[] }>(
+          "tree.list",
+          { workspaceId, parentCollectionId: collectionId },
+        );
+        if (!this.#isCurrentCollectionLoad(collectionId, sequence)) return;
+        const currentStore = useApplicationStore();
+        if (
+          currentStore.selectedWorkspaceId !== workspaceId ||
+          this.#workspaceTreeGeneration !== generation
+        ) {
+          return;
+        }
+        currentStore.collectionChildren = {
+          ...currentStore.collectionChildren,
+          [collectionId]: { status: "ready", children: result.children },
+        };
+      } catch (cause) {
+        if (
+          this.#isCurrentCollectionLoad(collectionId, sequence) &&
+          useApplicationStore().selectedWorkspaceId === workspaceId &&
+          this.#workspaceTreeGeneration === generation
+        ) {
+          const currentStore = useApplicationStore();
+          currentStore.collectionChildren = {
+            ...currentStore.collectionChildren,
+            [collectionId]: {
+              status: "error",
+              children: previousChildren,
+            },
+          };
+        }
+        throw cause;
+      } finally {
+        if (this.#isCurrentCollectionLoad(collectionId, sequence)) {
+          this.#collectionLoads.delete(collectionId);
+        }
+      }
+    })();
+    this.#collectionLoads.set(collectionId, {
+      workspaceId,
+      generation,
+      sequence,
+      promise,
+    });
+    await promise;
+  }
+
+  /** Reports whether a branch reply still owns the latest requested load. */
+  #isCurrentCollectionLoad(collectionId: string, sequence: number): boolean {
+    return this.#collectionLoads.get(collectionId)?.sequence === sequence;
   }
 
   /** Loads collection children for a secondary tree without changing selection. */
   async loadCollectionChildren(collectionId: string): Promise<void> {
     const store = useApplicationStore();
-    if (store.collectionChildren[collectionId] !== undefined) {
+    if (store.collectionChildren[collectionId]?.status === "ready") {
       return;
     }
     const workspaceId = requireSelection(store.selectedWorkspaceId);
-    await this.#run(() => this.#reloadCollection(workspaceId, collectionId));
+    await this.#loadCollectionBranch(workspaceId, collectionId, false).catch(
+      () => undefined,
+    );
   }
 
   /** Expands an unloaded collection without selecting it, or collapses it. */
@@ -1560,13 +1671,15 @@ export class ApplicationController {
       return;
     }
     const workspaceId = requireSelection(store.selectedWorkspaceId);
-    if (store.collectionChildren[collectionId] === undefined) {
-      await this.#run(() => this.#reloadCollection(workspaceId, collectionId));
-    }
     store.expandedCollectionIds = includeOnce(
       store.expandedCollectionIds,
       collectionId,
     );
+    if (store.collectionChildren[collectionId]?.status !== "ready") {
+      await this.#loadCollectionBranch(workspaceId, collectionId, false).catch(
+        () => undefined,
+      );
+    }
   }
 
   /** Opens a new unsaved request tab in the selected workspace. */
@@ -2252,6 +2365,7 @@ export class ApplicationController {
   /** Runs one workspace-tree operation with shared busy and error state. */
   async #run<Result>(operation: () => Promise<Result>): Promise<Result> {
     const store = useApplicationStore();
+    this.#foregroundOperationCount += 1;
     store.busy = true;
     store.error = null;
     try {
@@ -2260,7 +2374,8 @@ export class ApplicationController {
       store.error = applicationError(cause);
       throw cause;
     } finally {
-      store.busy = false;
+      this.#foregroundOperationCount -= 1;
+      store.busy = this.#foregroundOperationCount > 0;
     }
   }
 
@@ -3129,9 +3244,12 @@ function replaceLoadedRequestNode(request: RequestView): void {
   const store = useApplicationStore();
   store.rootNodes = replaceRequestNode(store.rootNodes, request);
   store.collectionChildren = Object.fromEntries(
-    Object.entries(store.collectionChildren).map(([collectionId, nodes]) => [
+    Object.entries(store.collectionChildren).map(([collectionId, state]) => [
       collectionId,
-      replaceRequestNode(nodes, request),
+      {
+        ...state,
+        children: replaceRequestNode(state.children, request),
+      } satisfies CollectionChildrenState,
     ]),
   );
 }

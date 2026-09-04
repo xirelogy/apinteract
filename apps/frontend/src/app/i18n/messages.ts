@@ -162,6 +162,8 @@ export const enUsMessages = {
     inside: "Inside {name}",
     moreActions: "More actions for {name}",
     label: "Collection",
+    loadFailed: "Could not load this collection.",
+    loading: "Loading collection…",
     headersDescription:
       "Enabled headers apply to requests in this collection and its descendants.",
     name: "Collection name",
@@ -173,6 +175,8 @@ export const enUsMessages = {
     propertiesDescription:
       "Rename this collection and manage inherited headers and variables.",
     propertiesTitle: "Collection",
+    refreshing: "Refreshing collection…",
+    retry: "Retry",
   },
   environment: {
     addVariable: "Add variable",
