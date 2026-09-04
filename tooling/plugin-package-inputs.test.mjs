@@ -70,7 +70,13 @@ for (const definition of packageDefinitions) {
     assert.match(workflow, /grep -Eq 'E404\|404 Not Found'/u);
     assert.match(workflow, /run: pnpm check/);
     assert.match(workflow, /pnpm --dir packages\//);
-    assert.match(workflow, /npm publish .* --access public --provenance/);
+    assert.match(workflow, /npm_tag="oidc"/u);
+    assert.match(workflow, /npm_tag="next"/u);
+    assert.match(workflow, /npm_tag="latest"/u);
+    assert.match(
+      workflow,
+      /npm publish .* --access public --tag "\$\{NPM_TAG\}" --provenance/u,
+    );
     assert.doesNotMatch(workflow, /NODE_AUTH_TOKEN|NPM_TOKEN|secrets\./u);
     assert.ok(
       workflow.indexOf("Refuse to overwrite an immutable npm version") >
@@ -102,7 +108,10 @@ test("the plugin SDK declares the plugin API as a compatible peer", async () => 
       "utf8",
     ),
   );
-  assert.equal(manifest.peerDependencies?.["@apinteract/plugin-api"], "^1.0.0");
+  assert.equal(
+    manifest.peerDependencies?.["@apinteract/plugin-api"],
+    "^0.1.0-0",
+  );
 });
 
 test("repository gates exercise packed packages and contract compatibility", () => {
@@ -125,6 +134,8 @@ test("bootstrap publication is manual, token-scoped, and non-overwriting", () =>
     /npm version already exists and will not be overwritten/u,
   );
   assert.match(bootstrapWorkflow, /--provenance=false/u);
+  assert.match(bootstrapWorkflow, /\^0\\\.\[0-9\]\+\\\.\[0-9\]\+-bootstrap/u);
+  assert.match(bootstrapWorkflow, /--tag bootstrap/u);
   assert.match(bootstrapWorkflow, /npm publish [\s\S]*--access public/u);
   assert.doesNotMatch(bootstrapWorkflow, /id-token: write/u);
 });

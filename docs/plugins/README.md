@@ -390,23 +390,22 @@ token immediately after both packages have been initialized.
 Do not consume an intended stable version unless that is deliberate: npm
 versions cannot be replaced. A safe sequence is, for example:
 
-1. Set `plugin-api` to `1.0.0-bootstrap.0` and initialize it with the token.
+1. Set `plugin-api` to `0.1.0-bootstrap.0` and initialize it with the token.
 2. Configure npm trusted publishing for `publish-plugin-api.yml` and the
    `npm` environment.
-3. Set the package to `1.0.0-oidc.0`, commit, and push the
-   `plugin-api-v1.0.0-oidc.0` tag. This exercises the real OIDC workflow.
-4. Set the package to `1.0.0`, commit, and push `plugin-api-v1.0.0` for the
+3. Set the package to `0.1.0-oidc.0`, commit, and push the
+   `plugin-api-v0.1.0-oidc.0` tag. This exercises the real OIDC workflow.
+4. Set the package to `0.1.0`, commit, and push `plugin-api-v0.1.0` for the
    official release.
 
-Repeat the sequence independently for `plugin-sdk`. If the bootstrap already
-used `1.0.0`, use the next unpublished prerelease and stable version for the
-OIDC test and official release.
+Repeat the sequence independently for `plugin-sdk`, after publishing the API
+version accepted by its peer range. Bootstrap publications use the `bootstrap`
+npm dist-tag, OIDC test publications use `oidc`, other prereleases use `next`,
+and stable releases alone advance `latest`. This keeps all experimental
+versions away from both `latest` and the reserved `1.0.0` release line.
 
 The `@apinteract` scope and both package names must exist under the publishing
-npm organization before their trusted publishers can be configured. If npm
-requires an initial package publication before that configuration is
-available, publish the first verified tarball once with a short-lived granular
-token, revoke the token, and configure `publish-plugin-api.yml` or
-`publish-plugin-sdk.yml` as the package's trusted publisher. Automated tags
-start with the next unpublished package version because the workflows reject
-overwrites.
+npm organization. The bootstrap token must have permission to create public
+packages in that scope. After initialization, configure
+`publish-plugin-api.yml` and `publish-plugin-sdk.yml` as their respective
+trusted publishers and remove the token and `npm-bootstrap` environment.

@@ -61,8 +61,9 @@ jobs:
               ;;
           esac
           version="$(node -p "require('./${package_directory}/package.json').version")"
-          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            printf 'Package version is not valid SemVer: %s\n' "${version}" >&2
+          if [[ ! "${version}" =~ ^0\.[0-9]+\.[0-9]+-bootstrap\.[0-9]+$ ]]; then
+            printf 'Bootstrap package version must look like 0.1.0-bootstrap.0: %s\n' \
+              "${version}" >&2
             exit 1
           fi
           printf 'directory=%s\nname=%s\nversion=%s\n' \
@@ -114,4 +115,5 @@ jobs:
             exit 1
           fi
           npm publish "${{ steps.archive.outputs.tarball }}" \
-            --access public --provenance=false --registry https://registry.npmjs.org
+            --access public --tag bootstrap --provenance=false \
+            --registry https://registry.npmjs.org

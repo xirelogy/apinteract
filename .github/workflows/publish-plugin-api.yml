@@ -49,7 +49,15 @@ jobs:
             printf 'Tag must exactly match the package version: %s\n' "${expected_tag}" >&2
             exit 1
           fi
-          printf 'name=%s\nversion=%s\n' "${package_name}" "${version}" >>"${GITHUB_OUTPUT}"
+          if [[ "${version}" =~ -oidc\.[0-9]+$ ]]; then
+            npm_tag="oidc"
+          elif [[ "${version}" == *-* ]]; then
+            npm_tag="next"
+          else
+            npm_tag="latest"
+          fi
+          printf 'name=%s\nversion=%s\nnpm-tag=%s\n' \
+            "${package_name}" "${version}" "${npm_tag}" >>"${GITHUB_OUTPUT}"
 
       - name: Run repository and external-consumer checks
         run: pnpm check
@@ -87,4 +95,6 @@ jobs:
           fi
 
       - name: Publish to npm with provenance
-        run: npm publish "${{ steps.package.outputs.tarball }}" --access public --provenance --registry https://registry.npmjs.org
+        env:
+          NPM_TAG: ${{ steps.release.outputs.npm-tag }}
+        run: npm publish "${{ steps.package.outputs.tarball }}" --access public --tag "${NPM_TAG}" --provenance --registry https://registry.npmjs.org
