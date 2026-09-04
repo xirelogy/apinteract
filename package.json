@@ -20,7 +20,7 @@
     "dev:proxy": "pnpm --filter @apinteract/proxy dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "eslint . --max-warnings 0 && stylelint \"apps/frontend/src/**/*.css\"",
+    "lint": "pnpm plugin-tooling:build && eslint . --max-warnings 0 && stylelint \"apps/frontend/src/**/*.css\"",
     "plugin-contracts:check": "tsc -p tooling/tsconfig.json",
     "plugin-packages:verify": "node tooling/verify-plugin-packages.mjs",
     "plugin-tooling:build": "pnpm --filter @apinteract/plugin-api build && pnpm --filter @apinteract/plugin-sdk build",

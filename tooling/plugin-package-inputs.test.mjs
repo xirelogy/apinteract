@@ -106,6 +106,7 @@ test("the plugin SDK declares the plugin API as a compatible peer", async () => 
 });
 
 test("repository gates exercise packed packages and contract compatibility", () => {
+  assert.match(rootManifest.scripts.lint, /^pnpm plugin-tooling:build/u);
   assert.match(rootManifest.scripts.test, /pnpm plugin-packages:verify/u);
   assert.match(rootManifest.scripts.typecheck, /pnpm plugin-contracts:check/u);
   assert.match(rootManifest.scripts.typecheck, /pnpm plugin-tooling:build/u);
