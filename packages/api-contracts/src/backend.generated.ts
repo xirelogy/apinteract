@@ -1558,6 +1558,8 @@ export interface components {
       error?: components["schemas"]["WebSocketError"];
       scriptLogs: components["schemas"]["ScriptLogEntry"][];
       scriptTests: components["schemas"]["ScriptTestResult"][];
+      /** @description Value-free receipts for persistent variable writes committed with this execution. */
+      scriptVariableWrites?: components["schemas"]["ScriptVariableWriteResult"][];
       scriptError?: components["schemas"]["ScriptPhaseError"];
       outgoingRequest?: components["schemas"]["OutgoingRequestView"];
     };
@@ -1624,6 +1626,12 @@ export interface components {
       /** @enum {string} */
       status: "passed" | "failed" | "errored";
       message?: string;
+      /** @description Stable SDK/runtime code or JavaScript error name, when available. */
+      code?: string;
+      /** @description One-based source line reported for the test body failure. */
+      line?: number;
+      /** @description One-based source column reported for the test body failure. */
+      column?: number;
       /**
        * @description Stable localization key for an SDK-generated test message. Omitted for script-authored messages.
        * @enum {string}
@@ -1634,6 +1642,18 @@ export interface components {
         | "assertion_values_not_deeply_equal"
         | "assertion_value_does_not_match"
         | "test_threw_non_error";
+    };
+    /** @description Identifies one persistent variable write without exposing its value. */
+    ScriptVariableWriteResult: {
+      name: components["schemas"]["VariableName"];
+      /** @enum {string} */
+      scope:
+        | "request"
+        | "parent-collection"
+        | "workspace"
+        | "selected-environment";
+      /** @enum {string} */
+      kind: "value" | "secret";
     };
     ScriptPhaseError: {
       /** @enum {string} */

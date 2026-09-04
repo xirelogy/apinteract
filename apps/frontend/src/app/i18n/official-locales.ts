@@ -417,6 +417,7 @@ const zhHansMessages = {
       name: "版本名称",
       namePlaceholder: "为此版本命名",
       readOnly: "你正在查看不可变版本。切换到“当前草稿”即可编辑。",
+      readOnlyIndicator: "正在查看只读版本",
       restore: "恢复为当前版本",
       saveName: "保存名称",
       title: "版本",
@@ -442,6 +443,7 @@ const zhHansMessages = {
       log: "日志",
       test: "测试",
       error: "错误",
+      variable: "变量",
     },
     logLevel: {
       debug: "调试",
@@ -479,6 +481,19 @@ const zhHansMessages = {
       assertion_values_not_deeply_equal: "值的深度比较不相等",
       assertion_value_does_not_match: "值不匹配",
       test_threw_non_error: "测试抛出了非错误值",
+    },
+    variableWrite: {
+      saved: "已保存",
+      kind: {
+        value: "普通值",
+        secret: "秘密值",
+      },
+      scope: {
+        request: "请求",
+        "parent-collection": "父集合",
+        workspace: "工作区",
+        "selected-environment": "已选环境",
+      },
     },
   },
   response: {
@@ -967,6 +982,7 @@ const zhHantMessages = {
       name: "版本名稱",
       namePlaceholder: "為此版本命名",
       readOnly: "你正在檢視不可變版本。切換到「目前草稿」即可編輯。",
+      readOnlyIndicator: "正在檢視唯讀版本",
       restore: "還原為目前版本",
       saveName: "儲存名稱",
       title: "版本",
@@ -992,6 +1008,7 @@ const zhHantMessages = {
       log: "日誌",
       test: "測試",
       error: "錯誤",
+      variable: "變數",
     },
     logLevel: {
       debug: "偵錯",
@@ -1029,6 +1046,19 @@ const zhHantMessages = {
       assertion_values_not_deeply_equal: "值的深度比較不相等",
       assertion_value_does_not_match: "值不相符",
       test_threw_non_error: "測試拋出了非錯誤值",
+    },
+    variableWrite: {
+      saved: "已儲存",
+      kind: {
+        value: "一般值",
+        secret: "秘密值",
+      },
+      scope: {
+        request: "請求",
+        "parent-collection": "父集合",
+        workspace: "工作區",
+        "selected-environment": "已選環境",
+      },
     },
   },
   response: {

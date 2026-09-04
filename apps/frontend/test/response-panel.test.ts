@@ -417,6 +417,9 @@ describe("ResponsePanel body transfer", () => {
           status: "failed",
           message: "Unlocalized backend fallback",
           messageCode: "assertion_expected_truthy",
+          code: "runtime_error",
+          line: 7,
+          column: 3,
         },
       ],
       scriptError: {
@@ -446,6 +449,7 @@ describe("ResponsePanel body transfer", () => {
     expect(wrapper.get(".script-results").text()).toContain(
       "Expected a truthy value",
     );
+    expect(wrapper.get(".script-results").text()).toContain("Line 7, column 3");
     expect(wrapper.get(".script-results").text()).not.toContain(
       "Unlocalized backend fallback",
     );
@@ -488,6 +492,55 @@ describe("ResponsePanel body transfer", () => {
         .get(".response-body-state")
         .element.closest<HTMLElement>('[role="tabpanel"]')?.hidden,
     ).toBe(false);
+  });
+
+  it("shows value-free receipts for committed script variable writes", async () => {
+    const execution: ExecutionView = {
+      executionId: "019fa8be-a510-76b9-b73b-69f4c7af7878",
+      state: "completed",
+      status: 200,
+      bodyComplete: true,
+      bodyBytes: 2,
+      createdAt: "2026-07-28T00:00:00.000Z",
+      completedAt: "2026-07-28T00:00:01.000Z",
+      scriptLogs: [],
+      scriptTests: [],
+      scriptVariableWrites: [
+        { name: "customerId", scope: "workspace", kind: "value" },
+        {
+          name: "accessToken",
+          scope: "selected-environment",
+          kind: "secret",
+        },
+      ],
+    };
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(ResponsePanel, {
+      props: { execution },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Scripts"))
+      ?.trigger("click");
+    const receipts = wrapper.findAll(
+      '.script-result-card[data-kind="variable"]',
+    );
+    expect(receipts).toHaveLength(2);
+    expect(receipts[0]?.get(".script-result-card-header").text()).toBe(
+      "VariablePost-responseSaved",
+    );
+    expect(receipts[0]?.get(".script-result-variable-details").text()).toBe(
+      "customerIdWorkspace · Value",
+    );
+    expect(receipts[1]?.get(".script-result-variable-details").text()).toBe(
+      "accessTokenSelected environment · Secret",
+    );
   });
 
   it("keeps exact raw JSON beside a faithful formatted structured view", async () => {

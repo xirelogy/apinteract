@@ -60,6 +60,9 @@ const selectedTab = ref<ResponseDetailTab>("raw");
 type ScriptLog = ExecutionView["scriptLogs"][number];
 type ScriptTest = ExecutionView["scriptTests"][number];
 type ScriptError = NonNullable<ExecutionView["scriptError"]>;
+type ScriptVariableWrite = NonNullable<
+  ExecutionView["scriptVariableWrites"]
+>[number];
 const scriptFailureCodes = new Set([
   "syntax_error",
   "runtime_error",
@@ -101,9 +104,15 @@ type ScriptResultCard =
       readonly sequence: number;
       readonly phase: ScriptError["phase"];
       readonly error: ScriptError;
+    }
+  | {
+      readonly type: "variable";
+      readonly sequence: number;
+      readonly phase: "post-response";
+      readonly write: ScriptVariableWrite;
     };
 
-/** Merges script output into the order in which the SDK produced it. */
+/** Merges script output with value-free receipts for committed mutations. */
 const scriptResultCards = computed<readonly ScriptResultCard[]>(() => {
   const execution = props.execution;
   if (execution === null) return [];
@@ -121,6 +130,15 @@ const scriptResultCards = computed<readonly ScriptResultCard[]>(() => {
       test,
     })),
   ].sort((left, right) => left.sequence - right.sequence);
+  const writeSequenceOffset = cards.at(-1)?.sequence ?? 0;
+  cards.push(
+    ...(execution.scriptVariableWrites ?? []).map((write, index) => ({
+      type: "variable" as const,
+      sequence: writeSequenceOffset + index + 1,
+      phase: "post-response" as const,
+      write,
+    })),
+  );
   if (execution.scriptError !== undefined) {
     cards.push({
       type: "error",
@@ -339,7 +357,10 @@ function formatTestMessage(test: ScriptTest): string {
 }
 
 /** Formats only source coordinates actually reported by the script engine. */
-function formatScriptLocation(error: ScriptError): string {
+function formatScriptLocation(error: {
+  readonly line?: number;
+  readonly column?: number;
+}): string {
   if (error.line === undefined) return "";
   return error.column === undefined
     ? t("scripting.line", { line: error.line })
@@ -347,6 +368,24 @@ function formatScriptLocation(error: ScriptError): string {
         line: error.line,
         column: error.column,
       });
+}
+
+/** Adds safe error code and source coordinates to an in-test diagnostic. */
+function formatTestDiagnostic(test: ScriptTest): string {
+  const message = formatTestMessage(test);
+  const knownMessage =
+    test.messageCode !== undefined &&
+    scriptTestMessageCodes.has(test.messageCode);
+  const parts = [message];
+  if (
+    test.code !== undefined &&
+    !knownMessage &&
+    test.code !== "runtime_error"
+  ) {
+    parts.push(test.code);
+  }
+  if (test.line !== undefined) parts.push(formatScriptLocation(test));
+  return parts.filter((part) => part !== "").join(" · ");
 }
 </script>
 
@@ -517,7 +556,7 @@ function formatScriptLocation(error: ScriptError): string {
           <section>
             <h3>
               {{ t("response.requestBody") }}
-              <small>
+              <small class="script-result-variable-target">
                 {{ formatBytes(execution.outgoingRequest.body.byteLength) }}
                 <template
                   v-if="execution.outgoingRequest.body.encoding === 'base64'"
@@ -638,7 +677,9 @@ function formatScriptLocation(error: ScriptError): string {
               ? card.test.status
               : card.type === 'log'
                 ? card.log.level
-                : 'error'
+                : card.type === 'variable'
+                  ? 'passed'
+                  : 'error'
           "
           :role="card.type === 'error' ? 'alert' : undefined"
         >
@@ -653,6 +694,9 @@ function formatScriptLocation(error: ScriptError): string {
             <strong v-else-if="card.type === 'test'">
               {{ t(`scripting.testStatus.${card.test.status}`) }}
             </strong>
+            <strong v-else-if="card.type === 'variable'">
+              {{ t("scripting.variableWrite.saved") }}
+            </strong>
             <code v-if="card.type === 'error'" class="script-result-code">
               {{ card.error.code }}
             </code>
@@ -665,9 +709,18 @@ function formatScriptLocation(error: ScriptError): string {
           </template>
           <template v-else-if="card.type === 'test'">
             <strong class="script-result-message">{{ card.test.name }}</strong>
-            <small v-if="card.test.message || card.test.messageCode">
-              {{ formatTestMessage(card.test) }}
+            <small v-if="formatTestDiagnostic(card.test)">
+              {{ formatTestDiagnostic(card.test) }}
             </small>
+          </template>
+          <template v-else-if="card.type === 'variable'">
+            <div class="script-result-variable-details">
+              <code>{{ card.write.name }}</code>
+              <small>
+                {{ t(`scripting.variableWrite.scope.${card.write.scope}`) }} ·
+                {{ t(`scripting.variableWrite.kind.${card.write.kind}`) }}
+              </small>
+            </div>
           </template>
           <template v-else>
             <div class="script-result-error-details">

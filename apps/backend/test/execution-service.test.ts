@@ -422,7 +422,12 @@ describe("ExecutionService shutdown", () => {
         [],
         "",
         "",
-        'throw new Error("Visible post-response failure");',
+        `
+          asdk.variables.setSecret("discardedToken", "discarded-secret", {
+            scope: "request",
+          });
+          throw new Error("Visible post-response failure");
+        `,
       );
       const failingEvents: ExecutionEvent[] = [];
       await executions.start(
@@ -524,6 +529,20 @@ describe("ExecutionService shutdown", () => {
           },
         ],
         scriptTests: [{ sequence: 2, name: "response body", status: "passed" }],
+        scriptVariableWrites: [
+          { name: "createdResult", scope: "workspace", kind: "value" },
+          { name: "nextToken", scope: "request", kind: "secret" },
+          {
+            name: "collectionResult",
+            scope: "parent-collection",
+            kind: "value",
+          },
+          {
+            name: "environmentToken",
+            scope: "selected-environment",
+            kind: "secret",
+          },
+        ],
       });
       expect(failingEvents.at(-1)?.payload).toMatchObject({
         state: "completed",
@@ -531,9 +550,15 @@ describe("ExecutionService shutdown", () => {
           phase: "post-response",
           code: "runtime_error",
           message: "Visible post-response failure",
-          line: 1,
+          line: 5,
         },
       });
+      expect(failingEvents.at(-1)?.payload).not.toHaveProperty(
+        "scriptVariableWrites",
+      );
+      await expect(
+        variables.get(userId, "request", failingRequest.requestId, null),
+      ).resolves.toMatchObject({ revision: 0, variables: [] });
       expect(transportFailingEvents.at(-1)?.payload).toMatchObject({
         state: "failed",
         scriptLogs: [],
@@ -588,6 +613,22 @@ describe("ExecutionService shutdown", () => {
       expect(persistedExecution.script_result_json).not.toContain(
         "response-token",
       );
+      expect(JSON.parse(persistedExecution.script_result_json!)).toMatchObject({
+        variableWrites: [
+          { name: "createdResult", scope: "workspace", kind: "value" },
+          { name: "nextToken", scope: "request", kind: "secret" },
+          {
+            name: "collectionResult",
+            scope: "parent-collection",
+            kind: "value",
+          },
+          {
+            name: "environmentToken",
+            scope: "selected-environment",
+            kind: "secret",
+          },
+        ],
+      });
       expect(JSON.stringify(auditEvents)).not.toContain("response-token");
       expect(JSON.stringify(auditEvents)).not.toContain("environment-secret");
     } finally {

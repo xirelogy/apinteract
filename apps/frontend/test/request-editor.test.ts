@@ -200,6 +200,16 @@ describe("RequestEditor", () => {
     expect(
       wrapper.get('input[aria-label="Request name"]').attributes("disabled"),
     ).toBeDefined();
+    const readOnlyIndicator = wrapper.get(
+      '.request-version-read-only-indicator[role="img"]',
+    );
+    expect(readOnlyIndicator.attributes("aria-label")).toBe(
+      "Viewing a read-only version",
+    );
+    expect(readOnlyIndicator.attributes("title")).toBe(
+      "Viewing a read-only version",
+    );
+    expect(readOnlyIndicator.find(".lucide-lock").exists()).toBe(true);
     await wrapper
       .findAll('[role="tab"]')
       .find((tab) => tab.text().includes("Versions"))

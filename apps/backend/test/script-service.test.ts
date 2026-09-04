@@ -90,6 +90,34 @@ describe(
       await service.close();
     });
 
+    it("captures diagnostics for errors thrown inside tests", async () => {
+      service = new ScriptService();
+      const result = await service.runPostResponse(
+        `
+        asdk.test("bad sdk", () => asdk.variables.none());
+        asdk.test("bad assertion", () => asdk.assert.equal(1, 2));
+        `,
+        postInput(),
+      );
+      expect(result.tests).toEqual([
+        {
+          sequence: 1,
+          name: "bad sdk",
+          status: "errored",
+          message: "not a function",
+          code: "TypeError",
+        },
+        {
+          sequence: 2,
+          name: "bad assertion",
+          status: "failed",
+          message: "Values are not equal",
+          messageCode: "assertion_values_not_equal",
+          code: "runtime_error",
+        },
+      ]);
+    });
+
     it("runs a pre-request script with safe variable and request access", async () => {
       service = new ScriptService();
 
@@ -426,19 +454,20 @@ describe(
           },
         },
       );
-
       expect(result.tests).toEqual([
         {
           sequence: 1,
           name: "body",
           status: "errored",
           message: "Response body is unavailable",
+          code: "response_body_unavailable",
         },
         {
           sequence: 2,
           name: "status",
           status: "failed",
           message: "Values are not equal",
+          code: "runtime_error",
           messageCode: "assertion_values_not_equal",
         },
         {
@@ -446,6 +475,7 @@ describe(
           name: "truthy",
           status: "failed",
           message: "Expected a truthy value",
+          code: "runtime_error",
           messageCode: "assertion_expected_truthy",
         },
       ]);

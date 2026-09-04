@@ -10,6 +10,7 @@ import {
   type ScriptRequest,
   type ScriptTestResult,
   type ScriptVariable,
+  type ScriptVariableWriteScope,
 } from "../scripting/script-types.js";
 
 /** One script log annotated with the phase that produced it. */
@@ -26,10 +27,18 @@ export interface ScriptPhaseError {
   readonly column?: number;
 }
 
+/** Value-free receipt for one persistent variable mutation committed by a script. */
+export interface ScriptVariableWriteResult {
+  readonly name: string;
+  readonly scope: ScriptVariableWriteScope;
+  readonly kind: "value" | "secret";
+}
+
 /** Accumulated script output persisted with one execution. */
 export interface ScriptSummary {
   readonly logs: readonly PhasedScriptLog[];
   readonly tests: readonly ScriptTestResult[];
+  readonly variableWrites?: readonly ScriptVariableWriteResult[];
   readonly error?: ScriptPhaseError;
 }
 

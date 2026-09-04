@@ -297,6 +297,9 @@ export function validateTests(
     const status = record?.status;
     const message = record?.message;
     const messageCode = record?.messageCode;
+    const code = record?.code;
+    const line = record?.line;
+    const column = record?.column;
     if (
       record === undefined ||
       typeof sequence !== "number" ||
@@ -306,6 +309,16 @@ export function validateTests(
       typeof status !== "string" ||
       !["passed", "failed", "errored"].includes(status) ||
       (message !== undefined && typeof message !== "string") ||
+      (code !== undefined &&
+        (typeof code !== "string" || code.length === 0 || code.length > 100)) ||
+      (line !== undefined &&
+        (typeof line !== "number" ||
+          !Number.isSafeInteger(line) ||
+          line < 1)) ||
+      (column !== undefined &&
+        (typeof column !== "number" ||
+          !Number.isSafeInteger(column) ||
+          column < 1)) ||
       (messageCode !== undefined &&
         (typeof messageCode !== "string" ||
           ![
@@ -326,6 +339,9 @@ export function validateTests(
       name,
       status: status as ScriptTestResult["status"],
       ...(typeof message === "string" ? { message } : {}),
+      ...(typeof code === "string" ? { code } : {}),
+      ...(typeof line === "number" ? { line } : {}),
+      ...(typeof column === "number" ? { column } : {}),
       ...(typeof messageCode === "string"
         ? {
             messageCode: messageCode as NonNullable<

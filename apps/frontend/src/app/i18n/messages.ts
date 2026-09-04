@@ -437,6 +437,7 @@ export const enUsMessages = {
       namePlaceholder: "Name this version",
       readOnly:
         "You are viewing an immutable version. Switch to Current draft to edit.",
+      readOnlyIndicator: "Viewing a read-only version",
       restore: "Restore as current",
       saveName: "Save name",
       title: "Versions",
@@ -462,6 +463,7 @@ export const enUsMessages = {
       log: "Log",
       test: "Test",
       error: "Error",
+      variable: "Variable",
     },
     logLevel: {
       debug: "Debug",
@@ -500,6 +502,19 @@ export const enUsMessages = {
       assertion_values_not_deeply_equal: "Values are not deeply equal",
       assertion_value_does_not_match: "Value does not match",
       test_threw_non_error: "The test threw a non-error value",
+    },
+    variableWrite: {
+      saved: "Saved",
+      kind: {
+        value: "Value",
+        secret: "Secret",
+      },
+      scope: {
+        request: "Request",
+        "parent-collection": "Parent collection",
+        workspace: "Workspace",
+        "selected-environment": "Selected environment",
+      },
     },
   },
   response: {

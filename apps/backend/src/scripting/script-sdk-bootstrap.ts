@@ -611,6 +611,53 @@ export const SCRIPT_SDK_BOOTSTRAP = String.raw`
     return error;
   }
 
+  function errorDiagnostics(error) {
+    if (error === null || typeof error !== "object") return {};
+    const detail = error;
+    const rawCode =
+      typeof detail.code === "string"
+        ? detail.code
+        : typeof detail.name === "string" && detail.name !== "Error"
+          ? detail.name
+          : undefined;
+    const code =
+      rawCode === undefined || rawCode.length === 0
+        ? undefined
+        : rawCode.slice(0, 100);
+    const directLine = detail.lineNumber;
+    const directColumn = detail.columnNumber;
+    if (
+      typeof directLine === "number" &&
+      Number.isSafeInteger(directLine) &&
+      directLine >= 1
+    ) {
+      return {
+        ...(code === undefined ? {} : { code }),
+        line: directLine,
+        ...(typeof directColumn === "number" &&
+        Number.isSafeInteger(directColumn) &&
+        directColumn >= 1
+          ? { column: directColumn }
+          : {}),
+      };
+    }
+    if (typeof detail.stack !== "string") {
+      return code === undefined ? {} : { code };
+    }
+    const match = /request-script\.js(?::(\d+))?(?::(\d+))?/u.exec(detail.stack);
+    const line = match?.[1] === undefined ? undefined : Number(match[1]);
+    const column = match?.[2] === undefined ? undefined : Number(match[2]);
+    return {
+      ...(code === undefined ? {} : { code }),
+      ...(line !== undefined && Number.isSafeInteger(line) && line >= 1
+        ? { line }
+        : {}),
+      ...(column !== undefined && Number.isSafeInteger(column) && column >= 1
+        ? { column }
+        : {}),
+    };
+  }
+
   const assertionApi = Object.freeze({
     ok(value, message) {
       if (!value) {
@@ -680,6 +727,7 @@ export const SCRIPT_SDK_BOOTSTRAP = String.raw`
         status: error && error.assertion ? "failed" : "errored",
         message: error instanceof Error ? error.message : "Test threw a non-error value",
         ...(messageCode === undefined ? {} : { messageCode }),
+        ...errorDiagnostics(error),
       });
     }
   }

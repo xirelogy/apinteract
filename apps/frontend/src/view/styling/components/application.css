@@ -996,6 +996,25 @@
   border-color: transparent;
 }
 
+.request-name-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.request-name-row .request-name-input {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.request-version-read-only-indicator {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--accent-primary);
+}
+
 .request-title {
   display: grid;
   min-width: 0;
@@ -2168,6 +2187,22 @@
 .script-result-error-details {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.script-result-variable-details {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.script-result-variable-details code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.script-result-variable-target {
+  flex: 0 0 auto;
 }
 
 .script-result-code {

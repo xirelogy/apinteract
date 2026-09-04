@@ -7,7 +7,10 @@ import {
 } from "../executions/execution-service.js";
 import { bytesToId, idToBytes, type EntityId } from "../foundation/id.js";
 import type { DatabaseSchema } from "../persistence/schema.js";
-import type { ScriptSummary } from "../executions/script-execution-adapter.js";
+import type {
+  ScriptSummary,
+  ScriptVariableWriteResult,
+} from "../executions/script-execution-adapter.js";
 import type { WorkspaceService } from "../workspaces/workspace-service.js";
 import { ResourceNotFoundError } from "../workspaces/workspace-service.js";
 
@@ -307,6 +310,9 @@ export class RequestExchangeService {
         ...parseExecutionError(row.error_json),
         scriptLogs: scripts.logs,
         scriptTests: scripts.tests,
+        ...(scripts.variableWrites === undefined
+          ? {}
+          : { scriptVariableWrites: scripts.variableWrites }),
         ...(scripts.error === undefined ? {} : { scriptError: scripts.error }),
       },
     };
@@ -376,12 +382,39 @@ function parseScriptSummary(value: string | null): ScriptSummary {
   if (value === null) return { logs: [], tests: [] };
   try {
     const parsed = JSON.parse(value) as ScriptSummary;
-    return Array.isArray(parsed.logs) && Array.isArray(parsed.tests)
-      ? parsed
-      : { logs: [], tests: [] };
+    if (!Array.isArray(parsed.logs) || !Array.isArray(parsed.tests)) {
+      return { logs: [], tests: [] };
+    }
+    const variableWrites = Array.isArray(parsed.variableWrites)
+      ? parsed.variableWrites.filter(isScriptVariableWriteResult)
+      : [];
+    return {
+      logs: parsed.logs,
+      tests: parsed.tests,
+      ...(variableWrites.length === 0 ? {} : { variableWrites }),
+      ...(parsed.error === undefined ? {} : { error: parsed.error }),
+    };
   } catch {
     return { logs: [], tests: [] };
   }
+}
+
+/** Validates the value-free variable receipt stored with an execution. */
+function isScriptVariableWriteResult(
+  value: unknown,
+): value is ScriptVariableWriteResult {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.name === "string" &&
+    [
+      "request",
+      "parent-collection",
+      "workspace",
+      "selected-environment",
+    ].includes(String(candidate.scope)) &&
+    (candidate.kind === "value" || candidate.kind === "secret")
+  );
 }
 
 /** Parses the small persisted execution failure envelope for response display. */

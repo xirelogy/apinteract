@@ -231,6 +231,9 @@ execution. If the script throws, no queued value is saved. If a target profile
 changes while the request is running, all queued writes are discarded and the
 execution reports `variable_write_conflict` beside the response. Repeated
 writes to the same name and scope use the last value supplied by the script.
+After a successful commit, the script results identify each variable name,
+destination scope, and whether it was stored as a value or secret. Stored
+values are never included in these receipts.
 
 ## Share temporary values
 
@@ -277,7 +280,10 @@ asdk.test("contains an ID", () => {
 
 Tests are reported as passed, failed, or errored. A failed test does not turn a
 valid target response into a network failure. If the body is unavailable,
-check `response.body.available` before calling `text()` or `bytes()`.
+check `response.body.available` before calling `text()` or `bytes()`. Errors
+captured by a test retain a safe error code (or JavaScript error name) and any
+source line and column reported by the script engine, so failures can be
+diagnosed without exposing a stack trace.
 
 The authoritative response is read-only. A post-response script can create
 tests, logs, and local values, but cannot rewrite response bytes or headers.

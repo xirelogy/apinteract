@@ -45,6 +45,7 @@ import {
   type PhasedScriptLog,
   type ScriptPhaseError,
   type ScriptSummary,
+  type ScriptVariableWriteResult,
 } from "./script-execution-adapter.js";
 
 type ResponseHead = ProxyComponents["schemas"]["ResponseHead"];
@@ -86,6 +87,7 @@ export interface ExecutionView {
   readonly outgoingRequest?: OutgoingRequestView;
   readonly scriptLogs: readonly PhasedScriptLog[];
   readonly scriptTests: readonly ScriptTestResult[];
+  readonly scriptVariableWrites?: readonly ScriptVariableWriteResult[];
   readonly scriptError?: ScriptPhaseError;
 }
 
@@ -696,6 +698,13 @@ export class ExecutionService {
     variableWrites: readonly ScriptVariableWrite[],
   ): Promise<ExecutionView> {
     const completedAt = Date.now();
+    const committedVariableWrites = variableWrites.map(
+      scriptVariableWriteResult,
+    );
+    const persistedScripts =
+      committedVariableWrites.length === 0
+        ? scripts
+        : { ...scripts, variableWrites: committedVariableWrites };
     // The file is committed before this transaction. Blob metadata, its
     // execution reference, terminal state, and audit outbox entry are then
     // committed atomically. Crash recovery may need to remove an orphan file
@@ -743,7 +752,7 @@ export class ExecutionService {
           body_bytes: blob?.byteLength ?? 0,
           body_sha256: blob?.sha256 ?? null,
           error_json: error === null ? null : JSON.stringify(error),
-          script_result_json: JSON.stringify(scripts),
+          script_result_json: JSON.stringify(persistedScripts),
           completed_at: completedAt,
         })
         .where("id", "=", idToBytes(prepared.executionId))
@@ -787,6 +796,9 @@ export class ExecutionService {
       ...(outgoingRequest === undefined ? {} : { outgoingRequest }),
       scriptLogs: scripts.logs,
       scriptTests: scripts.tests,
+      ...(committedVariableWrites.length === 0
+        ? {}
+        : { scriptVariableWrites: committedVariableWrites }),
       ...(scripts.error === undefined ? {} : { scriptError: scripts.error }),
     };
   }
@@ -841,6 +853,13 @@ export class ExecutionService {
       this.#variableWritePolicy,
     );
   }
+}
+
+/** Removes plaintext from one committed write before it enters execution results. */
+function scriptVariableWriteResult(
+  write: ScriptVariableWrite,
+): ScriptVariableWriteResult {
+  return { name: write.name, scope: write.scope, kind: write.kind };
 }
 
 /** Converts a sensitivity-aware script view into a user-inspectable request. */

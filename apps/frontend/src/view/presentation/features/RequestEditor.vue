@@ -836,15 +836,26 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               aria-hidden="true"
             />
             <div class="request-title">
-              <TextInput
-                id="request-name"
-                v-model="name"
-                class="request-name-input"
-                :aria-label="t('request.name')"
-                :placeholder="t('request.titlePlaceholder')"
-                :disabled="editorDisabled"
-                @input="emitChange"
-              />
+              <div class="request-name-row">
+                <TextInput
+                  id="request-name"
+                  v-model="name"
+                  class="request-name-input"
+                  :aria-label="t('request.name')"
+                  :placeholder="t('request.titlePlaceholder')"
+                  :disabled="editorDisabled"
+                  @input="emitChange"
+                />
+                <span
+                  v-if="viewingRevision"
+                  class="request-version-read-only-indicator"
+                  role="img"
+                  :aria-label="t('request.versions.readOnlyIndicator')"
+                  :title="t('request.versions.readOnlyIndicator')"
+                >
+                  <Lock :size="15" aria-hidden="true" />
+                </span>
+              </div>
               <p
                 v-for="warning in recoveryWarnings"
                 :key="warning"

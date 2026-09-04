@@ -186,6 +186,12 @@ export interface ScriptTestResult {
   readonly status: "passed" | "failed" | "errored";
   readonly message?: string;
   readonly messageCode?: ScriptTestMessageCode;
+  /** Stable SDK/runtime code or JavaScript error name, when available. */
+  readonly code?: string;
+  /** One-based source line reported for the test body failure. */
+  readonly line?: number;
+  /** One-based source column reported for the test body failure. */
+  readonly column?: number;
 }
 
 /** Shared copied input for either script phase. */

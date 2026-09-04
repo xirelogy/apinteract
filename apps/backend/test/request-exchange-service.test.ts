@@ -124,7 +124,13 @@ describe("RequestExchangeService", () => {
           body_bytes: 0,
           body_sha256: null,
           error_json: null,
-          script_result_json: null,
+          script_result_json: JSON.stringify({
+            logs: [],
+            tests: [],
+            variableWrites: [
+              { name: "token", scope: "workspace", kind: "secret" },
+            ],
+          }),
           created_at: Date.parse("2026-02-01T00:00:00.000Z"),
           completed_at: Date.parse("2026-02-01T00:00:01.000Z"),
         })
@@ -151,6 +157,9 @@ describe("RequestExchangeService", () => {
       expect(execution.execution).toMatchObject({
         status: 201,
         headers: [{ name: "content-type", value: "application/json" }],
+        scriptVariableWrites: [
+          { name: "token", scope: "workspace", kind: "secret" },
+        ],
       });
       const captureSummary = summaries[1]!;
       const capture = await exchanges.get(

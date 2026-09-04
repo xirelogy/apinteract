@@ -3951,6 +3951,13 @@
             "type": "array",
             "items": { "$ref": "#/components/schemas/ScriptTestResult" }
           },
+          "scriptVariableWrites": {
+            "type": "array",
+            "description": "Value-free receipts for persistent variable writes committed with this execution.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptVariableWriteResult"
+            }
+          },
           "scriptError": {
             "$ref": "#/components/schemas/ScriptPhaseError"
           },
@@ -4132,6 +4139,21 @@
             "enum": ["passed", "failed", "errored"]
           },
           "message": { "type": "string" },
+          "code": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Stable SDK/runtime code or JavaScript error name, when available."
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "One-based source line reported for the test body failure."
+          },
+          "column": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "One-based source column reported for the test body failure."
+          },
           "messageCode": {
             "type": "string",
             "description": "Stable localization key for an SDK-generated test message. Omitted for script-authored messages.",
@@ -4143,6 +4165,25 @@
               "test_threw_non_error"
             ]
           }
+        }
+      },
+      "ScriptVariableWriteResult": {
+        "type": "object",
+        "description": "Identifies one persistent variable write without exposing its value.",
+        "additionalProperties": false,
+        "required": ["name", "scope", "kind"],
+        "properties": {
+          "name": { "$ref": "#/components/schemas/VariableName" },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "request",
+              "parent-collection",
+              "workspace",
+              "selected-environment"
+            ]
+          },
+          "kind": { "type": "string", "enum": ["value", "secret"] }
         }
       },
       "ScriptPhaseError": {
