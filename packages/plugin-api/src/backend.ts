@@ -1,10 +1,45 @@
-import type { components } from "@apinteract/api-contracts/backend";
-
 import type { APInteractPluginModule } from "./core.js";
 
 export type ImportProviderId = string;
-export type ImportedHttpMethod = components["schemas"]["HttpMethod"];
-export type ImportedVariableWrite = components["schemas"]["VariableWrite"];
+export type ImportedHttpMethod =
+  | "GET"
+  | "POST"
+  | "PUT"
+  | "PATCH"
+  | "DELETE"
+  | "HEAD"
+  | "OPTIONS";
+
+/** Describes one variable declaration emitted by an import provider. */
+export type ImportedVariableWrite =
+  | {
+      readonly variableId?: string;
+      readonly name: string;
+      readonly description?: string;
+      readonly kind: "value";
+      readonly value: string;
+    }
+  | {
+      readonly variableId?: string;
+      readonly name: string;
+      readonly description?: string;
+      readonly kind: "secret";
+      readonly value?: string;
+      readonly clearValue?: boolean;
+    }
+  | {
+      readonly variableId?: string;
+      readonly name: string;
+      readonly description?: string;
+      readonly kind: "alias";
+      readonly target: string;
+    }
+  | {
+      readonly variableId?: string;
+      readonly name: string;
+      readonly description?: string;
+      readonly kind: "unset";
+    };
 
 /** Declares one source adapter and the normalized features it may produce. */
 export interface ImportProviderManifest {
@@ -121,7 +156,7 @@ export interface ImportedCollection {
   readonly description: string;
   readonly notes: string;
   readonly pathPrefix: string;
-  readonly variables: readonly components["schemas"]["VariableWrite"][];
+  readonly variables: readonly ImportedVariableWrite[];
 }
 
 /** Preserves one recorded HTTP response without provider-controlled provenance. */
@@ -162,7 +197,7 @@ export interface ImportedRequest {
   readonly body: string;
   readonly preRequestScript: string;
   readonly postResponseScript: string;
-  readonly variables: readonly components["schemas"]["VariableWrite"][];
+  readonly variables: readonly ImportedVariableWrite[];
   readonly capturedExchange?: ImportedCapturedExchange;
   readonly capturedExchanges?: readonly ImportedCapturedExchange[];
 }
@@ -178,7 +213,7 @@ export interface ImportPlan {
   readonly description: string;
   readonly notes: string;
   readonly pathPrefix: string;
-  readonly variables: readonly components["schemas"]["VariableWrite"][];
+  readonly variables: readonly ImportedVariableWrite[];
   readonly collections: readonly ImportedCollection[];
   readonly requests: readonly ImportedRequest[];
   readonly diagnostics: readonly ImportDiagnostic[];

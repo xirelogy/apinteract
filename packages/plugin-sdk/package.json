@@ -1,20 +1,44 @@
 {
   "name": "@apinteract/plugin-sdk",
   "version": "1.0.0",
-  "private": true,
+  "description": "Optional authoring helpers for developing APInteract plugins.",
+  "license": "MIT",
+  "homepage": "https://github.com/xirelogy/apinteract/tree/main/packages/plugin-sdk#readme",
+  "bugs": "https://github.com/xirelogy/apinteract/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xirelogy/apinteract.git",
+    "directory": "packages/plugin-sdk"
+  },
   "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "exports": {
     "./backend/import": {
-      "types": "./src/backend/import.ts",
-      "default": "./src/backend/import.ts"
+      "types": "./dist/backend/import.d.ts",
+      "default": "./dist/backend/import.js"
     },
     "./frontend/localization": {
-      "types": "./src/frontend/localization.ts",
-      "default": "./src/frontend/localization.ts"
+      "types": "./dist/frontend/localization.d.ts",
+      "default": "./dist/frontend/localization.js"
     }
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
     "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@apinteract/plugin-api": "^1.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
   },
   "devDependencies": {
     "@apinteract/plugin-api": "workspace:*",

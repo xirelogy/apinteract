@@ -1,13 +1,93 @@
-import type { components } from "@apinteract/api-contracts/backend";
-
 import type { APInteractPluginModule } from "./core.js";
 
-export type RequestBodyHostKind =
-  components["schemas"]["RequestBodyDefinition"]["kind"];
+export type RequestBodyHostKind = RequestBodyDefinition["kind"];
+
+/** Describes one editable name/value field in a structured request body. */
+export interface RequestBodyField {
+  readonly name: string;
+  readonly value: string;
+  readonly enabled: boolean;
+  readonly description?: string;
+  readonly mode?: "override" | "append";
+}
+
+/** Describes an immutable workspace upload referenced by a request body. */
+export interface RequestAttachment {
+  readonly attachmentId: string;
+  readonly workspaceId: string;
+  readonly fileName: string;
+  readonly contentType: string;
+  readonly byteLength: number;
+  readonly sha256: string;
+}
+
+/** Describes one file positioned among multipart text fields. */
+export interface MultipartFileField {
+  readonly kind: "file";
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly description?: string;
+  readonly attachment: RequestAttachment;
+}
+
+/** Preserves the canonical HTTP wire-body forms exchanged with content plugins. */
 export type RequestBodyDefinition =
-  components["schemas"]["RequestBodyDefinition"];
-export type RequestAttachment = components["schemas"]["RequestAttachment"];
-export type VariablePreview = components["schemas"]["VariablePreview"];
+  | { readonly kind: "none" }
+  | {
+      readonly kind: "text";
+      readonly contentType: string | null;
+      readonly text: string;
+    }
+  | {
+      readonly kind: "file";
+      readonly contentType: string | null;
+      readonly attachment: RequestAttachment;
+    }
+  | {
+      readonly kind: "urlencoded";
+      readonly contentType: string | null;
+      readonly fields: RequestBodyField[];
+    }
+  | {
+      readonly kind: "multipart";
+      readonly contentType: string | null;
+      readonly boundary: string;
+      readonly fields: (RequestBodyField | MultipartFileField)[];
+    };
+
+/** Identifies the declaration that supplied one effective variable preview. */
+export interface VariablePreviewSource {
+  readonly scope: "workspace" | "collection" | "environment" | "request";
+  readonly scopeId: string;
+  readonly scopeName: string;
+  readonly revision: number;
+}
+
+/** Provides secret-safe variable resolution evidence to an editor plugin. */
+export interface VariablePreview {
+  readonly name: string;
+  readonly status: "resolved" | "missing" | "unset" | "error";
+  readonly declaredKind: "value" | "secret" | "alias" | "unset" | null;
+  readonly effectiveKind: "value" | "secret" | null;
+  readonly aliasTarget: string | null;
+  readonly value: string | null;
+  readonly secretVersion: number | null;
+  readonly diagnostic: string | null;
+  readonly source: VariablePreviewSource | null;
+}
+
+/** Exposes only response fields required by response-content plugins. */
+export interface ResponseExecution {
+  readonly executionId: string;
+  readonly headers?: readonly {
+    readonly name: string;
+    readonly value: string;
+  }[];
+  readonly bodyComplete: boolean;
+  readonly bodyBytes?: number;
+  readonly bodyPreview?: string;
+  readonly bodyBlobId?: string;
+}
 /** Names one editor language understood by a host or safely treated as plain text. */
 export type CodeEditorLanguage = string;
 
@@ -130,7 +210,7 @@ export interface RequestContentContribution {
 
 /** Provides bounded response data to one selected frontend parser/presenter. */
 export interface ResponseContentPresenterContext {
-  readonly execution: components["schemas"]["ExecutionView"];
+  readonly execution: ResponseExecution;
   readonly mediaType: string;
   readonly locale: string;
   readonly previewComplete: boolean;

@@ -1,0 +1,117 @@
+name: Initialize npm plugin package
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package to initialize on npm
+        required: true
+        type: choice
+        options:
+          - plugin-api
+          - plugin-sdk
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish bootstrap version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: npm-bootstrap
+
+    steps:
+      - name: Check out selected source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install the declared pnpm version
+        run: |
+          corepack enable
+          corepack install --global pnpm@8.15.0
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve and validate selected package
+        id: package
+        env:
+          SELECTED_PACKAGE: ${{ inputs.package }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${SELECTED_PACKAGE}" in
+            plugin-api)
+              package_directory="packages/plugin-api"
+              package_name="@apinteract/plugin-api"
+              ;;
+            plugin-sdk)
+              package_directory="packages/plugin-sdk"
+              package_name="@apinteract/plugin-sdk"
+              ;;
+            *)
+              printf 'Unsupported package selection: %s\n' "${SELECTED_PACKAGE}" >&2
+              exit 1
+              ;;
+          esac
+          version="$(node -p "require('./${package_directory}/package.json').version")"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            printf 'Package version is not valid SemVer: %s\n' "${version}" >&2
+            exit 1
+          fi
+          printf 'directory=%s\nname=%s\nversion=%s\n' \
+            "${package_directory}" "${package_name}" "${version}" >>"${GITHUB_OUTPUT}"
+
+      - name: Run repository and external-consumer checks
+        run: pnpm check
+
+      - name: Pack the verified package
+        id: archive
+        env:
+          PACKAGE_DIRECTORY: ${{ steps.package.outputs.directory }}
+        run: |
+          set -euo pipefail
+          pack_directory="$(mktemp -d "${RUNNER_TEMP}/apinteract-plugin-bootstrap.XXXXXXXX")"
+          pnpm --dir "${PACKAGE_DIRECTORY}" pack --pack-destination "${pack_directory}"
+          shopt -s nullglob
+          tarballs=("${pack_directory}"/*.tgz)
+          if (( ${#tarballs[@]} != 1 )); then
+            printf 'Expected exactly one bootstrap tarball.\n' >&2
+            exit 1
+          fi
+          printf 'tarball=%s\n' "${tarballs[0]}" >>"${GITHUB_OUTPUT}"
+
+      - name: Refuse to overwrite an existing npm version
+        env:
+          PACKAGE_NAME: ${{ steps.package.outputs.name }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          set -euo pipefail
+          lookup_log="$(mktemp "${RUNNER_TEMP}/apinteract-npm-view.XXXXXXXX")"
+          if npm view "${PACKAGE_NAME}@${VERSION}" version --registry https://registry.npmjs.org > /dev/null 2>"${lookup_log}"; then
+            printf 'npm version already exists and will not be overwritten: %s@%s\n' \
+              "${PACKAGE_NAME}" "${VERSION}" >&2
+            exit 1
+          fi
+          if ! grep -Eq 'E404|404 Not Found' "${lookup_log}"; then
+            cat "${lookup_log}" >&2
+            exit 1
+          fi
+
+      - name: Publish bootstrap version with npm token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${NODE_AUTH_TOKEN}" ]]; then
+            printf 'The NPM_TOKEN secret in the npm-bootstrap environment is required.\n' >&2
+            exit 1
+          fi
+          npm publish "${{ steps.archive.outputs.tarball }}" \
+            --access public --provenance=false --registry https://registry.npmjs.org

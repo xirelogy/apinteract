@@ -1,28 +1,46 @@
 {
   "name": "@apinteract/plugin-api",
   "version": "1.0.0",
-  "private": true,
+  "description": "Stable TypeScript contracts for developing APInteract plugins.",
+  "license": "MIT",
+  "homepage": "https://github.com/xirelogy/apinteract/tree/main/packages/plugin-api#readme",
+  "bugs": "https://github.com/xirelogy/apinteract/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xirelogy/apinteract.git",
+    "directory": "packages/plugin-api"
+  },
   "type": "module",
+  "types": "./dist/core.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "exports": {
     ".": {
-      "types": "./src/core.ts",
+      "types": "./dist/core.d.ts",
       "default": "./dist/core.js"
     },
     "./frontend": {
-      "types": "./src/frontend.ts",
+      "types": "./dist/frontend.d.ts",
       "default": "./dist/frontend.js"
     },
     "./backend": {
-      "types": "./src/backend.ts",
+      "types": "./dist/backend.d.ts",
       "default": "./dist/backend.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "@apinteract/api-contracts": "workspace:*"
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
   },
   "devDependencies": {
     "typescript": "5.9.3"

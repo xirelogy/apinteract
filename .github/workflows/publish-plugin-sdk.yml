@@ -1,0 +1,90 @@
+name: Publish plugin SDK package
+
+on:
+  push:
+    tags:
+      - "plugin-sdk-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-plugin-sdk
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: npm
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Install the declared pnpm version
+        run: |
+          corepack enable
+          corepack install --global pnpm@8.15.0
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_name="@apinteract/plugin-sdk"
+          version="$(node -p "require('./packages/plugin-sdk/package.json').version")"
+          expected_tag="plugin-sdk-v${version}"
+          if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
+            printf 'Tag must exactly match the package version: %s\n' "${expected_tag}" >&2
+            exit 1
+          fi
+          printf 'name=%s\nversion=%s\n' "${package_name}" "${version}" >>"${GITHUB_OUTPUT}"
+
+      - name: Run repository and external-consumer checks
+        run: pnpm check
+
+      - name: Pack the verified package
+        id: package
+        run: |
+          set -euo pipefail
+          pack_directory="$(mktemp -d "${RUNNER_TEMP}/apinteract-plugin-sdk.XXXXXXXX")"
+          pnpm --dir packages/plugin-sdk pack --pack-destination "${pack_directory}"
+          shopt -s nullglob
+          tarballs=("${pack_directory}"/*.tgz)
+          if (( ${#tarballs[@]} != 1 )); then
+            printf 'Expected exactly one plugin SDK tarball.\n' >&2
+            exit 1
+          fi
+          tarball="${tarballs[0]}"
+          printf 'tarball=%s\n' "${tarball}" >>"${GITHUB_OUTPUT}"
+
+      - name: Refuse to overwrite an immutable npm version
+        env:
+          PACKAGE_NAME: ${{ steps.release.outputs.name }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          lookup_log="$(mktemp "${RUNNER_TEMP}/apinteract-npm-view.XXXXXXXX")"
+          if npm view "${PACKAGE_NAME}@${VERSION}" version --registry https://registry.npmjs.org > /dev/null 2>"${lookup_log}"; then
+            printf 'npm version already exists and will not be overwritten: %s@%s\n' \
+              "${PACKAGE_NAME}" "${VERSION}" >&2
+            exit 1
+          fi
+          if ! grep -Eq 'E404|404 Not Found' "${lookup_log}"; then
+            cat "${lookup_log}" >&2
+            exit 1
+          fi
+
+      - name: Publish to npm with provenance
+        run: npm publish "${{ steps.package.outputs.tarball }}" --access public --provenance --registry https://registry.npmjs.org

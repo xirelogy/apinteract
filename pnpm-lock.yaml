@@ -264,10 +264,6 @@ importers:
         version: 5.9.3
 
   packages/plugin-api:
-    dependencies:
-      '@apinteract/api-contracts':
-        specifier: workspace:*
-        version: link:../api-contracts
     devDependencies:
       typescript:
         specifier: 5.9.3

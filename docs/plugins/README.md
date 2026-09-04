@@ -7,6 +7,18 @@ or more implementations through typed providers from `@apinteract/plugin-api`.
 Frontend plugins and backend plugins execute in different environments and
 cannot contribute across that boundary. They use the same package format.
 
+Install the public development packages without checking out the APInteract
+source tree:
+
+```sh
+pnpm add --save-dev @apinteract/plugin-api @apinteract/plugin-sdk
+```
+
+`plugin-api` supplies the stable host contracts. `plugin-sdk` supplies optional
+helpers and declares `plugin-api` as a peer dependency. Both packages are
+development inputs: a distributable plugin bundles SDK runtime helpers and has
+no unresolved `@apinteract/*` runtime imports.
+
 ## Package Format
 
 Every discovery-root child is one self-contained package:
@@ -48,6 +60,13 @@ is the whole-number host/plugin compatibility generation and changes only when
 that contract breaks. It is deliberately not SemVer: the independently
 released `@apinteract/plugin-api` and `@apinteract/plugin-sdk` packages use
 SemVer for compatible and incompatible package releases.
+
+The APInteract product version, package SemVer versions, manifest
+`apiVersion`, and manifest `schemaVersion` are independent. Compatible contract
+additions increment the `plugin-api` minor version. A breaking executable
+contract increments both its package major version and the manifest
+`apiVersion`. SDK releases follow their own SemVer line and do not change host
+compatibility by themselves.
 
 IDs use lowercase alphanumeric segments separated by dots or hyphens. Versions
 use semantic `major.minor.patch` form. Entrypoints must remain below `dist/` and
@@ -340,3 +359,54 @@ Authentication providers, blob stores, delivery providers, persistence
 adapters, script runtimes, secret stores, logging sinks, and proxy selectors
 remain future extension points. They can reuse the same single-target package
 format while defining their own typed provider contracts.
+
+## Package Releases
+
+The development packages are released independently from APInteract container
+images. A maintainer updates the selected package version and lockfile, merges
+the verified source, then creates one matching tag:
+
+- `plugin-api-v1.2.3` publishes `@apinteract/plugin-api@1.2.3`.
+- `plugin-sdk-v1.2.3` publishes `@apinteract/plugin-sdk@1.2.3`.
+
+Each tag runs the repository checks against packed tarballs before publishing
+only that package to npm with provenance. Existing npm versions are immutable
+and will not be overwritten. npm trusted publishing must authorize the matching
+GitHub Actions workflow in the `xirelogy/apinteract` repository and its `npm`
+GitHub environment; no long-lived npm token is used. Publish `plugin-api` first
+when an SDK release declares a peer range that requires its new version.
+
+### First-Publication Bootstrap
+
+npm requires a package to exist before its trusted publisher can be configured.
+Use the manual **Initialize npm plugin package** workflow for this one-time
+bootstrap. Create a GitHub `npm-bootstrap` environment, add a short-lived
+granular npm token named `NPM_TOKEN` to that environment, select one package,
+and run the workflow against the commit containing its intended bootstrap
+version. The workflow runs all checks, refuses an existing version, publishes
+without provenance, and never exposes the token to other steps. Revoke the
+token immediately after both packages have been initialized.
+
+Do not consume an intended stable version unless that is deliberate: npm
+versions cannot be replaced. A safe sequence is, for example:
+
+1. Set `plugin-api` to `1.0.0-bootstrap.0` and initialize it with the token.
+2. Configure npm trusted publishing for `publish-plugin-api.yml` and the
+   `npm` environment.
+3. Set the package to `1.0.0-oidc.0`, commit, and push the
+   `plugin-api-v1.0.0-oidc.0` tag. This exercises the real OIDC workflow.
+4. Set the package to `1.0.0`, commit, and push `plugin-api-v1.0.0` for the
+   official release.
+
+Repeat the sequence independently for `plugin-sdk`. If the bootstrap already
+used `1.0.0`, use the next unpublished prerelease and stable version for the
+OIDC test and official release.
+
+The `@apinteract` scope and both package names must exist under the publishing
+npm organization before their trusted publishers can be configured. If npm
+requires an initial package publication before that configuration is
+available, publish the first verified tarball once with a short-lived granular
+token, revoke the token, and configure `publish-plugin-api.yml` or
+`publish-plugin-sdk.yml` as the package's trusted publisher. Automated tags
+start with the next unpublished package version because the workflows reject
+overwrites.
