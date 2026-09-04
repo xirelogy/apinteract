@@ -1,6 +1,6 @@
 {
   "name": "@apinteract/plugin-api",
-  "version": "0.1.0-bootstrap.0",
+  "version": "0.1.0-oidc.0",
   "description": "Stable TypeScript contracts for developing APInteract plugins.",
   "license": "MIT",
   "homepage": "https://github.com/xirelogy/apinteract/tree/main/packages/plugin-api#readme",
