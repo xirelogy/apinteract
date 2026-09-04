@@ -143,6 +143,31 @@ the `xirelogy/apinteract` repository. The metadata action requires all three
 permissions; the workflow uses the same token to push the image. The Docker Hub
 repository controls whether anonymous users can pull the published image.
 
+## Publish Plugin Development Packages
+
+`@apinteract/plugin-api` and `@apinteract/plugin-sdk` are released independently
+from the product image. Update their package manifests and release assertions,
+run `deploy/scripts/development check`, then commit and push the verified source
+before creating either release tag.
+
+The tag must exactly match the selected package and manifest version:
+
+- `plugin-api-vVERSION` publishes `@apinteract/plugin-api@VERSION`.
+- `plugin-sdk-vVERSION` publishes `@apinteract/plugin-sdk@VERSION`.
+
+Push the API tag first whenever the SDK peer range requires that API release.
+Wait until the API version is available from npm before pushing the SDK tag.
+Each workflow refuses to overwrite an existing npm version and publishes its
+packed tarball with provenance. Stable versions use the `latest` npm dist-tag,
+OIDC test versions use `oidc`, and other prereleases use `next`.
+
+npm trusted publishing must authorize `publish-plugin-api.yml` and
+`publish-plugin-sdk.yml` separately for the `xirelogy/apinteract` repository
+and the `npm` GitHub environment. Both trusted publishers require npm publish
+permission and public publishing access. The packages have completed their
+one-time initialization, so routine releases do not use an npm token or the
+manual initialization workflow.
+
 ## License Policy
 
 The policy is intentionally an allowlist. A new or missing license expression

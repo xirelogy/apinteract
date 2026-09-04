@@ -246,7 +246,7 @@ async function verifyPluginPackages() {
     assert.equal(apiManifest.dependencies, undefined);
     assert.equal(
       sdkManifest.peerDependencies?.["@apinteract/plugin-api"],
-      "^0.1.0-0",
+      "^1.0.0",
     );
 
     await createExternalConsumer(consumerRoot, {

@@ -1,6 +1,6 @@
 {
   "name": "@apinteract/plugin-sdk",
-  "version": "0.1.0-oidc.0",
+  "version": "1.0.0",
   "description": "Optional authoring helpers for developing APInteract plugins.",
   "license": "MIT",
   "homepage": "https://github.com/xirelogy/apinteract/tree/main/packages/plugin-sdk#readme",
@@ -33,7 +33,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@apinteract/plugin-api": "^0.1.0-0"
+    "@apinteract/plugin-api": "^1.0.0"
   },
   "publishConfig": {
     "access": "public",

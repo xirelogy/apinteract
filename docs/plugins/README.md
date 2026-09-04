@@ -360,52 +360,17 @@ adapters, script runtimes, secret stores, logging sinks, and proxy selectors
 remain future extension points. They can reuse the same single-target package
 format while defining their own typed provider contracts.
 
-## Package Releases
+## Choosing Package Versions
 
-The development packages are released independently from APInteract container
-images. A maintainer updates the selected package version and lockfile, merges
-the verified source, then creates one matching tag:
+Use the current stable `@apinteract/plugin-api` and
+`@apinteract/plugin-sdk` releases for normal plugin development. The packages
+are versioned independently, and the SDK declares the API versions with which
+it is compatible. Package-manager peer-dependency warnings therefore indicate
+that the selected combination should be changed rather than ignored.
 
-- `plugin-api-v1.2.3` publishes `@apinteract/plugin-api@1.2.3`.
-- `plugin-sdk-v1.2.3` publishes `@apinteract/plugin-sdk@1.2.3`.
-
-Each tag runs the repository checks against packed tarballs before publishing
-only that package to npm with provenance. Existing npm versions are immutable
-and will not be overwritten. npm trusted publishing must authorize the matching
-GitHub Actions workflow in the `xirelogy/apinteract` repository and its `npm`
-GitHub environment; no long-lived npm token is used. Publish `plugin-api` first
-when an SDK release declares a peer range that requires its new version.
-
-### First-Publication Bootstrap
-
-npm requires a package to exist before its trusted publisher can be configured.
-Use the manual **Initialize npm plugin package** workflow for this one-time
-bootstrap. Create a GitHub `npm-bootstrap` environment, add a short-lived
-granular npm token named `NPM_TOKEN` to that environment, select one package,
-and run the workflow against the commit containing its intended bootstrap
-version. The workflow runs all checks, refuses an existing version, publishes
-without provenance, and never exposes the token to other steps. Revoke the
-token immediately after both packages have been initialized.
-
-Do not consume an intended stable version unless that is deliberate: npm
-versions cannot be replaced. A safe sequence is, for example:
-
-1. Set `plugin-api` to `0.1.0-bootstrap.0` and initialize it with the token.
-2. Configure npm trusted publishing for `publish-plugin-api.yml` and the
-   `npm` environment.
-3. Set the package to `0.1.0-oidc.0`, commit, and push the
-   `plugin-api-v0.1.0-oidc.0` tag. This exercises the real OIDC workflow.
-4. Set the package to `0.1.0`, commit, and push `plugin-api-v0.1.0` for the
-   official release.
-
-Repeat the sequence independently for `plugin-sdk`, after publishing the API
-version accepted by its peer range. Bootstrap publications use the `bootstrap`
-npm dist-tag, OIDC test publications use `oidc`, other prereleases use `next`,
-and stable releases alone advance `latest`. This keeps all experimental
-versions away from both `latest` and the reserved `1.0.0` release line.
-
-The `@apinteract` scope and both package names must exist under the publishing
-npm organization. The bootstrap token must have permission to create public
-packages in that scope. After initialization, configure
-`publish-plugin-api.yml` and `publish-plugin-sdk.yml` as their respective
-trusted publishers and remove the token and `npm-bootstrap` environment.
+Commit the plugin project's lockfile so its builds use the same contract and
+helper implementations. Before adopting a new `plugin-api` major version,
+review its compatibility notes, confirm that the target APInteract host
+supports the corresponding manifest `apiVersion`, then rebuild and test the
+plugin. Prerelease package versions are intended for deliberate compatibility
+testing and should be selected explicitly rather than used by default.

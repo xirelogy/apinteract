@@ -108,10 +108,7 @@ test("the plugin SDK declares the plugin API as a compatible peer", async () => 
       "utf8",
     ),
   );
-  assert.equal(
-    manifest.peerDependencies?.["@apinteract/plugin-api"],
-    "^0.1.0-0",
-  );
+  assert.equal(manifest.peerDependencies?.["@apinteract/plugin-api"], "^1.0.0");
 });
 
 test("repository gates exercise packed packages and contract compatibility", () => {

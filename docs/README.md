@@ -23,7 +23,8 @@ This directory contains the public documentation for APInteract.
 - [All-in-one deployment](../deploy/aio/README.md): source-built container
   operation, storage, configuration, and verification.
 - [Release supply-chain verification](../deploy/release/README.md): dependency,
-  secret, license, image, SBOM, signature, and provenance release gates.
+  secret, license, package, image, SBOM, signature, and provenance release
+  gates.
 
 APInteract is actively developed as a public alpha.
 Published documents describe current product behavior and mark proposed or
