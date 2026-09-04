@@ -61,7 +61,10 @@ The release build:
 - force-materializes the exact locked dependency graph without running
   dependency lifecycle scripts, so installed-package audits do not depend on
   stale or incomplete local pnpm metadata;
-- runs full and production-only pnpm vulnerability audits;
+- runs full and production-only pnpm vulnerability audits with fetch retries,
+  three command attempts, exponential backoff, and a five-minute request
+  timeout for transient registry transport failures (the release host still
+  selects the registry);
 - inventories full and production dependency licenses and enforces the
   reviewed policy in [`license-policy.json`](license-policy.json);
 - scans Git history for secrets with redacted findings;
