@@ -13,7 +13,13 @@ import { join } from "node:path";
 import type { components } from "@apinteract/api-contracts/proxy";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ExecutionService } from "../src/application/execution-service.js";
+import {
+  ExecutionExpiredError,
+  ExecutionResponseReaderConflictError,
+  ExecutionService,
+  IdempotencyConflictError,
+  PrincipalCapacityError,
+} from "../src/application/execution-service.js";
 import type { TargetApprover } from "../src/application/target-policy.js";
 import {
   DEFAULT_PROXY_LIMITS,
@@ -107,6 +113,72 @@ describe("ExecutionService outbound headers", () => {
 });
 
 describe("ExecutionService limits and lifecycle", () => {
+  it("serializes creation by principal and idempotency key", async () => {
+    const directory = await temporaryDirectory();
+    const executions = executionService(directory, {
+      maxConcurrentExecutionsPerPrincipal: 2,
+    });
+    const value = createDescriptor("https://example.com/", []);
+    value.request.body = { mode: "stream", length: null, sha256: null };
+
+    const [first, replay] = await Promise.all([
+      executions.create("principal", "shared-key", value),
+      executions.create("principal", "shared-key", value),
+    ]);
+
+    expect(first.session.executionId).toBe(replay.session.executionId);
+    expect([first.replayed, replay.replayed].sort()).toEqual([false, true]);
+
+    const different = createDescriptor("https://different.example/", []);
+    different.request.body = { mode: "stream", length: null, sha256: null };
+    await expect(
+      executions.create("principal", "shared-key", different),
+    ).rejects.toBeInstanceOf(IdempotencyConflictError);
+
+    const pending = executions.create("second-principal", "pending-key", value);
+    await expect(
+      executions.create("second-principal", "pending-key", different),
+    ).rejects.toBeInstanceOf(IdempotencyConflictError);
+    await expect(pending).resolves.toMatchObject({ replayed: false });
+
+    await expect(
+      executions.create("principal", "unrelated-key", value),
+    ).resolves.toMatchObject({ replayed: false });
+    await expect(
+      executions.create("principal", "capacity-key", value),
+    ).rejects.toBeInstanceOf(PrincipalCapacityError);
+    await executions.close();
+  });
+
+  it("leases one response reader and releases it explicitly", async () => {
+    const directory = await temporaryDirectory();
+    const executions = executionService(directory);
+    const value = createDescriptor("https://example.com/", []);
+    value.request.body = { mode: "stream", length: null, sha256: null };
+    const { session } = await executions.create(
+      "principal",
+      "reader-lease-key",
+      value,
+    );
+
+    const first = executions.stream("principal", session.executionId, -1);
+    expect(first).toBeDefined();
+    expect(() =>
+      executions.stream("principal", session.executionId, -1),
+    ).toThrow(ExecutionResponseReaderConflictError);
+
+    first?.close();
+    const resumed = executions.stream("principal", session.executionId, -1);
+    expect(resumed).toBeDefined();
+    resumed?.close();
+    await executions.cancel("principal", session.executionId);
+    await executions.release("principal", session.executionId);
+    expect(
+      executions.stream("principal", session.executionId, -1),
+    ).toBeUndefined();
+    await executions.close();
+  });
+
   it("applies total timeout while an execution is awaiting body upload", async () => {
     const directory = await temporaryDirectory();
     const executions = executionService(directory, {}, 60_000);
@@ -242,7 +314,7 @@ describe("ExecutionService limits and lifecycle", () => {
 
   it("removes terminal state, cache files, and quota reservations at expiry", async () => {
     const directory = await temporaryDirectory();
-    const executions = executionService(directory, {}, 20);
+    const executions = executionService(directory, {}, 100);
     const value = createDescriptor("https://example.com/", []);
     value.request.body = { mode: "stream", length: null, sha256: null };
     value.request.behavior.totalTimeoutMs = 10;
@@ -256,6 +328,12 @@ describe("ExecutionService limits and lifecycle", () => {
     await expect
       .poll(() => executions.get("principal", session.executionId))
       .toBeUndefined();
+    expect(() =>
+      executions.stream("principal", session.executionId, -1),
+    ).toThrow(ExecutionExpiredError);
+    expect(
+      executions.stream("foreign-principal", session.executionId, -1),
+    ).toBeUndefined();
     await expect(
       stat(join(directory, `${session.executionId}.frames`)),
     ).rejects.toMatchObject({ code: "ENOENT" });
@@ -306,11 +384,11 @@ async function executeAndRelease(
     idempotencyKey,
     descriptor,
   );
-  const stream = executions.stream(principalId, session.executionId, -1);
-  if (stream === undefined) {
+  const reader = executions.stream(principalId, session.executionId, -1);
+  if (reader === undefined) {
     throw new Error("Created execution was not available");
   }
-  for await (const frame of stream) {
+  for await (const frame of reader.frames) {
     // Reading through the terminal frame applies the target request lifecycle.
     expect(frame.byteLength).toBeGreaterThan(0);
   }
@@ -382,11 +460,11 @@ async function readTerminalError(
   executionId: string,
   principalId = "principal",
 ): Promise<Record<string, unknown>> {
-  const stream = executions.stream(principalId, executionId, -1);
-  if (stream === undefined) {
+  const reader = executions.stream(principalId, executionId, -1);
+  if (reader === undefined) {
     throw new Error("Created execution was not available");
   }
-  for await (const frame of stream) {
+  for await (const frame of reader.frames) {
     if (frame.readUInt8(0) === 5) {
       const payloadLength = Number(frame.readBigUInt64BE(8));
       return JSON.parse(

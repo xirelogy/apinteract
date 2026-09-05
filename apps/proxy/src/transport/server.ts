@@ -10,8 +10,10 @@ import type { components } from "@apinteract/api-contracts/proxy";
 
 import type { ProxyConfiguration } from "../config.js";
 import {
+  ExecutionExpiredError,
   ExecutionService,
   ExecutionInputLimitError,
+  ExecutionResponseReaderConflictError,
   IdempotencyConflictError,
   PrincipalCapacityError,
   RequestBodyUploadError,
@@ -329,12 +331,23 @@ export function createProxyServer(
         request.query.afterSequence === undefined
           ? -1
           : request.query.afterSequence;
-      const stream = executions.stream(
-        (request as AuthenticatedRequest).principalId,
-        request.params.executionId,
-        afterSequence,
-      );
-      if (stream === undefined) {
+      let reader;
+      try {
+        reader = executions.stream(
+          (request as AuthenticatedRequest).principalId,
+          request.params.executionId,
+          afterSequence,
+        );
+      } catch (cause) {
+        if (cause instanceof ExecutionResponseReaderConflictError) {
+          return problem(reply, 409, "execution_state_conflict", cause.message);
+        }
+        if (cause instanceof ExecutionExpiredError) {
+          return problem(reply, 410, "execution_expired", cause.message);
+        }
+        throw cause;
+      }
+      if (reader === undefined) {
         return problem(
           reply,
           404,
@@ -343,21 +356,28 @@ export function createProxyServer(
         );
       }
 
+      /** Releases the exclusive lease as soon as the client disconnects. */
+      const closeReader = () => reader.close();
+      reply.raw.once("close", closeReader);
       reply.hijack();
       reply.raw.writeHead(200, {
         "Content-Type": "application/vnd.apinteract.proxy-stream",
         "Cache-Control": "no-store",
       });
-      for await (const frame of stream) {
-        // Respect socket backpressure while replaying cached frames so a slow
-        // backend cannot force unbounded buffering in the proxy process.
-        if (!reply.raw.write(frame)) {
-          await new Promise<void>((resolve) =>
-            reply.raw.once("drain", resolve),
-          );
+      try {
+        for await (const frame of reader.frames) {
+          if (reply.raw.destroyed) break;
+          // Respect socket backpressure while replaying cached frames so a slow
+          // backend cannot force unbounded buffering in the proxy process.
+          if (!reply.raw.write(frame)) {
+            await waitForDrainOrClose(reply.raw);
+          }
         }
+      } finally {
+        reply.raw.removeListener("close", closeReader);
+        reader.close();
+        if (!reply.raw.destroyed) reply.raw.end();
       }
-      reply.raw.end();
     },
   );
 
@@ -402,4 +422,19 @@ export function createProxyServer(
   );
 
   return server;
+}
+
+/** Waits for backpressure relief without hanging after a socket disconnect. */
+function waitForDrainOrClose(response: FastifyReply["raw"]): Promise<void> {
+  if (response.destroyed) return Promise.resolve();
+  return new Promise((resolve) => {
+    /** Removes the alternate listener before resuming response iteration. */
+    const finish = () => {
+      response.removeListener("drain", finish);
+      response.removeListener("close", finish);
+      resolve();
+    };
+    response.once("drain", finish);
+    response.once("close", finish);
+  });
 }

@@ -99,11 +99,15 @@ export class FrameStore {
   }
 
   /** Replays frames after a sequence and waits until terminal when caught up. */
-  async *readAfter(afterSequence: number): AsyncGenerator<Buffer> {
+  async *readAfter(
+    afterSequence: number,
+    signal?: AbortSignal,
+  ): AsyncGenerator<Buffer> {
     // A caller resumes after its last complete frame. Passing -1 starts at the
     // first frame, while a caught-up reader waits without polling.
     let index = afterSequence + 1;
     while (true) {
+      if (signal?.aborted === true) return;
       const frame = this.#frames[index];
       if (frame !== undefined) {
         const bytes = Buffer.allocUnsafe(frame.length);
@@ -115,7 +119,7 @@ export class FrameStore {
       if (this.#terminal) {
         return;
       }
-      await this.#waitForFrame();
+      await this.#waitForFrame(signal);
     }
   }
 
@@ -129,9 +133,20 @@ export class FrameStore {
   }
 
   /** Suspends a caught-up reader until append or disposal changes state. */
-  #waitForFrame(): Promise<void> {
+  #waitForFrame(signal?: AbortSignal): Promise<void> {
     return new Promise((resolve) => {
-      this.#waiters.add(resolve);
+      let settled = false;
+      /** Removes both wake paths before resuming the reader. */
+      const wake = () => {
+        if (settled) return;
+        settled = true;
+        this.#waiters.delete(wake);
+        signal?.removeEventListener("abort", wake);
+        resolve();
+      };
+      this.#waiters.add(wake);
+      signal?.addEventListener("abort", wake, { once: true });
+      if (signal?.aborted === true) wake();
     });
   }
 

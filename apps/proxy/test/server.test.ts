@@ -179,6 +179,102 @@ describe("proxy runtime contract", () => {
     expect(second.json<ProblemBody>().code).toBe("proxy_capacity_exceeded");
   });
 
+  it("replays concurrent creation for one idempotency key", async () => {
+    const server = await createServer({
+      maxConcurrentExecutionsPerPrincipal: 1,
+    });
+    const value = descriptor("https://example.com/", true);
+
+    const [first, replay] = await Promise.all([
+      createExecution(server, "concurrent-key-01", value),
+      createExecution(server, "concurrent-key-01", value),
+    ]);
+
+    expect(first.statusCode).toBe(201);
+    expect(replay.statusCode).toBe(201);
+    expect(first.json<ExecutionBody>().executionId).toBe(
+      replay.json<ExecutionBody>().executionId,
+    );
+    expect(
+      [
+        first.headers["idempotency-replayed"],
+        replay.headers["idempotency-replayed"],
+      ].sort(),
+    ).toEqual(["false", "true"]);
+  });
+
+  it("rejects a second active response reader", async () => {
+    const server = await createServer();
+    const creation = await createExecution(
+      server,
+      "reader-conflict-01",
+      descriptor("https://example.com/", true),
+    );
+    const executionId = creation.json<ExecutionBody>().executionId;
+    const first = server.inject({
+      method: "GET",
+      url: `/executions/${executionId}/response`,
+      headers: authorization(),
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const second = await server.inject({
+      method: "GET",
+      url: `/executions/${executionId}/response`,
+      headers: authorization(),
+    });
+
+    expect(second.statusCode).toBe(409);
+    expect(second.json<ProblemBody>().code).toBe("execution_state_conflict");
+    await server.inject({
+      method: "POST",
+      url: `/executions/${executionId}/cancel`,
+      headers: authorization(),
+    });
+    await expect(first).resolves.toMatchObject({ statusCode: 200 });
+  });
+
+  it("distinguishes an owned expired response from a missing execution", async () => {
+    const server = await createServer({}, 250);
+    const creation = await createExecution(
+      server,
+      "expired-response-01",
+      descriptor("http://127.0.0.1:65535/"),
+    );
+    const executionId = creation.json<ExecutionBody>().executionId;
+    await server.inject({
+      method: "GET",
+      url: `/executions/${executionId}/response`,
+      headers: authorization(),
+    });
+    await expect
+      .poll(async () => {
+        const response = await server.inject({
+          method: "GET",
+          url: `/executions/${executionId}`,
+          headers: authorization(),
+        });
+        return response.statusCode;
+      })
+      .toBe(404);
+
+    const expired = await server.inject({
+      method: "GET",
+      url: `/executions/${executionId}/response`,
+      headers: authorization(),
+    });
+    const missing = await server.inject({
+      method: "GET",
+      url: "/executions/00000000-0000-7000-8000-000000000000/response",
+      headers: authorization(),
+    });
+
+    expect(expired.statusCode).toBe(410);
+    expect(expired.json<ProblemBody>().code).toBe("execution_expired");
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json<ProblemBody>().code).toBe("execution_not_found");
+  });
+
   it("returns a terminal policy error without contacting loopback", async () => {
     const server = await createServer();
     const creation = await createExecution(
@@ -212,13 +308,14 @@ describe("proxy runtime contract", () => {
 /** Creates one isolated in-memory Fastify proxy with a writable frame cache. */
 async function createServer(
   limitOverrides: Partial<ProxyConfiguration["limits"]> = {},
+  retentionMs = 50,
 ): Promise<FastifyInstance> {
   const cachePath = await mkdtemp(join(tmpdir(), "apinteract-proxy-server-"));
   temporaryDirectories.push(cachePath);
   const configuration: ProxyConfiguration = {
     configVersion: 1,
     server: { host: "127.0.0.1", port: 8081 },
-    cache: { path: cachePath, retentionMs: 50 },
+    cache: { path: cachePath, retentionMs },
     limits: {
       maxMetadataBytes: 1_024,
       maxRequestHeaderCount: 8,

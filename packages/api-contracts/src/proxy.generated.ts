@@ -126,7 +126,7 @@ export interface paths {
     };
     /**
      * Stream the target response
-     * @description Opens the response data plane for an execution owned by the authenticated principal. Only one response reader may be active for an execution. The proxy returns a framed binary stream and may send heartbeat frames while waiting for the target. A RESPONSE_HEAD frame announces the target response before any BODY frame. The outer HTTP status describes this proxy operation; every valid target HTTP status, including 4xx and 5xx, is carried in RESPONSE_HEAD and completes normally unless a separate network or protocol failure occurs. Cached frames remain available until the terminal execution is released or expires.
+     * @description Opens the response data plane for an execution owned by the authenticated principal. Only one response reader may be active for an execution; a second reader receives 409 until the first stream completes or disconnects. The proxy returns a framed binary stream and may send heartbeat frames while waiting for the target. A RESPONSE_HEAD frame announces the target response before any BODY frame. The outer HTTP status describes this proxy operation; every valid target HTTP status, including 4xx and 5xx, is carried in RESPONSE_HEAD and completes normally unless a separate network or protocol failure occurs. Cached frames remain available until the terminal execution is released or expires.
      */
     get: operations["streamProxyExecutionResponse"];
     put?: never;
@@ -509,7 +509,7 @@ export interface components {
         "application/problem+json": components["schemas"]["Problem"];
       };
     };
-    /** @description The execution existed for this principal, but its transient response data is no longer available. */
+    /** @description The execution existed for this principal, but its transient response data is no longer available. The proxy retains only an owner-scoped in-memory tombstone for one additional configured response-cache retention window, subject to a bounded process-wide capacity. Missing, foreign, explicitly released, and tombstone-evicted executions remain indistinguishable as not found. */
     ExecutionExpired: {
       headers: {
         [name: string]: unknown;

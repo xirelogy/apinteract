@@ -27,6 +27,7 @@ type TargetRequest = components["schemas"]["TargetRequest"];
 type ExecutionStreamError = components["schemas"]["ExecutionStreamError"];
 
 const TERMINAL_FRAME_RESERVE_BYTES = 4_096;
+const MAX_EXPIRY_TOMBSTONES = 10_000;
 const FORBIDDEN_TARGET_HEADERS = new Set([
   "host",
   "content-length",
@@ -60,6 +61,27 @@ interface ManagedExecution {
   request?: ClientRequest;
   totalTimer?: NodeJS.Timeout;
   expiryTimer?: NodeJS.Timeout;
+  responseReaderActive: boolean;
+}
+
+interface PendingExecutionCreation {
+  readonly descriptorHash: string;
+  readonly result: Promise<{
+    readonly session: ExecutionSession;
+    readonly replayed: false;
+  }>;
+}
+
+interface ExpiredExecutionTombstone {
+  readonly principalId: string;
+  readonly timer: NodeJS.Timeout;
+}
+
+/** Exclusive leased access to one execution's resumable response frames. */
+export interface ExecutionResponseReader {
+  readonly frames: AsyncGenerator<Buffer>;
+  /** Releases the reader lease and aborts any pending frame wait. */
+  close(): void;
 }
 
 interface ExecutionFailureOptions {
@@ -97,6 +119,10 @@ export class ExecutionInputLimitError extends Error {
 
 /** Raised when a principal has exhausted an advertised transient resource. */
 export class PrincipalCapacityError extends Error {}
+/** Raised when an owned response cache has passed its retention deadline. */
+export class ExecutionExpiredError extends Error {}
+/** Raised while another client holds the execution's response-reader lease. */
+export class ExecutionResponseReaderConflictError extends Error {}
 
 /** Internal typed failure projected onto a safe terminal stream error. */
 class ExecutionFailure extends Error {
@@ -126,6 +152,8 @@ export class ExecutionService {
   readonly #reportCleanupError: (cause: unknown) => void;
   readonly #executions = new Map<string, ManagedExecution>();
   readonly #idempotency = new Map<string, string>();
+  readonly #pendingCreations = new Map<string, PendingExecutionCreation>();
+  readonly #expiredExecutions = new Map<string, ExpiredExecutionTombstone>();
   readonly #executionCounts = new Map<string, number>();
   readonly #cacheBytes = new Map<string, number>();
   readonly #reservedCacheBytes = new Map<string, number>();
@@ -185,6 +213,42 @@ export class ExecutionService {
       }
     }
 
+    const pending = this.#pendingCreations.get(key);
+    if (pending !== undefined) {
+      if (pending.descriptorHash !== descriptorHash) {
+        throw new IdempotencyConflictError(
+          "The idempotency key is being used with a different descriptor",
+        );
+      }
+      return { session: (await pending.result).session, replayed: true };
+    }
+
+    const result = this.#createExecution(
+      principalId,
+      idempotencyKey,
+      descriptor,
+      descriptorHash,
+      key,
+    );
+    const creation = { descriptorHash, result };
+    this.#pendingCreations.set(key, creation);
+    try {
+      return await result;
+    } finally {
+      if (this.#pendingCreations.get(key) === creation) {
+        this.#pendingCreations.delete(key);
+      }
+    }
+  }
+
+  /** Allocates one new execution after its idempotency key is exclusively held. */
+  async #createExecution(
+    principalId: string,
+    idempotencyKey: string,
+    descriptor: CreateExecutionRequest,
+    descriptorHash: string,
+    key: string,
+  ): Promise<{ readonly session: ExecutionSession; readonly replayed: false }> {
     this.#reserveExecution(principalId);
     const id = uuidV7();
     let frameStore: FrameStore;
@@ -215,6 +279,7 @@ export class ExecutionService {
       cacheBytes: 0,
       terminalReserveBytes: TERMINAL_FRAME_RESERVE_BYTES,
       terminating: false,
+      responseReaderActive: false,
     };
     this.#executions.set(id, execution);
     this.#idempotency.set(key, id);
@@ -284,10 +349,56 @@ export class ExecutionService {
     principalId: string,
     executionId: string,
     afterSequence: number,
-  ): AsyncGenerator<Buffer> | undefined {
-    return this.#owned(principalId, executionId)?.frameStore.readAfter(
-      afterSequence,
-    );
+  ): ExecutionResponseReader | undefined {
+    const execution = this.#owned(principalId, executionId);
+    if (execution === undefined) {
+      if (
+        this.#expiredExecutions.get(executionId)?.principalId === principalId
+      ) {
+        throw new ExecutionExpiredError(
+          "The execution response cache has expired",
+        );
+      }
+      return undefined;
+    }
+    if (execution.responseReaderActive) {
+      throw new ExecutionResponseReaderConflictError(
+        "A response reader is already active for this execution",
+      );
+    }
+    execution.responseReaderActive = true;
+    const controller = new AbortController();
+    let closed = false;
+    /** Releases the response-reader lease and wakes any waiting consumer. */
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      execution.responseReaderActive = false;
+      controller.abort();
+    };
+    return {
+      frames: this.#readResponseFrames(
+        execution,
+        afterSequence,
+        controller.signal,
+        close,
+      ),
+      close,
+    };
+  }
+
+  /** Releases the reader lease when replay completes, fails, or is cancelled. */
+  async *#readResponseFrames(
+    execution: ManagedExecution,
+    afterSequence: number,
+    signal: AbortSignal,
+    close: () => void,
+  ): AsyncGenerator<Buffer> {
+    try {
+      yield* execution.frameStore.readAfter(afterSequence, signal);
+    } finally {
+      close();
+    }
   }
 
   /** Requests best-effort cancellation of an owned active or accepted execution. */
@@ -344,6 +455,10 @@ export class ExecutionService {
       execution.request?.destroy(new Error("Proxy is shutting down"));
       await this.#releaseExecution(execution);
     }
+    for (const tombstone of this.#expiredExecutions.values()) {
+      clearTimeout(tombstone.timer);
+    }
+    this.#expiredExecutions.clear();
   }
 
   /** Performs policy-approved target HTTP I/O and records its terminal response. */
@@ -820,7 +935,7 @@ export class ExecutionService {
       Date.now() + this.#retentionMs,
     ).toISOString();
     execution.expiryTimer = setTimeout(() => {
-      void this.#releaseExecution(execution).catch(this.#reportCleanupError);
+      void this.#expireExecution(execution).catch(this.#reportCleanupError);
     }, this.#retentionMs);
     execution.expiryTimer.unref();
   }
@@ -870,6 +985,34 @@ export class ExecutionService {
       execution.terminalReserveBytes,
     );
     await execution.frameStore.dispose();
+  }
+
+  /** Releases transient data and retains a bounded owner-only expiry marker. */
+  async #expireExecution(execution: ManagedExecution): Promise<void> {
+    if (this.#executions.get(execution.id) !== execution) return;
+    this.#retainExpiryTombstone(execution.id, execution.principalId);
+    await this.#releaseExecution(execution);
+  }
+
+  /** Retains an expiry distinction temporarily without request or response data. */
+  #retainExpiryTombstone(executionId: string, principalId: string): void {
+    while (this.#expiredExecutions.size >= MAX_EXPIRY_TOMBSTONES) {
+      const oldestId = this.#expiredExecutions.keys().next().value;
+      if (oldestId === undefined) break;
+      const oldest = this.#expiredExecutions.get(oldestId);
+      if (oldest !== undefined) clearTimeout(oldest.timer);
+      this.#expiredExecutions.delete(oldestId);
+    }
+    const tombstone: ExpiredExecutionTombstone = {
+      principalId,
+      timer: setTimeout(() => {
+        if (this.#expiredExecutions.get(executionId) === tombstone) {
+          this.#expiredExecutions.delete(executionId);
+        }
+      }, this.#retentionMs),
+    };
+    tombstone.timer.unref();
+    this.#expiredExecutions.set(executionId, tombstone);
   }
 
   /** Subtracts an accounted value and removes empty principal entries. */
