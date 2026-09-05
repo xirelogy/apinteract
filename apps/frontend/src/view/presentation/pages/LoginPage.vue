@@ -19,6 +19,9 @@ const selectedId = ref(
 const selected = computed(() =>
   providers.find((provider) => provider.descriptor.id === selectedId.value),
 );
+const selectedIsAvailable = computed(
+  () => selected.value?.descriptor.availability === "available",
+);
 const providerOptions = computed(() =>
   providers.map((provider) => ({
     value: provider.descriptor.id,
@@ -53,10 +56,7 @@ const providerOptions = computed(() =>
         {{ selected.descriptor.description }}
       </p>
       <AuthProviderLoginHost
-        v-if="
-          selected !== undefined &&
-          selected.descriptor.availability === 'available'
-        "
+        v-if="selectedIsAvailable && selected !== undefined"
         :instance-id="selected.descriptor.id"
       />
       <p v-else-if="selected !== undefined" class="form-error" role="status">

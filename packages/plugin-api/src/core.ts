@@ -13,9 +13,12 @@ export const AUTH_PROVIDER_PLUGIN_MANIFEST_SCHEMA_VERSION = 2;
 /** Current executable host/plugin compatibility generation. */
 export const PLUGIN_API_VERSION = 1;
 
-/** Fields shared by every installable plugin package generation. */
-interface PluginPackageManifestBase {
+/** Identifies one installable plugin package and its single execution target. */
+export interface PluginPackageManifest<
+  TTarget extends PluginTarget = PluginTarget,
+> {
   /** Selects the JSON manifest format independently of the executable API. */
+  readonly schemaVersion: typeof PLUGIN_MANIFEST_SCHEMA_VERSION;
   /** Selects one breaking-compatibility generation of the host/plugin API. */
   readonly apiVersion: typeof PLUGIN_API_VERSION;
   readonly id: string;
@@ -23,22 +26,19 @@ interface PluginPackageManifestBase {
   readonly version: string;
   /** Higher weights are presented before lower-weight plugin contributions. */
   readonly weight?: number;
-}
-
-/** Identifies one schema-v1 package with a single execution target. */
-export interface SingleTargetPluginPackageManifest<
-  TTarget extends PluginTarget = PluginTarget,
-> extends PluginPackageManifestBase {
-  readonly schemaVersion: typeof PLUGIN_MANIFEST_SCHEMA_VERSION;
   readonly target: TTarget;
   readonly entrypoint: string;
   readonly providers: readonly string[];
 }
 
 /** Identifies one built-in auth package with an atomic runtime pair. */
-export interface AuthProviderPluginPackageManifest
-  extends PluginPackageManifestBase {
+export interface AuthProviderPluginPackageManifest {
   readonly schemaVersion: typeof AUTH_PROVIDER_PLUGIN_MANIFEST_SCHEMA_VERSION;
+  readonly apiVersion: typeof PLUGIN_API_VERSION;
+  readonly id: string;
+  readonly name: string;
+  readonly version: string;
+  readonly weight?: number;
   readonly target: "auth-provider";
   readonly entrypoints: {
     readonly backend: string;
@@ -50,21 +50,17 @@ export interface AuthProviderPluginPackageManifest
   };
 }
 
-/** Selects the manifest shape accepted for a requested package target. */
-export type PluginPackageManifest<
-  TTarget extends PluginPackageTarget = PluginPackageTarget,
-> = TTarget extends "auth-provider"
-  ? AuthProviderPluginPackageManifest
-  : TTarget extends PluginTarget
-    ? SingleTargetPluginPackageManifest<TTarget>
-    : SingleTargetPluginPackageManifest | AuthProviderPluginPackageManifest;
+/** Represents every manifest generation accepted by core package discovery. */
+export type AnyPluginPackageManifest =
+  | PluginPackageManifest
+  | AuthProviderPluginPackageManifest;
 
 /** Describes one successfully loaded plugin without exposing contributions. */
 export interface EnabledPlugin {
   readonly id: string;
   readonly name: string;
   readonly version: string;
-  readonly target: PluginPackageTarget;
+  readonly target: PluginTarget;
   readonly source: PluginSource;
 }
 

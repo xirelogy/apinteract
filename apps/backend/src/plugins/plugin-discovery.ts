@@ -7,6 +7,8 @@ import {
   AUTH_PROVIDER_PLUGIN_MANIFEST_SCHEMA_VERSION,
   PLUGIN_API_VERSION,
   PLUGIN_MANIFEST_SCHEMA_VERSION,
+  type AnyPluginPackageManifest,
+  type AuthProviderPluginPackageManifest,
   type PluginPackageManifest,
   type PluginSource,
   type PluginTarget,
@@ -28,7 +30,7 @@ export interface PluginDiscoveryRoot {
 
 /** Retains validated paths and bytes needed by one runtime loader. */
 export interface DiscoveredPluginPackage {
-  readonly manifest: PluginPackageManifest;
+  readonly manifest: AnyPluginPackageManifest;
   readonly source: PluginSource;
   readonly packagePath: string;
   /** Backend entrypoint for auth bundles and sole entrypoint for schema-v1 packages. */
@@ -183,7 +185,7 @@ async function resolveEntrypoint(
 /** Requires package metadata while keeping the plugin manifest canonical. */
 function validatePackageMetadata(
   value: unknown,
-  manifest: PluginPackageManifest,
+  manifest: AnyPluginPackageManifest,
 ): void {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Plugin package.json must be an object");
@@ -242,7 +244,9 @@ async function appendDistributionAssets(
 }
 
 /** Rejects malformed canonical package metadata at the filesystem boundary. */
-export function validatePluginManifest(value: unknown): PluginPackageManifest {
+export function validatePluginManifest(
+  value: unknown,
+): AnyPluginPackageManifest {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Plugin manifest must be an object");
   }
@@ -322,7 +326,7 @@ function validateSingleTargetManifest(
 /** Validates an atomic, built-in auth-provider runtime pair. */
 function validateAuthProviderManifest(
   manifest: Record<string, unknown>,
-): PluginPackageManifest<"auth-provider"> {
+): AuthProviderPluginPackageManifest {
   if (manifest.schemaVersion !== AUTH_PROVIDER_PLUGIN_MANIFEST_SCHEMA_VERSION) {
     throw new Error("Auth-provider plugin manifest schemaVersion must be 2");
   }
