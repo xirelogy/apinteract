@@ -65,11 +65,19 @@ export class AuthenticationService {
     await this.#purgeExpiredAttempts();
     validateInput(input);
     const provider = this.#providers.require(providerInstanceId);
-    this.#consumeRateLimit(`${providerInstanceId}:${rateLimitKey}`);
-    return this.#processResult(
+    const limiterKey = `${providerInstanceId}:${rateLimitKey}`;
+    this.#consumeRateLimit(limiterKey);
+    const transition = await this.#processResult(
       providerInstanceId,
       await provider.runtime.begin(input),
     );
+    if (
+      transition.status === "authenticated" ||
+      transition.status === "unavailable"
+    ) {
+      this.#releaseRateLimit(limiterKey);
+    }
+    return transition;
   }
 
   /** Applies a bounded core-owned attempt rate without involving providers. */
@@ -101,6 +109,14 @@ export class AuthenticationService {
     current.count += 1;
   }
 
+  /** Releases the provisional slot for successful or non-failing attempts. */
+  #releaseRateLimit(key: string): void {
+    const current = this.#rateLimits.get(key);
+    if (current === undefined) return;
+    if (current.count <= 1) this.#rateLimits.delete(key);
+    else current.count -= 1;
+  }
+
   /** Advances one bound attempt exactly once for each stored transition. */
   async continue(
     attemptId: EntityId,
@@ -129,7 +145,8 @@ export class AuthenticationService {
       if (row.status === "active") await this.#discardAttempt(attemptId);
       return { status: "rejected" };
     }
-    this.#consumeRateLimit(`${row.provider_instance_id}:${rateLimitKey}`);
+    const limiterKey = `${row.provider_instance_id}:${rateLimitKey}`;
+    this.#consumeRateLimit(limiterKey);
     const claimed = await this.#database
       .updateTable("authentication_attempts")
       .set({ status: "consumed" })
@@ -147,13 +164,20 @@ export class AuthenticationService {
         parseAttemptState(row.state_json),
         input,
       );
-      return await this.#processResult(
+      const transition = await this.#processResult(
         row.provider_instance_id,
         result,
         attemptId,
         binding,
         row.transition_count + 1,
       );
+      if (
+        transition.status === "authenticated" ||
+        transition.status === "unavailable"
+      ) {
+        this.#releaseRateLimit(limiterKey);
+      }
+      return transition;
     } catch (cause) {
       await this.#discardAttempt(attemptId);
       throw cause;
