@@ -1,6 +1,6 @@
 {
   "name": "@apinteract/plugin-api",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Stable TypeScript contracts for developing APInteract plugins.",
   "license": "MIT",
   "homepage": "https://github.com/xirelogy/apinteract/tree/main/packages/plugin-api#readme",
@@ -30,6 +30,14 @@
     "./backend": {
       "types": "./dist/backend.d.ts",
       "default": "./dist/backend.js"
+    },
+    "./backend/authentication": {
+      "types": "./dist/backend/authentication.d.ts",
+      "default": "./dist/backend/authentication.js"
+    },
+    "./frontend/authentication": {
+      "types": "./dist/frontend/authentication.d.ts",
+      "default": "./dist/frontend/authentication.js"
     }
   },
   "scripts": {

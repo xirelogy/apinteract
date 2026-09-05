@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import { parse } from "yaml";
+import type { AuthProviderValue } from "@apinteract/plugin-api/backend/authentication";
 
 import {
   DEFAULT_SCRIPT_VARIABLE_WRITE_POLICY,
@@ -40,6 +41,9 @@ export interface BackendConfiguration {
   readonly frontend: {
     readonly distPath: string;
   };
+  readonly authentication?: {
+    readonly providers: readonly AuthenticationProviderConfiguration[];
+  };
   readonly plugins?: {
     readonly builtinPath: string;
     readonly userPath: string;
@@ -48,6 +52,20 @@ export interface BackendConfiguration {
     readonly variableWrites: ScriptVariableWritePolicy;
   };
 }
+
+/** Selects and presents one startup-configured authentication provider. */
+export interface AuthenticationProviderConfiguration {
+  readonly id: string;
+  readonly plugin: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly configuration: AuthProviderValue;
+}
+
+const identifierPattern = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u;
+const MAX_AUTH_CONFIGURATION_DEPTH = 8;
+const MAX_AUTH_CONFIGURATION_ITEMS = 128;
+const MAX_AUTH_CONFIGURATION_STRING = 4096;
 
 /** Requires a configuration value to be a non-array object. */
 function record(value: unknown, location: string): Record<string, unknown> {
@@ -94,6 +112,114 @@ function boolean(
     throw new Error(`${location} must be a boolean`);
   }
   return value;
+}
+
+/** Converts one bounded YAML subtree into a JSON-compatible provider value. */
+function authConfigurationValue(
+  value: unknown,
+  location: string,
+  depth = 0,
+): AuthProviderValue {
+  if (depth > MAX_AUTH_CONFIGURATION_DEPTH) {
+    throw new Error(`${location} exceeds the maximum nesting depth`);
+  }
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    if (value.length > MAX_AUTH_CONFIGURATION_STRING) {
+      throw new Error(`${location} exceeds the maximum string length`);
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > MAX_AUTH_CONFIGURATION_ITEMS) {
+      throw new Error(`${location} contains too many items`);
+    }
+    return value.map((item, index) =>
+      authConfigurationValue(item, `${location}[${index}]`, depth + 1),
+    );
+  }
+  if (typeof value === "object" && value !== null) {
+    const entries = Object.entries(value);
+    if (entries.length > MAX_AUTH_CONFIGURATION_ITEMS) {
+      throw new Error(`${location} contains too many properties`);
+    }
+    return Object.fromEntries(
+      entries.map(([key, item]) => {
+        if (key.length === 0 || key.length > 100) {
+          throw new Error(`${location} contains an invalid property name`);
+        }
+        return [
+          key,
+          authConfigurationValue(item, `${location}.${key}`, depth + 1),
+        ];
+      }),
+    );
+  }
+  throw new Error(`${location} must contain only JSON-compatible values`);
+}
+
+/** Parses the ordered provider-instance allowlist or its documented default. */
+function authenticationProviders(
+  value: unknown,
+): readonly AuthenticationProviderConfiguration[] {
+  if (value === undefined) {
+    return [
+      {
+        id: "local-password",
+        plugin: "builtin.local-password",
+        label: "Username and password",
+        description: "Sign in with your APInteract username and password.",
+        configuration: {},
+      },
+    ];
+  }
+  const authentication = record(value, "config.authentication");
+  if (
+    !Array.isArray(authentication.providers) ||
+    authentication.providers.length === 0
+  ) {
+    throw new Error(
+      "config.authentication.providers must be a non-empty array",
+    );
+  }
+  const identifiers = new Set<string>();
+  return authentication.providers.map((entry, index) => {
+    const location = `config.authentication.providers[${index}]`;
+    const provider = record(entry, location);
+    const id = text(provider.id, `${location}.id`);
+    const plugin = text(provider.plugin, `${location}.plugin`);
+    if (
+      id.length > 128 ||
+      plugin.length > 128 ||
+      !identifierPattern.test(id) ||
+      !identifierPattern.test(plugin)
+    ) {
+      throw new Error(`${location} has an invalid id or plugin`);
+    }
+    if (identifiers.has(id)) {
+      throw new Error(`config.authentication.providers has duplicate id ${id}`);
+    }
+    identifiers.add(id);
+    const description =
+      provider.description === undefined
+        ? undefined
+        : text(provider.description, `${location}.description`);
+    const label = text(provider.label, `${location}.label`);
+    if (label.length > 200 || (description?.length ?? 0) > 1000) {
+      throw new Error(`${location} has an overlong label or description`);
+    }
+    return {
+      id,
+      plugin,
+      label,
+      ...(description === undefined ? {} : { description }),
+      configuration: authConfigurationValue(
+        provider.configuration ?? {},
+        `${location}.configuration`,
+      ),
+    };
+  });
 }
 
 /** Reads the unique allowlisted scopes accepted by script variable setters. */
@@ -152,6 +278,7 @@ export async function loadBackendConfiguration(
     scripts.variableWrites ?? {},
     "config.scripts.variableWrites",
   );
+  const authentication = authenticationProviders(document.authentication);
 
   const secureCookie =
     sessions.secureCookie === undefined ? true : sessions.secureCookie;
@@ -222,6 +349,7 @@ export async function loadBackendConfiguration(
         "/opt/apinteract/frontend",
       ),
     },
+    authentication: { providers: authentication },
     plugins: {
       builtinPath: text(
         plugins.builtinPath,

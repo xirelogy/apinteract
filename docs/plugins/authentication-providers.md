@@ -4,9 +4,9 @@ APInteract authentication providers add login methods while preserving one
 application-user, authorization, and session model. The extension contract
 supports local passwords and future email, OTP, OIDC, LDAP, and other methods.
 
-This document describes the planned provider contract. Executable schemas and
-the backend authentication OpenAPI operations will be published as backend
-implementation begins.
+The authentication-provider contract is available in `@apinteract/plugin-api`
+1.1.0. The package is additive to the published 1.0.0 plugin API contract.
+APInteract currently ships one built-in provider, `builtin.local-password`.
 
 ## System Boundary
 
@@ -37,20 +37,40 @@ one or more configured instances of that type. This allows one LDAP plugin to
 connect to several directories, or one OIDC plugin to represent several
 issuers, without sharing subject namespaces.
 
-External provider packages use the standard extension layout:
+Enabled instances are an ordered startup configuration allowlist. Each entry
+has a switching key, user-facing label, built-in plugin ID, and plugin-specific
+configuration:
 
-```text
-/opt/apinteract/extensions/
-  example-provider/
-    apinteract-extension.json
-    dist/
-      entrypoint
+```yaml
+authentication:
+  providers:
+    - id: local-password
+      plugin: builtin.local-password
+      label: Username and password
+      description: Sign in with your APInteract username and password.
+      configuration: {}
 ```
 
-The package manifest identifies its version, authentication contract version,
-backend entry point, configuration schema, and required services. Extensions
-are loaded at backend startup from an administrator-controlled, read-only
-volume.
+Restart APInteract after changing this list. The `id` identifies the instance
+in login flows and credential administration; it is independent of the
+APInteract username and of the provider's own subject identifier. Omitting the
+section enables the single local-password instance shown above.
+
+Auth provider packages use the built-in plugin layout:
+
+```text
+/opt/apinteract/plugins/
+  example-provider/
+    apinteract-plugin.json
+    dist/
+      backend.mjs
+      frontend.mjs
+```
+
+The package manifest identifies its version, matched backend and frontend
+entrypoints, and declared authentication contributions. Authentication bundles
+are shipped only in the read-only built-in plugin root; user plugin roots
+cannot supply code to the anonymous login surface.
 
 Installed providers are trusted backend code. The contract limits coupling but
 does not sandbox an extension.
@@ -88,28 +108,18 @@ are deployment data and are not workspace variables.
 
 ### Interaction Flows
 
-The frontend renders provider interactions from bounded descriptors rather
-than provider-supplied HTML or JavaScript:
+The package's matched frontend contribution owns its provider-specific login
+experience. APInteract mounts it in a host-provided container and supplies only
+the instance's safe public descriptor and narrow actions for starting,
+continuing, cancelling, and completing authentication. This permits password,
+multi-step code, redirect, passkey, and other browser-native interactions
+without exposing application or session internals.
 
-```text
-InteractionStep
-  kind:
-    collect | redirect | await_callback | information
-  fields:
-    semantic:
-      username | password | email | phone | otp | generic
-    inputType:
-      text | password | email | tel | otp
-    validation and autocomplete metadata
-    sensitive
-```
-
-A password flow collects username and password in one step. An email-code flow
-first collects an email address, requests delivery, and then returns an OTP
-step. An OIDC flow returns a redirect followed by a backend-owned callback.
-
-The backend validates submitted field type and size before invoking the
-provider. Sensitive values are excluded from ordinary logs and automatic
+The host remains responsible for attempt expiry, browser binding, Origin and
+CSRF validation, replay prevention, rate limiting, session establishment, and
+navigation. Provider frontend code does not receive access or refresh
+credentials, private backend configuration, token storage, or a general
+backend client. Sensitive values are excluded from ordinary logs and automatic
 persistence.
 
 ### Credential Data
@@ -126,9 +136,9 @@ Providers define schemas for credential material and attempt state. APInteract
 persists those records through its database-independent repositories, so
 providers do not depend on SQLite, PostgreSQL, or MySQL tables.
 
-Private provider data is encrypted by APInteract before persistence. Password
-providers additionally apply a password-specific one-way hash such as
-Argon2id.
+Providers must return only storage-safe credential material. Password providers
+apply a password-specific one-way hash such as Argon2id; raw passwords and
+other transient login evidence are never stored as credential material.
 
 ### Runtime Flow
 
@@ -137,7 +147,6 @@ A provider runtime handles a small state machine:
 ```text
 begin
 continue
-handle callback
 cancel
 health
 ```
@@ -155,14 +164,16 @@ APInteract stores protected attempt state between invocations and owns the
 public start, continue, cancellation, and callback routes. Provider packages do
 not add arbitrary authentication endpoints.
 
-Credential-capable providers can also implement creation, update, removal, and
-safe display operations. The built-in administration and recovery commands use
-the same credential handler as normal backend APIs.
+Credential-capable providers can implement creation and update operations. The
+built-in administration and recovery commands use the local-password
+provider's credential handler.
 
 ## External Services
 
 Provider runtimes receive scoped backend services for time, secure randomness,
-cryptography, callback URLs, credential lookup, and outbound communication.
+password hashing, and credential lookup. Future providers that require
+callbacks or outbound communication will need additional narrow host services;
+they do not receive unrestricted application services.
 
 Email and SMS delivery are separate extension points. Email-link and OTP
 providers request delivery through those services instead of embedding one
@@ -216,10 +227,18 @@ credential material.
 
 ## Built-In Password Provider
 
-The MVP includes `builtin.local-password`. It provides declarative
-username/password collection, Argon2id credential storage, administrator
-credential creation and reset, generic authentication failures, and provider
-assertions consumed by the standard identity and session services.
+The MVP includes `builtin.local-password`. Its frontend contribution provides
+username/password interaction, while its backend contribution provides
+Argon2id credential storage, administrator credential creation and reset,
+generic authentication failures, and provider assertions consumed by the
+standard identity and session services.
 
-The built-in implementation uses the same contract as external providers,
-making the public extension boundary part of the initial backend architecture.
+If exactly one local-password instance is configured, `apinteract-admin init`
+and `apinteract-admin reset-password USER` select it automatically. When
+several local-password instances exist, pass `--provider-instance ID` to the
+backend administrator command. These practices belong specifically to the
+local-password provider and are not implied for other login methods.
+
+Authentication bundles are currently built-in only. User-installed plugin
+roots remain available for ordinary frontend and backend plugins, but cannot
+add code to the anonymous login surface.

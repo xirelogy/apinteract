@@ -1,10 +1,15 @@
 import type { BackendConfiguration } from "../config.js";
+import { randomBytes } from "node:crypto";
 import { AuditService } from "../audit/audit-service.js";
+import { AuthenticationService } from "../authentication/authentication-service.js";
+import { AuthProviderRegistry } from "../authentication/auth-provider-registry.js";
+import { CredentialRepository } from "../authentication/credential-repository.js";
 import { LocalBlobStore } from "../blobs/local-blob-store.js";
 import { ExecutionService } from "../executions/execution-service.js";
 import { EnvironmentService } from "../environments/environment-service.js";
 import { RequestExchangeService } from "../exchanges/request-exchange-service.js";
 import { IdentityService } from "../identity/identity-service.js";
+import { hashPassword, verifyPassword } from "../foundation/password.js";
 import { ImportService } from "../imports/import-service.js";
 import { SqliteDatabase } from "../persistence/sqlite-database.js";
 import { ProxyClient } from "../proxy/proxy-client.js";
@@ -17,6 +22,7 @@ import { WorkspaceService } from "../workspaces/workspace-service.js";
 import { createBackendPluginRuntime } from "../plugins/backend-plugin-host.js";
 import {
   discoverPluginPackages,
+  loadAuthProviderBackendModule,
   loadBackendPluginModule,
 } from "../plugins/plugin-discovery.js";
 import { PluginService } from "../plugins/plugin-service.js";
@@ -26,6 +32,8 @@ export interface Application {
   readonly audit: AuditService;
   readonly blobs: LocalBlobStore;
   readonly identity: IdentityService;
+  readonly authentication: AuthenticationService;
+  readonly authProviders: AuthProviderRegistry;
   readonly sessions: SessionService;
   readonly workspaces: WorkspaceService;
   readonly environments: EnvironmentService;
@@ -59,7 +67,6 @@ export async function createApplication(
     configuration.blobs.stagingPath,
   );
   await blobs.initialize();
-  const identity = new IdentityService(database.db, audit);
   const sessions = new SessionService(database.db, audit, {
     accessLifetimeSeconds: configuration.sessions.accessLifetimeSeconds,
     refreshIdleLifetimeSeconds:
@@ -101,7 +108,16 @@ export async function createApplication(
     },
   );
   const pluginRuntime = createBackendPluginRuntime();
+  const authProviders = new AuthProviderRegistry();
   for (const plugin of discoveredPlugins) {
+    if (plugin.manifest.target === "auth-provider") {
+      authProviders.install(
+        plugin.manifest,
+        await loadAuthProviderBackendModule(plugin),
+        plugin.source,
+      );
+      continue;
+    }
     if (plugin.manifest.target !== "backend") continue;
     try {
       pluginRuntime.plugins.install(
@@ -116,6 +132,33 @@ export async function createApplication(
     }
   }
   pluginRuntime.plugins.validateCapabilities();
+  const credentials = new CredentialRepository(database.db);
+  const configuredAuthProviders = configuration.authentication?.providers ?? [
+    {
+      id: "local-password",
+      plugin: "builtin.local-password",
+      label: "Username and password",
+      description: "Sign in with your APInteract username and password.",
+      configuration: {},
+    },
+  ];
+  await authProviders.initialize(configuredAuthProviders, (instanceId) => ({
+    clock: { now: () => Date.now() },
+    secureRandom: { bytes: secureRandomBytes },
+    passwords: { hash: hashPassword, verify: verifyPassword },
+    credentials: credentials.reader(instanceId),
+  }));
+  const identity = new IdentityService(
+    database.db,
+    audit,
+    authProviders,
+    credentials,
+  );
+  const authentication = new AuthenticationService(
+    database.db,
+    authProviders,
+    identity,
+  );
   const plugins = new PluginService(pluginRuntime.plugins, discoveredPlugins);
   const imports = new ImportService(requests, pluginRuntime.imports);
   const proxy = new ProxyClient(
@@ -149,6 +192,8 @@ export async function createApplication(
     audit,
     blobs,
     identity,
+    authentication,
+    authProviders,
     sessions,
     workspaces,
     environments,
@@ -165,7 +210,16 @@ export async function createApplication(
       await executions.close();
       await scripts.close();
       await audit.publishPending();
+      await authProviders.close();
       await database.close();
     },
   };
+}
+
+/** Returns bounded cryptographic randomness to a built-in provider runtime. */
+function secureRandomBytes(length: number): Uint8Array {
+  if (!Number.isSafeInteger(length) || length < 1 || length > 4096) {
+    throw new Error("Authentication provider requested invalid random bytes");
+  }
+  return randomBytes(length);
 }

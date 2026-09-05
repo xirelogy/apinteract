@@ -77,6 +77,116 @@
         }
       }
     },
+    "/auth/providers": {
+      "get": {
+        "tags": ["Authentication"],
+        "operationId": "listAuthenticationProviders",
+        "summary": "List configured authentication provider instances",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Ordered safe descriptors and immutable built-in frontend modules.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthProviderCatalog" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
+    "/auth/attempts": {
+      "post": {
+        "tags": ["Authentication"],
+        "operationId": "beginAuthenticationAttempt",
+        "summary": "Begin authentication through one configured provider",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authentication completed or requires another interaction.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthAttemptResult" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
+    "/auth/attempts/{attemptId}/continue": {
+      "post": {
+        "tags": ["Authentication"],
+        "operationId": "continueAuthenticationAttempt",
+        "summary": "Continue a browser-bound authentication attempt",
+        "security": [],
+        "parameters": [
+          {
+            "name": "attemptId",
+            "in": "path",
+            "required": true,
+            "schema": { "$ref": "#/components/schemas/UuidV7" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AuthContinueRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authentication completed or requires another interaction.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthAttemptResult" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
+    "/auth/attempts/{attemptId}": {
+      "delete": {
+        "tags": ["Authentication"],
+        "operationId": "cancelAuthenticationAttempt",
+        "summary": "Cancel a browser-bound authentication attempt",
+        "security": [],
+        "parameters": [
+          {
+            "name": "attemptId",
+            "in": "path",
+            "required": true,
+            "schema": { "$ref": "#/components/schemas/UuidV7" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "The attempt is no longer active." },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
     "/auth/login": {
       "post": {
         "tags": ["Authentication"],
@@ -117,6 +227,15 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -147,6 +266,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -331,6 +453,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           }
         }
       }
@@ -485,6 +610,22 @@
             }
           }
         }
+      },
+      "TooManyRequests": {
+        "description": "The authentication attempt rate limit was exceeded.",
+        "content": {
+          "application/problem+json": {
+            "schema": { "$ref": "#/components/schemas/Problem" }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "The selected authentication provider is temporarily unavailable.",
+        "content": {
+          "application/problem+json": {
+            "schema": { "$ref": "#/components/schemas/Problem" }
+          }
+        }
       }
     },
     "schemas": {
@@ -634,6 +775,148 @@
               "enum": ["ready", "not_ready"]
             }
           }
+        }
+      },
+      "AuthProviderCatalog": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["providers"],
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AuthProviderCatalogEntry" }
+          }
+        }
+      },
+      "AuthProviderCatalogEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["manifest", "descriptor", "moduleUrl"],
+        "properties": {
+          "manifest": {
+            "$ref": "#/components/schemas/AuthProviderPluginManifest"
+          },
+          "descriptor": {
+            "$ref": "#/components/schemas/AuthProviderDescriptor"
+          },
+          "moduleUrl": {
+            "type": "string",
+            "pattern": "^/auth/plugins/[a-z0-9.-]+/[a-f0-9]{64}/.+\\.(?:js|mjs)$"
+          }
+        }
+      },
+      "AuthProviderPluginManifest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "apiVersion",
+          "id",
+          "name",
+          "version",
+          "target",
+          "entrypoints",
+          "providers"
+        ],
+        "properties": {
+          "schemaVersion": { "const": 2 },
+          "apiVersion": { "const": 1 },
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "version": { "type": "string" },
+          "weight": { "type": "integer", "minimum": -10000, "maximum": 10000 },
+          "target": { "const": "auth-provider" },
+          "entrypoints": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["backend", "frontend"],
+            "properties": {
+              "backend": { "type": "string" },
+              "frontend": { "type": "string" }
+            }
+          },
+          "providers": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["backend", "frontend"],
+            "properties": {
+              "backend": {
+                "type": "array",
+                "prefixItems": [{ "const": "authentication.provider" }],
+                "items": false
+              },
+              "frontend": {
+                "type": "array",
+                "prefixItems": [{ "const": "authentication.login" }],
+                "items": false
+              }
+            }
+          }
+        }
+      },
+      "AuthProviderDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "pluginId",
+          "label",
+          "availability",
+          "publicConfiguration"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "pluginId": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "availability": {
+            "type": "string",
+            "enum": ["available", "unavailable"]
+          },
+          "publicConfiguration": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "AuthContinueRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fields"],
+        "properties": {
+          "fields": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        }
+      },
+      "AuthAttemptResult": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/AuthInteractionRequired" },
+          { "$ref": "#/components/schemas/AuthAuthenticated" }
+        ]
+      },
+      "AuthInteractionRequired": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "attemptId", "publicData"],
+        "properties": {
+          "status": { "const": "interaction_required" },
+          "attemptId": { "$ref": "#/components/schemas/UuidV7" },
+          "publicData": {}
+        }
+      },
+      "AuthAuthenticated": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "credential"],
+        "properties": {
+          "status": { "const": "authenticated" },
+          "credential": { "$ref": "#/components/schemas/AccessCredential" }
         }
       },
       "LoginRequest": {

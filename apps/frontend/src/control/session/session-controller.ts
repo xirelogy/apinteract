@@ -3,6 +3,7 @@ import type {
   CurrentSession,
   RequestAttachment,
 } from "@/model/contracts/backend";
+import type { AuthProviderFrontendResult } from "@apinteract/plugin-api/frontend/authentication";
 import { useApplicationStore } from "@/control/state/application-store";
 import {
   BackendUnavailableError,
@@ -29,6 +30,7 @@ export class SessionController {
   #accessToken: string | null = null;
   #recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   #recoveryAttempt = 0;
+  #authenticationAttemptId: string | null = null;
   #stopNetworkRecovery: (() => void) | null = null;
   readonly #authenticationLostListeners = new Set<() => void>();
 
@@ -109,10 +111,61 @@ export class SessionController {
     return () => this.#authenticationLostListeners.delete(listener);
   }
 
-  /** Authenticates local credentials and establishes frontend session state. */
-  async login(username: string, password: string): Promise<void> {
-    const credential = await this.#http.login(username, password);
-    await this.#establish(credential.accessToken, credential.session);
+  /** Starts one configured provider flow and establishes a completed session. */
+  async beginAuthentication(
+    providerId: string,
+    fields: Readonly<Record<string, string>>,
+  ): Promise<AuthProviderFrontendResult> {
+    try {
+      await this.cancelAuthentication();
+      return this.#authenticationResult(
+        await this.#http.beginAuthentication(providerId, fields),
+      );
+    } catch (cause) {
+      return authenticationFailureResult(cause);
+    }
+  }
+
+  /** Continues the current browser-bound provider flow. */
+  async continueAuthentication(
+    fields: Readonly<Record<string, string>>,
+  ): Promise<AuthProviderFrontendResult> {
+    if (this.#authenticationAttemptId === null) {
+      throw new Error("No authentication attempt is active");
+    }
+    try {
+      return this.#authenticationResult(
+        await this.#http.continueAuthentication(
+          this.#authenticationAttemptId,
+          fields,
+        ),
+      );
+    } catch (cause) {
+      return authenticationFailureResult(cause);
+    }
+  }
+
+  /** Cancels current provider state without exposing its browser binding. */
+  async cancelAuthentication(): Promise<void> {
+    const attemptId = this.#authenticationAttemptId;
+    this.#authenticationAttemptId = null;
+    if (attemptId !== null) await this.#http.cancelAuthentication(attemptId);
+  }
+
+  /** Maps a backend transition to the token-free frontend provider contract. */
+  async #authenticationResult(
+    result: Awaited<ReturnType<BackendHttpClient["beginAuthentication"]>>,
+  ): Promise<AuthProviderFrontendResult> {
+    if (result.status === "interaction_required") {
+      this.#authenticationAttemptId = result.attemptId;
+      return { status: result.status, publicData: result.publicData };
+    }
+    this.#authenticationAttemptId = null;
+    await this.#establish(
+      result.credential.accessToken,
+      result.credential.session,
+    );
+    return { status: "authenticated" };
   }
 
   /** Loads backend and proxy product versions through the HTTP health endpoint. */
@@ -214,6 +267,26 @@ export class SessionController {
       }
     }
   }
+}
+
+/** Maps public auth problems without exposing details to provider code. */
+function authenticationFailureResult(
+  cause: unknown,
+): AuthProviderFrontendResult {
+  if (
+    cause instanceof HttpProblemError &&
+    cause.problem.code === "authentication_provider_unavailable"
+  ) {
+    return { status: "unavailable", retryable: true };
+  }
+  if (
+    cause instanceof HttpProblemError &&
+    (cause.problem.code === "authentication_failed" ||
+      cause.problem.code === "invalid_authentication_input")
+  ) {
+    return { status: "rejected" };
+  }
+  throw cause;
 }
 
 /** Reports whether a failed transport attempt produced no backend response. */

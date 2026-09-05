@@ -4,6 +4,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  AUTH_PROVIDER_PLUGIN_MANIFEST_SCHEMA_VERSION,
   PLUGIN_API_VERSION,
   PLUGIN_MANIFEST_SCHEMA_VERSION,
   type PluginPackageManifest,
@@ -11,6 +12,7 @@ import {
   type PluginTarget,
 } from "@apinteract/plugin-api";
 import type { BackendPluginModule } from "@apinteract/plugin-api/backend";
+import type { AuthProviderBackendPluginModule } from "@apinteract/plugin-api/backend/authentication";
 
 const pluginIdPattern = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u;
 const semanticVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
@@ -29,7 +31,9 @@ export interface DiscoveredPluginPackage {
   readonly manifest: PluginPackageManifest;
   readonly source: PluginSource;
   readonly packagePath: string;
+  /** Backend entrypoint for auth bundles and sole entrypoint for schema-v1 packages. */
   readonly entrypointPath: string;
+  readonly frontendEntrypointPath?: string;
   readonly contentHash: string;
   readonly assets: ReadonlyMap<string, Buffer>;
 }
@@ -86,6 +90,26 @@ export async function loadBackendPluginModule(
   return { register: module.register as BackendPluginModule["register"] };
 }
 
+/** Dynamically imports one validated built-in auth-provider backend entrypoint. */
+export async function loadAuthProviderBackendModule(
+  plugin: DiscoveredPluginPackage,
+): Promise<AuthProviderBackendPluginModule> {
+  if (plugin.manifest.target !== "auth-provider") {
+    throw new Error(
+      `Cannot load ${plugin.manifest.target} plugin as authentication`,
+    );
+  }
+  const module = (await import(
+    `${pathToFileURL(plugin.entrypointPath).href}?sha256=${plugin.contentHash}`
+  )) as Record<string, unknown>;
+  if (typeof module.register !== "function") {
+    throw new Error(`Plugin ${plugin.manifest.id} does not export register`);
+  }
+  return {
+    register: module.register as AuthProviderBackendPluginModule["register"],
+  };
+}
+
 /** Reads and validates one package without executing its entrypoint. */
 async function readPluginPackage(
   packagePath: string,
@@ -99,23 +123,28 @@ async function readPluginPackage(
     ),
   ) as unknown;
   const manifest = validatePluginManifest(manifestValue);
+  if (manifest.target === "auth-provider" && source !== "built-in") {
+    throw new Error("Authentication provider bundles must be built in");
+  }
   validatePackageMetadata(
     JSON.parse(
       await readFile(resolve(canonicalPackagePath, "package.json"), "utf8"),
     ) as unknown,
     manifest,
   );
-  const entrypointPath = await realpath(
-    resolve(canonicalPackagePath, manifest.entrypoint),
+  const entrypointPath = await resolveEntrypoint(
+    canonicalPackagePath,
+    manifest.target === "auth-provider"
+      ? manifest.entrypoints.backend
+      : manifest.entrypoint,
   );
-  const relativeEntrypoint = relative(canonicalPackagePath, entrypointPath);
-  if (
-    relativeEntrypoint.startsWith(`..${sep}`) ||
-    relativeEntrypoint === ".." ||
-    isAbsolute(relativeEntrypoint)
-  ) {
-    throw new Error("Plugin entrypoint escapes its package directory");
-  }
+  const frontendEntrypointPath =
+    manifest.target === "auth-provider"
+      ? await resolveEntrypoint(
+          canonicalPackagePath,
+          manifest.entrypoints.frontend,
+        )
+      : undefined;
   const assets = await readDistributionAssets(
     resolve(canonicalPackagePath, "dist"),
   );
@@ -128,9 +157,27 @@ async function readPluginPackage(
     source,
     packagePath: canonicalPackagePath,
     entrypointPath,
+    ...(frontendEntrypointPath === undefined ? {} : { frontendEntrypointPath }),
     contentHash: contentHash.digest("hex"),
     assets,
   };
+}
+
+/** Resolves one declared entrypoint while rejecting traversal through links. */
+async function resolveEntrypoint(
+  packagePath: string,
+  entrypoint: string,
+): Promise<string> {
+  const entrypointPath = await realpath(resolve(packagePath, entrypoint));
+  const relativeEntrypoint = relative(packagePath, entrypointPath);
+  if (
+    relativeEntrypoint.startsWith(`..${sep}`) ||
+    relativeEntrypoint === ".." ||
+    isAbsolute(relativeEntrypoint)
+  ) {
+    throw new Error("Plugin entrypoint escapes its package directory");
+  }
+  return entrypointPath;
 }
 
 /** Requires package metadata while keeping the plugin manifest canonical. */
@@ -200,15 +247,8 @@ export function validatePluginManifest(value: unknown): PluginPackageManifest {
     throw new Error("Plugin manifest must be an object");
   }
   const manifest = value as Record<string, unknown>;
-  const target = manifest.target;
-  const providers = manifest.providers;
-  if (
-    manifest.schemaVersion !== PLUGIN_MANIFEST_SCHEMA_VERSION ||
-    manifest.apiVersion !== PLUGIN_API_VERSION
-  ) {
-    throw new Error(
-      "Plugin manifest schemaVersion and apiVersion must both be 1",
-    );
+  if (manifest.apiVersion !== PLUGIN_API_VERSION) {
+    throw new Error("Plugin manifest apiVersion must be 1");
   }
   if (typeof manifest.id !== "string" || !pluginIdPattern.test(manifest.id)) {
     throw new Error("Plugin manifest has an invalid ID");
@@ -230,6 +270,21 @@ export function validatePluginManifest(value: unknown): PluginPackageManifest {
       manifest.weight > 10000)
   ) {
     throw new Error("Plugin manifest has an invalid weight");
+  }
+  if (manifest.target === "auth-provider") {
+    return validateAuthProviderManifest(manifest);
+  }
+  return validateSingleTargetManifest(manifest);
+}
+
+/** Validates the target-specific fields of one schema-v1 manifest. */
+function validateSingleTargetManifest(
+  manifest: Record<string, unknown>,
+): PluginPackageManifest<"frontend" | "backend"> {
+  const target = manifest.target;
+  const providers = manifest.providers;
+  if (manifest.schemaVersion !== PLUGIN_MANIFEST_SCHEMA_VERSION) {
+    throw new Error("Single-target plugin manifest schemaVersion must be 1");
   }
   if (target !== "frontend" && target !== "backend") {
     throw new Error("Plugin manifest has an invalid target");
@@ -254,14 +309,76 @@ export function validatePluginManifest(value: unknown): PluginPackageManifest {
   return {
     schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
     apiVersion: PLUGIN_API_VERSION,
-    id: manifest.id,
-    name: manifest.name,
-    version: manifest.version,
+    id: manifest.id as string,
+    name: manifest.name as string,
+    version: manifest.version as string,
     ...(typeof manifest.weight === "number" ? { weight: manifest.weight } : {}),
     target: target as PluginTarget,
     entrypoint: manifest.entrypoint,
     providers: providers as string[],
   };
+}
+
+/** Validates an atomic, built-in auth-provider runtime pair. */
+function validateAuthProviderManifest(
+  manifest: Record<string, unknown>,
+): PluginPackageManifest<"auth-provider"> {
+  if (manifest.schemaVersion !== AUTH_PROVIDER_PLUGIN_MANIFEST_SCHEMA_VERSION) {
+    throw new Error("Auth-provider plugin manifest schemaVersion must be 2");
+  }
+  const entrypoints = manifest.entrypoints;
+  const providers = manifest.providers;
+  if (
+    !isRecord(entrypoints) ||
+    !validEntrypoint(entrypoints.backend) ||
+    !validEntrypoint(entrypoints.frontend) ||
+    entrypoints.backend === entrypoints.frontend
+  ) {
+    throw new Error("Auth-provider plugin manifest has invalid entrypoints");
+  }
+  if (
+    !isRecord(providers) ||
+    !exactProviders(providers.backend, "authentication.provider") ||
+    !exactProviders(providers.frontend, "authentication.login")
+  ) {
+    throw new Error("Auth-provider plugin manifest has invalid providers");
+  }
+  return {
+    schemaVersion: AUTH_PROVIDER_PLUGIN_MANIFEST_SCHEMA_VERSION,
+    apiVersion: PLUGIN_API_VERSION,
+    id: manifest.id as string,
+    name: manifest.name as string,
+    version: manifest.version as string,
+    ...(typeof manifest.weight === "number" ? { weight: manifest.weight } : {}),
+    target: "auth-provider",
+    entrypoints: {
+      backend: entrypoints.backend,
+      frontend: entrypoints.frontend,
+    },
+    providers: {
+      backend: ["authentication.provider"],
+      frontend: ["authentication.login"],
+    },
+  };
+}
+
+/** Reports whether one untrusted manifest value is a non-array object. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Applies the common package-relative JavaScript entrypoint rules. */
+function validEntrypoint(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    entrypointPattern.test(value) &&
+    !value.includes("../")
+  );
+}
+
+/** Requires exactly one declared auth capability on each runtime side. */
+function exactProviders(value: unknown, provider: string): boolean {
+  return Array.isArray(value) && value.length === 1 && value[0] === provider;
 }
 
 /** Detects only ordinary absent-path filesystem failures. */

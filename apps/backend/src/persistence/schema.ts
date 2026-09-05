@@ -20,11 +20,37 @@ export interface UserTable {
 export interface LoginCredentialTable {
   id: BinaryId;
   user_id: BinaryId;
-  provider_id: string;
+  provider_instance_id: string;
   provider_subject: string;
-  secret_hash: string;
   status: "active" | "disabled";
   created_at: number;
+}
+
+/** Stores one versioned provider-defined structured credential value. */
+export interface ProviderCredentialMaterialTable {
+  credential_id: BinaryId;
+  schema_version: number;
+  data_json: string;
+}
+
+/** Stores one mutable provider-scoped identifier used only for lookup. */
+export interface ProviderCredentialLookupKeyTable {
+  credential_id: BinaryId;
+  provider_instance_id: string;
+  key_name: string;
+  normalized_value: string;
+}
+
+/** Retains protected state for one bounded authentication flow. */
+export interface AuthenticationAttemptTable {
+  id: BinaryId;
+  provider_instance_id: string;
+  state_json: string;
+  binding_hash: string;
+  status: "active" | "consumed" | "cancelled" | "expired";
+  transition_count: number;
+  created_at: number;
+  expires_at: number;
 }
 
 export interface SessionTable {
@@ -294,6 +320,9 @@ export interface DatabaseSchema {
   instance_metadata: InstanceMetadataTable;
   users: UserTable;
   login_credentials: LoginCredentialTable;
+  provider_credential_material: ProviderCredentialMaterialTable;
+  provider_credential_lookup_keys: ProviderCredentialLookupKeyTable;
+  authentication_attempts: AuthenticationAttemptTable;
   sessions: SessionTable;
   refresh_tokens: RefreshTokenTable;
   workspaces: WorkspaceTable;

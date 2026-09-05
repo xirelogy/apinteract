@@ -9,8 +9,8 @@ import { InstanceAlreadyInitializedError } from "./identity/identity-service.js"
 const [area, command, ...commandArguments] = process.argv.slice(2);
 if (area !== "admin" || (command !== "init" && command !== "reset-password")) {
   process.stderr.write(
-    "Usage: apinteract admin init [--username NAME] [--display-name NAME] [--config PATH]\n" +
-      "       apinteract admin reset-password --user NAME [--config PATH]\n",
+    "Usage: apinteract admin init [--username NAME] [--display-name NAME] [--provider-instance ID] [--config PATH]\n" +
+      "       apinteract admin reset-password --user NAME [--provider-instance ID] [--config PATH]\n",
   );
   process.exitCode = 2;
 } else {
@@ -21,10 +21,15 @@ if (area !== "admin" || (command !== "init" && command !== "reset-password")) {
       username: { type: "string", default: "admin" },
       "display-name": { type: "string", default: "Administrator" },
       user: { type: "string" },
+      "provider-instance": { type: "string" },
     },
   });
   const password = await readPassword();
   const configuration = await loadBackendConfiguration(values.config);
+  const providerInstanceId = localPasswordProviderInstance(
+    configuration,
+    values["provider-instance"],
+  );
   const application = await createApplication(configuration);
   try {
     if (command === "init") {
@@ -32,7 +37,8 @@ if (area !== "admin" || (command !== "init" && command !== "reset-password")) {
         const user = await application.identity.initializeAdministrator(
           values.username,
           values["display-name"],
-          password,
+          providerInstanceId,
+          { username: values.username, password },
         );
         await application.audit.publishPending();
         stdout.write(`Initialized administrator ${user.username}.\n`);
@@ -48,13 +54,42 @@ if (area !== "admin" || (command !== "init" && command !== "reset-password")) {
       if (values.user === undefined) {
         throw new Error("--user is required for reset-password");
       }
-      await application.identity.resetPassword(values.user, password);
+      await application.identity.updateCredential(
+        values.user,
+        providerInstanceId,
+        { username: values.user, password },
+      );
       await application.audit.publishPending();
       stdout.write(`Reset password for ${values.user}.\n`);
     }
   } finally {
     await application.close();
   }
+}
+
+/** Selects one local-password instance without silently resolving ambiguity. */
+function localPasswordProviderInstance(
+  configuration: Awaited<ReturnType<typeof loadBackendConfiguration>>,
+  selected: string | undefined,
+): string {
+  const providers = configuration.authentication?.providers ?? [];
+  const local = providers.filter(
+    (provider) => provider.plugin === "builtin.local-password",
+  );
+  if (selected !== undefined) {
+    if (!local.some((provider) => provider.id === selected)) {
+      throw new Error(
+        `--provider-instance must select a configured builtin.local-password instance`,
+      );
+    }
+    return selected;
+  }
+  if (local.length !== 1) {
+    throw new Error(
+      "--provider-instance is required unless exactly one local-password instance is configured",
+    );
+  }
+  return local[0]!.id;
 }
 
 /** Reads a password from the terminal without echoing its characters. */

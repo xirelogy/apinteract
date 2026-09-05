@@ -12,6 +12,7 @@ import { router } from "./app/router";
 import { initializePwaRegistration } from "./app/pwa-registration";
 import { loadFrontendPlugins } from "./app/plugins/frontend-plugin-loader";
 import { frontendPluginRuntime } from "./app/plugins/frontend-plugin-host";
+import { authProviderFrontendHost } from "./app/plugins/auth-provider-host";
 import { ApplicationController } from "./control/application/application-controller";
 import { SessionController } from "./control/session/session-controller";
 import { BackendHttpClient } from "./control/transport/http-client";
@@ -19,7 +20,6 @@ import { BackendWebSocketClient } from "./control/transport/websocket-client";
 import "./view/styling/index.css";
 
 initializeDisplayStyle();
-await loadFrontendPlugins(frontendPluginRuntime);
 
 const app = createApp(App);
 const pinia = createPinia();
@@ -35,10 +35,18 @@ const session = new SessionController(http, webSocket);
 const controller = new ApplicationController(session, webSocket);
 app.provide(applicationControllerKey, controller);
 
+try {
+  await authProviderFrontendHost.load(await http.authProviders());
+} catch (cause) {
+  console.error("Authentication provider catalog could not be loaded", cause);
+  await authProviderFrontendHost.load([]);
+}
+
 // Restore browser credentials before router guards inspect authenticated state.
 // Otherwise a valid reload of /main can be redirected to /login while refresh
 // cookie rotation is still in progress.
-await session.restore();
+const authenticated = await session.restore();
+if (authenticated) await loadFrontendPlugins(frontendPluginRuntime);
 app.use(router);
 session.onAuthenticationLost(() => void router.replace("/login"));
 session.startNetworkRecovery();

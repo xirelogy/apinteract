@@ -5,6 +5,25 @@ import type {
   Problem,
   RequestAttachment,
 } from "@/model/contracts/backend";
+import type {
+  AuthProviderPublicDescriptor,
+  AuthProviderValue,
+} from "@apinteract/plugin-api/backend/authentication";
+import type { AuthProviderPluginPackageManifest } from "@apinteract/plugin-api";
+
+export interface AuthProviderCatalogEntry {
+  readonly manifest: AuthProviderPluginPackageManifest;
+  readonly descriptor: AuthProviderPublicDescriptor;
+  readonly moduleUrl: string;
+}
+
+export type AuthAttemptResult =
+  | { readonly status: "authenticated"; readonly credential: AccessCredential }
+  | {
+      readonly status: "interaction_required";
+      readonly attemptId: string;
+      readonly publicData: AuthProviderValue;
+    };
 
 /** Backend RFC 9457 response exposed as a typed frontend error. */
 export class HttpProblemError extends Error {
@@ -36,17 +55,52 @@ export class BackendHttpClient {
     return health;
   }
 
-  /** Exchanges local-password input for access and refresh credentials. */
-  async login(username: string, password: string): Promise<AccessCredential> {
-    return this.#request<AccessCredential>("/auth/login", {
+  /** Lists configured authentication instances and their safe built-in modules. */
+  async authProviders(): Promise<readonly AuthProviderCatalogEntry[]> {
+    const result = await this.#request<{
+      providers: AuthProviderCatalogEntry[];
+    }>("/auth/providers", {});
+    return result.providers;
+  }
+
+  /** Starts one provider-independent authentication attempt. */
+  async beginAuthentication(
+    providerId: string,
+    fields: Readonly<Record<string, string>>,
+  ): Promise<AuthAttemptResult> {
+    return this.#request<AuthAttemptResult>("/auth/attempts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify({
-        providerId: "local-password",
-        fields: { username, password },
+        providerId,
+        fields,
       }),
     });
+  }
+
+  /** Continues the current browser-bound authentication attempt. */
+  async continueAuthentication(
+    attemptId: string,
+    fields: Readonly<Record<string, string>>,
+  ): Promise<AuthAttemptResult> {
+    return this.#request<AuthAttemptResult>(
+      `/auth/attempts/${encodeURIComponent(attemptId)}/continue`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ fields }),
+      },
+    );
+  }
+
+  /** Cancels the current authentication attempt and its browser binding. */
+  async cancelAuthentication(attemptId: string): Promise<void> {
+    await this.#request<void>(
+      `/auth/attempts/${encodeURIComponent(attemptId)}`,
+      { method: "DELETE", credentials: "include" },
+    );
   }
 
   /** Rotates the HttpOnly refresh cookie and returns a new access token. */
@@ -120,7 +174,9 @@ export class BackendHttpClient {
     if (!response.ok) {
       throw await this.#problem(response);
     }
-    return (await response.json()) as T;
+    return response.status === 204
+      ? (undefined as T)
+      : ((await response.json()) as T);
   }
 
   /** Performs a browser request while preserving network failures as a typed state. */

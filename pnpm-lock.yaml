@@ -344,6 +344,18 @@ importers:
         specifier: 7.3.6
         version: 7.3.6(@types/node@24.10.0)(tsx@4.20.6)(yaml@2.9.0)
 
+  plugins/local-password:
+    devDependencies:
+      '@apinteract/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vite:
+        specifier: 7.3.6
+        version: 7.3.6(@types/node@24.10.0)(tsx@4.20.6)(yaml@2.9.0)
+
   plugins/openapi-import:
     devDependencies:
       '@apinteract/plugin-api':

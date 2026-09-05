@@ -1,13 +1,18 @@
+import type {
+  AuthProviderAssertion,
+  AuthProviderInput,
+} from "@apinteract/plugin-api/backend/authentication";
 import type { Kysely } from "kysely";
 
 import type { AuditService } from "../audit/audit-service.js";
+import type { AuthProviderRegistry } from "../authentication/auth-provider-registry.js";
+import type { CredentialRepository } from "../authentication/credential-repository.js";
 import {
   bytesToId,
   createEntityId,
   idToBytes,
   type EntityId,
 } from "../foundation/id.js";
-import { hashPassword, verifyPassword } from "../foundation/password.js";
 import type { DatabaseSchema } from "../persistence/schema.js";
 
 export interface ApplicationUser {
@@ -21,27 +26,44 @@ export class InstanceAlreadyInitializedError extends Error {}
 export class AuthenticationFailedError extends Error {}
 
 /**
- * Owns application users and the built-in local-password credential adapter.
+ * Owns application users and provider-subject linkage.
  *
- * Credentials identify and link to users but do not own application sessions;
- * SessionService takes over only after this service returns a verified user.
+ * Providers prove a scoped subject and own credential material. This service
+ * selects neither authentication behavior nor session policy.
  */
 export class IdentityService {
   readonly #database: Kysely<DatabaseSchema>;
   readonly #audit: AuditService;
+  readonly #providers: AuthProviderRegistry;
+  readonly #credentials: CredentialRepository;
 
-  constructor(database: Kysely<DatabaseSchema>, audit: AuditService) {
+  constructor(
+    database: Kysely<DatabaseSchema>,
+    audit: AuditService,
+    providers: AuthProviderRegistry,
+    credentials: CredentialRepository,
+  ) {
     this.#database = database;
     this.#audit = audit;
+    this.#providers = providers;
+    this.#credentials = credentials;
   }
 
-  /** Creates the first user and its local-password administrator credential. */
+  /** Creates the first user and one provider-managed administrator credential. */
   async initializeAdministrator(
     username: string,
     displayName: string,
-    password: string,
+    providerInstanceId: string,
+    credentialInput: AuthProviderInput,
   ): Promise<ApplicationUser> {
-    const secretHash = await hashPassword(password);
+    const provider = this.#providers.require(providerInstanceId);
+    const manager = provider.runtime.credentials;
+    if (manager === undefined) {
+      throw new Error(
+        `Authentication provider ${providerInstanceId} cannot create credentials`,
+      );
+    }
+    const creation = await manager.create(credentialInput);
     const userId = createEntityId();
     const credentialId = createEntityId();
     const now = Date.now();
@@ -69,23 +91,19 @@ export class IdentityService {
           deleted_at: null,
         })
         .execute();
-      await transaction
-        .insertInto("login_credentials")
-        .values({
-          id: idToBytes(credentialId),
-          user_id: idToBytes(userId),
-          provider_id: "local-password",
-          provider_subject: username,
-          secret_hash: secretHash,
-          status: "active",
-          created_at: now,
-        })
-        .execute();
+      await this.#credentials.insert(
+        transaction,
+        credentialId,
+        userId,
+        providerInstanceId,
+        creation,
+        now,
+      );
       await this.#audit.record(transaction, {
         type: "identity.instance_administrator_initialized",
         actorUserId: userId,
         workspaceId: null,
-        data: { username },
+        data: { username, providerInstanceId },
       });
       return {
         id: userId,
@@ -96,44 +114,27 @@ export class IdentityService {
     });
   }
 
-  /** Verifies an active local-password credential and returns its linked user. */
-  async authenticateLocalPassword(
-    username: string,
-    password: string,
+  /** Resolves a validated provider assertion to one active application user. */
+  async resolveAssertion(
+    assertion: AuthProviderAssertion,
   ): Promise<ApplicationUser> {
-    const row = await this.#database
-      .selectFrom("login_credentials as credential")
-      .innerJoin("users as user", "user.id", "credential.user_id")
-      .select([
-        "user.id",
-        "user.username",
-        "user.display_name",
-        "user.is_instance_admin",
-        "user.status as user_status",
-        "credential.secret_hash",
-        "credential.status as credential_status",
-      ])
-      .where("credential.provider_id", "=", "local-password")
-      .where("credential.provider_subject", "=", username)
-      .executeTakeFirst();
-
-    const valid =
-      row !== undefined &&
-      row.user_status === "active" &&
-      row.credential_status === "active" &&
-      (await verifyPassword(password, row.secret_hash));
-    if (!valid || row === undefined) {
+    this.#providers.require(assertion.providerInstanceId);
+    const userId = await this.#credentials.resolveUser(
+      assertion.providerInstanceId,
+      assertion.subject,
+    );
+    if (userId === null) {
       throw new AuthenticationFailedError(
         "The supplied credentials could not be accepted",
       );
     }
-
-    return {
-      id: bytesToId(row.id),
-      username: row.username,
-      displayName: row.display_name,
-      isInstanceAdmin: row.is_instance_admin === 1,
-    };
+    const user = await this.getActiveUser(userId);
+    if (user === undefined) {
+      throw new AuthenticationFailedError(
+        "The supplied credentials could not be accepted",
+      );
+    }
+    return user;
   }
 
   /** Returns an active application user by identifier when one exists. */
@@ -154,35 +155,51 @@ export class IdentityService {
         };
   }
 
-  /** Replaces a local password and revokes the user's active sessions. */
-  async resetPassword(username: string, password: string): Promise<void> {
-    const secretHash = await hashPassword(password);
+  /** Replaces provider-owned credential material and revokes active sessions. */
+  async updateCredential(
+    username: string,
+    providerInstanceId: string,
+    input: AuthProviderInput,
+  ): Promise<void> {
+    const provider = this.#providers.require(providerInstanceId);
+    const manager = provider.runtime.credentials;
+    if (manager === undefined) {
+      throw new Error(
+        `Authentication provider ${providerInstanceId} cannot update credentials`,
+      );
+    }
+    const user = await this.#database
+      .selectFrom("users")
+      .selectAll()
+      .where("username", "=", username)
+      .where("status", "!=", "deleted")
+      .executeTakeFirstOrThrow();
+    const userId = bytesToId(user.id);
+    const current = await this.#credentials.forUser(userId, providerInstanceId);
+    if (current === null) {
+      throw new Error(
+        `The user has no credential for authentication provider ${providerInstanceId}`,
+      );
+    }
+    const replacement = await manager.update(current, input);
     await this.#database.transaction().execute(async (transaction) => {
-      const user = await transaction
-        .selectFrom("users")
-        .selectAll()
-        .where("username", "=", username)
-        .where("status", "!=", "deleted")
-        .executeTakeFirstOrThrow();
-      await transaction
-        .updateTable("login_credentials")
-        .set({ secret_hash: secretHash, status: "active" })
-        .where("user_id", "=", user.id)
-        .where("provider_id", "=", "local-password")
-        .execute();
+      await this.#credentials.replace(
+        transaction,
+        current,
+        providerInstanceId,
+        replacement,
+      );
       await transaction
         .updateTable("sessions")
         .set({ status: "revoked" })
         .where("user_id", "=", user.id)
         .where("status", "=", "active")
         .execute();
-      // Credential replacement and session revocation are one recovery action:
-      // no session authenticated with the old password survives the reset.
       await this.#audit.record(transaction, {
-        type: "identity.password_recovered",
-        actorUserId: bytesToId(user.id),
+        type: "identity.credential_recovered",
+        actorUserId: userId,
         workspaceId: null,
-        data: { username },
+        data: { username, providerInstanceId },
       });
     });
   }

@@ -210,6 +210,7 @@ function validateBackendConfigurationKeys(configuration) {
     "proxy",
     "sessions",
     "frontend",
+    "authentication",
     "scripts",
   ]);
   requireKnownKeys(
@@ -252,6 +253,23 @@ function validateBackendConfigurationKeys(configuration) {
     "config.frontend",
     ["distPath"],
   );
+  const authentication = recordOrEmpty(
+    configuration.authentication,
+    "config.authentication",
+  );
+  requireKnownKeys(authentication, "config.authentication", ["providers"]);
+  if (authentication.providers !== undefined) {
+    if (!Array.isArray(authentication.providers)) {
+      throw new Error("config.authentication.providers must be an array");
+    }
+    authentication.providers.forEach((provider, index) =>
+      requireKnownKeys(
+        requireRecord(provider, `config.authentication.providers[${index}]`),
+        `config.authentication.providers[${index}]`,
+        ["id", "plugin", "label", "description", "configuration"],
+      ),
+    );
+  }
   const scripts = recordOrEmpty(configuration.scripts, "config.scripts");
   requireKnownKeys(scripts, "config.scripts", ["variableWrites"]);
   requireKnownKeys(

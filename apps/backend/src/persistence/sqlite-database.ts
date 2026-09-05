@@ -25,6 +25,7 @@ const CAPTURED_EXCHANGES_MIGRATION = "0015_captured_exchanges";
 const RESOURCE_DOCUMENTATION_MIGRATION = "0016_resource_documentation";
 const GENERIC_CAPTURE_SOURCE_MIGRATION = "0017_generic_capture_source";
 const CAPTURE_LABEL_MIGRATION = "0018_capture_label";
+const AUTH_PROVIDER_CREDENTIALS_MIGRATION = "0019_auth_provider_credentials";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -50,14 +51,41 @@ CREATE TABLE users (
 CREATE TABLE login_credentials (
   id BLOB PRIMARY KEY CHECK(length(id) = 16),
   user_id BLOB NOT NULL REFERENCES users(id),
-  provider_id TEXT NOT NULL,
+  provider_instance_id TEXT NOT NULL,
   provider_subject TEXT NOT NULL,
-  secret_hash TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN ('active', 'disabled')),
   created_at INTEGER NOT NULL,
-  UNIQUE(provider_id, provider_subject)
+  UNIQUE(provider_instance_id, provider_subject)
 ) STRICT;
 CREATE INDEX login_credentials_user_id ON login_credentials(user_id);
+
+CREATE TABLE provider_credential_material (
+  credential_id BLOB PRIMARY KEY REFERENCES login_credentials(id) ON DELETE CASCADE,
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  data_json TEXT NOT NULL CHECK(json_valid(data_json))
+) STRICT;
+
+CREATE TABLE provider_credential_lookup_keys (
+  credential_id BLOB NOT NULL REFERENCES login_credentials(id) ON DELETE CASCADE,
+  provider_instance_id TEXT NOT NULL,
+  key_name TEXT NOT NULL,
+  normalized_value TEXT NOT NULL,
+  PRIMARY KEY(credential_id, key_name),
+  UNIQUE(provider_instance_id, key_name, normalized_value)
+) WITHOUT ROWID, STRICT;
+
+CREATE TABLE authentication_attempts (
+  id BLOB PRIMARY KEY CHECK(length(id) = 16),
+  provider_instance_id TEXT NOT NULL,
+  state_json TEXT NOT NULL CHECK(json_valid(state_json)),
+  binding_hash TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('active', 'consumed', 'cancelled', 'expired')),
+  transition_count INTEGER NOT NULL CHECK(transition_count >= 0),
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX authentication_attempts_expiry
+  ON authentication_attempts(status, expires_at);
 
 CREATE TABLE sessions (
   id BLOB PRIMARY KEY CHECK(length(id) = 16),
@@ -452,6 +480,19 @@ export class SqliteDatabase {
     ) {
       this.#migrateCaptureLabel();
     }
+
+    const authProviderCredentialsApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(AUTH_PROVIDER_CREDENTIALS_MIGRATION);
+    if (
+      authProviderCredentialsApplied === undefined ||
+      !this.#columnExists("login_credentials", "provider_instance_id") ||
+      !this.#tableExists("provider_credential_material") ||
+      !this.#tableExists("provider_credential_lookup_keys") ||
+      !this.#tableExists("authentication_attempts")
+    ) {
+      this.#migrateAuthProviderCredentials();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -498,6 +539,7 @@ export class SqliteDatabase {
         RESOURCE_DOCUMENTATION_MIGRATION,
         GENERIC_CAPTURE_SOURCE_MIGRATION,
         CAPTURE_LABEL_MIGRATION,
+        AUTH_PROVIDER_CREDENTIALS_MIGRATION,
       ].some((identifier) => !identifiers.has(identifier)) ||
       !this.#columnExists("request_drafts", "body_json") ||
       !this.#tableExists("request_attachments") ||
@@ -507,7 +549,11 @@ export class SqliteDatabase {
       !this.#columnExists("collection_profiles", "description_text") ||
       !this.#columnExists("environments", "description_text") ||
       !this.#columnExists("request_drafts", "description_text") ||
-      !this.#columnExists("variables", "description_text")
+      !this.#columnExists("variables", "description_text") ||
+      !this.#columnExists("login_credentials", "provider_instance_id") ||
+      !this.#tableExists("provider_credential_material") ||
+      !this.#tableExists("provider_credential_lookup_keys") ||
+      !this.#tableExists("authentication_attempts")
     );
   }
 
@@ -1148,6 +1194,115 @@ export class SqliteDatabase {
         this.#recordMigration(RESOURCE_DOCUMENTATION_MIGRATION);
       }
     })();
+  }
+
+  /** Generalizes local-password rows without changing users or active sessions. */
+  #migrateAuthProviderCredentials(): void {
+    this.#driver.transaction(() => {
+      const legacy = this.#columnExists("login_credentials", "provider_id")
+        ? (this.#driver
+            .prepare(
+              "SELECT id, user_id, provider_subject, secret_hash, status, created_at FROM login_credentials",
+            )
+            .all() as readonly {
+            readonly id: Buffer;
+            readonly user_id: Buffer;
+            readonly provider_subject: string;
+            readonly secret_hash: string;
+            readonly status: string;
+            readonly created_at: number;
+          }[])
+        : [];
+      if (
+        legacy.length > 0 ||
+        this.#columnExists("login_credentials", "provider_id")
+      ) {
+        this.#driver.exec(`
+          ALTER TABLE login_credentials RENAME TO login_credentials_legacy;
+          DROP INDEX login_credentials_user_id;
+          CREATE TABLE login_credentials (
+            id BLOB PRIMARY KEY CHECK(length(id) = 16),
+            user_id BLOB NOT NULL REFERENCES users(id),
+            provider_instance_id TEXT NOT NULL,
+            provider_subject TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('active', 'disabled')),
+            created_at INTEGER NOT NULL,
+            UNIQUE(provider_instance_id, provider_subject)
+          ) STRICT;
+          CREATE INDEX login_credentials_user_id ON login_credentials(user_id);
+        `);
+        this.#createAuthProviderStorageTables();
+        const insertCredential = this.#driver.prepare(
+          "INSERT INTO login_credentials(id, user_id, provider_instance_id, provider_subject, status, created_at) VALUES (?, ?, 'local-password', ?, ?, ?)",
+        );
+        const insertMaterial = this.#driver.prepare(
+          "INSERT INTO provider_credential_material(credential_id, schema_version, data_json) VALUES (?, 1, ?)",
+        );
+        const insertLookup = this.#driver.prepare(
+          "INSERT INTO provider_credential_lookup_keys(credential_id, provider_instance_id, key_name, normalized_value) VALUES (?, 'local-password', 'username', ?)",
+        );
+        for (const credential of legacy) {
+          const subject = credential.id.toString("hex");
+          insertCredential.run(
+            credential.id,
+            credential.user_id,
+            subject,
+            credential.status,
+            credential.created_at,
+          );
+          insertMaterial.run(
+            credential.id,
+            JSON.stringify({ passwordHash: credential.secret_hash }),
+          );
+          insertLookup.run(
+            credential.id,
+            credential.provider_subject
+              .normalize("NFKC")
+              .toLocaleLowerCase("en-US"),
+          );
+        }
+        this.#driver.exec("DROP TABLE login_credentials_legacy");
+      } else {
+        this.#createAuthProviderStorageTables();
+      }
+      const applied = this.#driver
+        .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+        .get(AUTH_PROVIDER_CREDENTIALS_MIGRATION);
+      if (applied === undefined) {
+        this.#recordMigration(AUTH_PROVIDER_CREDENTIALS_MIGRATION);
+      }
+    })();
+  }
+
+  /** Creates generic credential and authentication-attempt tables idempotently. */
+  #createAuthProviderStorageTables(): void {
+    this.#driver.exec(`
+      CREATE TABLE IF NOT EXISTS provider_credential_material (
+        credential_id BLOB PRIMARY KEY REFERENCES login_credentials(id) ON DELETE CASCADE,
+        schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+        data_json TEXT NOT NULL CHECK(json_valid(data_json))
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS provider_credential_lookup_keys (
+        credential_id BLOB NOT NULL REFERENCES login_credentials(id) ON DELETE CASCADE,
+        provider_instance_id TEXT NOT NULL,
+        key_name TEXT NOT NULL,
+        normalized_value TEXT NOT NULL,
+        PRIMARY KEY(credential_id, key_name),
+        UNIQUE(provider_instance_id, key_name, normalized_value)
+      ) WITHOUT ROWID, STRICT;
+      CREATE TABLE IF NOT EXISTS authentication_attempts (
+        id BLOB PRIMARY KEY CHECK(length(id) = 16),
+        provider_instance_id TEXT NOT NULL,
+        state_json TEXT NOT NULL CHECK(json_valid(state_json)),
+        binding_hash TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('active', 'consumed', 'cancelled', 'expired')),
+        transition_count INTEGER NOT NULL CHECK(transition_count >= 0),
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS authentication_attempts_expiry
+        ON authentication_attempts(status, expires_at);
+    `);
   }
 
   /** Records one successfully applied schema migration. */

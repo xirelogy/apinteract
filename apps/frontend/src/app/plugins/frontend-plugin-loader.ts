@@ -26,6 +26,7 @@ export async function loadFrontendPlugins(
   }
   const entries = parseCatalog(await response.json());
   for (const entry of entries) {
+    if (runtime.plugins.has(entry.manifest.id)) continue;
     try {
       const imported = (await import(
         /* @vite-ignore */ entry.moduleUrl

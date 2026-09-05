@@ -225,6 +225,24 @@ Supported scopes are `request`, `parent-collection`, `workspace`, and
 `selected-environment`. This policy is an upper bound and does not bypass the
 executing user's access to a workspace or resource.
 
+Authentication methods are also selected by startup configuration. The image
+currently includes the local-password provider; omitting this section enables
+one default instance:
+
+```yaml
+authentication:
+  providers:
+    - id: local-password
+      plugin: builtin.local-password
+      label: Username and password
+      description: Sign in with your APInteract username and password.
+      configuration: {}
+```
+
+The instance `id` is the switch used by login and credential administration.
+See [Authentication provider plugins](../../docs/plugins/authentication-providers.md)
+for the ownership and identity-linking model.
+
 The initializer always owns these AIO-specific values:
 
 - backend listener `0.0.0.0:8080`;

@@ -494,4 +494,84 @@ describe("SqliteDatabase migrations", () => {
       await rm(rootPath, { recursive: true, force: true });
     }
   });
+
+  it("preserves legacy local-password users and hashes in generic provider storage", async () => {
+    const rootPath = await mkdtemp(
+      join(tmpdir(), "apinteract-auth-provider-migration-"),
+    );
+    const databasePath = join(rootPath, "apinteract.sqlite3");
+    const backupDirectory = join(rootPath, "backups");
+    try {
+      const current = await SqliteDatabase.open(databasePath, backupDirectory);
+      await current.close();
+      const driver = new BetterSqlite3(databasePath);
+      const userId = Buffer.alloc(16, 21);
+      const credentialId = Buffer.alloc(16, 22);
+      driver.exec(`
+        DROP TABLE authentication_attempts;
+        DROP TABLE provider_credential_lookup_keys;
+        DROP TABLE provider_credential_material;
+        DROP TABLE login_credentials;
+        CREATE TABLE login_credentials (
+          id BLOB PRIMARY KEY CHECK(length(id) = 16),
+          user_id BLOB NOT NULL REFERENCES users(id),
+          provider_id TEXT NOT NULL,
+          provider_subject TEXT NOT NULL,
+          secret_hash TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('active', 'disabled')),
+          created_at INTEGER NOT NULL,
+          UNIQUE(provider_id, provider_subject)
+        ) STRICT;
+        CREATE INDEX login_credentials_user_id ON login_credentials(user_id);
+        DELETE FROM schema_migrations WHERE id = '0019_auth_provider_credentials';
+      `);
+      driver
+        .prepare(
+          "INSERT INTO users VALUES (?, 'active', 'LegacyUser', 'Legacy User', 1, ?, NULL)",
+        )
+        .run(userId, Date.now());
+      driver
+        .prepare(
+          "INSERT INTO login_credentials VALUES (?, ?, 'local-password', 'LegacyUser', 'encoded-hash', 'active', ?)",
+        )
+        .run(credentialId, userId, Date.now());
+      driver.close();
+
+      const migrated = await SqliteDatabase.open(databasePath, backupDirectory);
+      const credential = await migrated.db
+        .selectFrom("login_credentials as credential")
+        .innerJoin(
+          "provider_credential_material as material",
+          "material.credential_id",
+          "credential.id",
+        )
+        .innerJoin(
+          "provider_credential_lookup_keys as lookup",
+          "lookup.credential_id",
+          "credential.id",
+        )
+        .select([
+          "credential.user_id",
+          "credential.provider_instance_id",
+          "credential.provider_subject",
+          "material.schema_version",
+          "material.data_json",
+          "lookup.key_name",
+          "lookup.normalized_value",
+        ])
+        .executeTakeFirstOrThrow();
+      expect(credential).toEqual({
+        user_id: userId,
+        provider_instance_id: "local-password",
+        provider_subject: credentialId.toString("hex"),
+        schema_version: 1,
+        data_json: '{"passwordHash":"encoded-hash"}',
+        key_name: "username",
+        normalized_value: "legacyuser",
+      });
+      await migrated.close();
+    } finally {
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
 });

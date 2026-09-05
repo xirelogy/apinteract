@@ -21,6 +21,74 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/auth/providers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List configured authentication provider instances */
+    get: operations["listAuthenticationProviders"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/auth/attempts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Begin authentication through one configured provider */
+    post: operations["beginAuthenticationAttempt"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/auth/attempts/{attemptId}/continue": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Continue a browser-bound authentication attempt */
+    post: operations["continueAuthenticationAttempt"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/auth/attempts/{attemptId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Cancel a browser-bound authentication attempt */
+    delete: operations["cancelAuthenticationAttempt"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/auth/login": {
     parameters: {
       query?: never;
@@ -230,6 +298,64 @@ export interface components {
       checks: {
         [key: string]: "ready" | "not_ready";
       };
+    };
+    AuthProviderCatalog: {
+      providers: components["schemas"]["AuthProviderCatalogEntry"][];
+    };
+    AuthProviderCatalogEntry: {
+      manifest: components["schemas"]["AuthProviderPluginManifest"];
+      descriptor: components["schemas"]["AuthProviderDescriptor"];
+      moduleUrl: string;
+    };
+    AuthProviderPluginManifest: {
+      /** @constant */
+      schemaVersion: 2;
+      /** @constant */
+      apiVersion: 1;
+      id: string;
+      name: string;
+      version: string;
+      weight?: number;
+      /** @constant */
+      target: "auth-provider";
+      entrypoints: {
+        backend: string;
+        frontend: string;
+      };
+      providers: {
+        backend: ["authentication.provider"];
+        frontend: ["authentication.login"];
+      };
+    };
+    AuthProviderDescriptor: {
+      id: string;
+      pluginId: string;
+      label: string;
+      description?: string;
+      /** @enum {string} */
+      availability: "available" | "unavailable";
+      publicConfiguration: {
+        [key: string]: unknown;
+      };
+    };
+    AuthContinueRequest: {
+      fields: {
+        [key: string]: string;
+      };
+    };
+    AuthAttemptResult:
+      | components["schemas"]["AuthInteractionRequired"]
+      | components["schemas"]["AuthAuthenticated"];
+    AuthInteractionRequired: {
+      /** @constant */
+      status: "interaction_required";
+      attemptId: components["schemas"]["UuidV7"];
+      publicData: unknown;
+    };
+    AuthAuthenticated: {
+      /** @constant */
+      status: "authenticated";
+      credential: components["schemas"]["AccessCredential"];
     };
     LoginRequest: {
       providerId: string;
@@ -1721,6 +1847,24 @@ export interface components {
         "application/problem+json": components["schemas"]["Problem"];
       };
     };
+    /** @description The authentication attempt rate limit was exceeded. */
+    TooManyRequests: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/problem+json": components["schemas"]["Problem"];
+      };
+    };
+    /** @description The selected authentication provider is temporarily unavailable. */
+    ServiceUnavailable: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/problem+json": components["schemas"]["Problem"];
+      };
+    };
   };
   parameters: {
     ExecutionId: components["schemas"]["ExecutionId"];
@@ -1760,6 +1904,109 @@ export interface operations {
       };
     };
   };
+  listAuthenticationProviders: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Ordered safe descriptors and immutable built-in frontend modules. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuthProviderCatalog"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  beginAuthenticationAttempt: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LoginRequest"];
+      };
+    };
+    responses: {
+      /** @description Authentication completed or requires another interaction. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuthAttemptResult"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      429: components["responses"]["TooManyRequests"];
+      503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  continueAuthenticationAttempt: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        attemptId: components["schemas"]["UuidV7"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AuthContinueRequest"];
+      };
+    };
+    responses: {
+      /** @description Authentication completed or requires another interaction. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuthAttemptResult"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      429: components["responses"]["TooManyRequests"];
+      503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  cancelAuthenticationAttempt: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        attemptId: components["schemas"]["UuidV7"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The attempt is no longer active. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      403: components["responses"]["Forbidden"];
+    };
+  };
   login: {
     parameters: {
       query?: never;
@@ -1786,6 +2033,9 @@ export interface operations {
       };
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      429: components["responses"]["TooManyRequests"];
+      503: components["responses"]["ServiceUnavailable"];
     };
   };
   refreshSession: {
@@ -1808,6 +2058,7 @@ export interface operations {
         };
       };
       401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
     };
   };
   logout: {
@@ -1938,6 +2189,7 @@ export interface operations {
           "application/json": components["schemas"]["FrontendPluginCatalog"];
         };
       };
+      400: components["responses"]["BadRequest"];
     };
   };
   getFrontendPluginAsset: {

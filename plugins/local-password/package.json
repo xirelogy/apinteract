@@ -1,0 +1,15 @@
+{
+  "name": "@apinteract/plugin-local-password",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build --config vite.backend.config.ts && vite build --config vite.frontend.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@apinteract/plugin-api": "workspace:*",
+    "typescript": "5.9.3",
+    "vite": "7.3.6"
+  }
+}

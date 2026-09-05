@@ -41,6 +41,7 @@ COPY plugins/html-preview/package.json plugins/html-preview/package.json
 COPY plugins/raster-image-preview/package.json plugins/raster-image-preview/package.json
 COPY plugins/openapi-import/package.json plugins/openapi-import/package.json
 COPY plugins/har-import/package.json plugins/har-import/package.json
+COPY plugins/local-password/package.json plugins/local-password/package.json
 
 RUN --mount=type=cache,id=apinteract-pnpm-store,target=/opt/pnpm/store \
     pnpm install --frozen-lockfile

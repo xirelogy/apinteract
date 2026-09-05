@@ -4,6 +4,13 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Application } from "../bootstrap/application.js";
 import type { BackendConfiguration } from "../config.js";
 import { AuthenticationFailedError } from "../identity/identity-service.js";
+import {
+  AuthenticationInputError,
+  AuthenticationRateLimitError,
+  type AuthenticationTransition,
+} from "../authentication/authentication-service.js";
+import { AuthProviderNotConfiguredError } from "../authentication/auth-provider-registry.js";
+import { idToBytes } from "../foundation/id.js";
 import { RequestAttachmentValidationError } from "../requests/request-attachment-service.js";
 import {
   type IssuedSession,
@@ -17,6 +24,7 @@ import { BACKEND_APPLICATION_VERSION } from "../version.js";
 import { sendProblem } from "./problem.js";
 
 const REFRESH_COOKIE = "apinteract_refresh";
+const AUTH_ATTEMPT_COOKIE = "apinteract_auth_attempt";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -35,6 +43,137 @@ export async function registerHttpRoutes(
     "application/octet-stream",
     { parseAs: "buffer", bodyLimit: 786_432 },
     (_request, body, done) => done(null, body),
+  );
+
+  /** Lists configured built-in login methods and immutable frontend modules. */
+  server.get("/auth/providers", async (_request, reply) =>
+    reply
+      .header("Cache-Control", "no-store")
+      .header("X-Content-Type-Options", "nosniff")
+      .send({
+        providers: application.plugins.authProviderCatalog(
+          await application.authProviders.descriptors(),
+        ),
+      }),
+  );
+
+  /** Serves one immutable asset from the built-in authentication catalog. */
+  server.get<{
+    Params: { pluginId: string; hash: string; "*": string };
+  }>("/auth/plugins/:pluginId/:hash/*", async (request, reply) => {
+    const asset = application.plugins.authProviderAsset(
+      request.params.pluginId,
+      request.params.hash,
+      request.params["*"],
+    );
+    if (asset === undefined) return reply.code(404).send();
+    return reply
+      .header("Cache-Control", "public, max-age=31536000, immutable")
+      .header("X-Content-Type-Options", "nosniff")
+      .type(asset.contentType)
+      .send(asset.bytes);
+  });
+
+  /** Starts a provider-independent authentication attempt. */
+  server.post<{
+    Body: { providerId?: unknown; fields?: unknown };
+  }>("/auth/attempts", async (request, reply) => {
+    if (!validOrigin(request, configuration.server.publicOrigin)) {
+      return originNotAllowed(reply);
+    }
+    const input = authenticationInput(request.body);
+    if (input === null) return invalidAuthenticationInput(reply);
+    try {
+      return sendAuthenticationTransition(
+        reply,
+        await application.authentication.begin(
+          input.providerId,
+          input.fields,
+          request.ip,
+        ),
+        application,
+        configuration,
+      );
+    } catch (cause) {
+      if (cause instanceof AuthenticationRateLimitError) {
+        return authenticationRateLimited(reply);
+      }
+      if (cause instanceof AuthenticationFailedError) {
+        return authenticationFailed(reply);
+      }
+      if (
+        cause instanceof AuthenticationInputError ||
+        cause instanceof AuthProviderNotConfiguredError
+      ) {
+        return invalidAuthenticationInput(reply);
+      }
+      throw cause;
+    }
+  });
+
+  /** Continues the active browser-bound authentication attempt. */
+  server.post<{
+    Params: { attemptId: string };
+    Body: { fields?: unknown };
+  }>("/auth/attempts/:attemptId/continue", async (request, reply) => {
+    if (!validOrigin(request, configuration.server.publicOrigin)) {
+      return originNotAllowed(reply);
+    }
+    const fields = stringFields(request.body?.fields);
+    const binding = attemptBinding(request, request.params.attemptId);
+    if (
+      fields === null ||
+      binding === null ||
+      !validEntityId(request.params.attemptId)
+    ) {
+      return invalidAuthenticationInput(reply);
+    }
+    try {
+      return sendAuthenticationTransition(
+        reply,
+        await application.authentication.continue(
+          request.params.attemptId,
+          binding,
+          fields,
+          request.ip,
+        ),
+        application,
+        configuration,
+      );
+    } catch (cause) {
+      if (cause instanceof AuthenticationRateLimitError) {
+        return authenticationRateLimited(reply);
+      }
+      if (cause instanceof AuthenticationFailedError) {
+        return authenticationFailed(reply);
+      }
+      if (
+        cause instanceof AuthenticationInputError ||
+        cause instanceof AuthProviderNotConfiguredError
+      ) {
+        return invalidAuthenticationInput(reply);
+      }
+      throw cause;
+    }
+  });
+
+  /** Cancels the active browser-bound authentication attempt idempotently. */
+  server.delete<{ Params: { attemptId: string } }>(
+    "/auth/attempts/:attemptId",
+    async (request, reply) => {
+      if (!validOrigin(request, configuration.server.publicOrigin)) {
+        return originNotAllowed(reply);
+      }
+      const binding = attemptBinding(request, request.params.attemptId);
+      if (binding !== null && validEntityId(request.params.attemptId)) {
+        await application.authentication.cancel(
+          request.params.attemptId,
+          binding,
+        );
+      }
+      clearAttemptCookie(reply, configuration);
+      return reply.code(204).send();
+    },
   );
 
   /** Publishes validated frontend plugin metadata without executable details. */
@@ -107,29 +246,24 @@ export async function registerHttpRoutes(
         detail: "The request origin is not allowed.",
       });
     }
-    const username = request.body?.fields?.username;
-    const password = request.body?.fields?.password;
-    if (
-      request.body?.providerId !== "local-password" ||
-      typeof username !== "string" ||
-      typeof password !== "string"
-    ) {
-      return sendProblem(reply, {
-        status: 400,
-        code: "invalid_authentication_input",
-        title: "Invalid authentication input",
-        detail: "The selected authentication provider input is invalid.",
-      });
-    }
+    const input = authenticationInput(request.body);
+    if (input === null) return invalidAuthenticationInput(reply);
     try {
-      const user = await application.identity.authenticateLocalPassword(
-        username,
-        password,
+      const transition = await application.authentication.begin(
+        input.providerId,
+        input.fields,
+        request.ip,
       );
-      const issued = await application.sessions.create(user);
-      setRefreshCookie(reply, issued.refreshToken, configuration);
-      return accessCredential(issued);
+      if (transition.status !== "authenticated") {
+        return transition.status === "unavailable"
+          ? authenticationUnavailable(reply)
+          : authenticationFailed(reply);
+      }
+      return issueSession(reply, transition.user, application, configuration);
     } catch (cause) {
+      if (cause instanceof AuthenticationRateLimitError) {
+        return authenticationRateLimited(reply);
+      }
       if (cause instanceof AuthenticationFailedError) {
         return sendProblem(reply, {
           status: 401,
@@ -138,13 +272,19 @@ export async function registerHttpRoutes(
           detail: cause.message,
         });
       }
+      if (
+        cause instanceof AuthenticationInputError ||
+        cause instanceof AuthProviderNotConfiguredError
+      ) {
+        return invalidAuthenticationInput(reply);
+      }
       throw cause;
     }
   });
 
   /** Rotates the opaque refresh cookie and returns a new access credential. */
   server.post("/auth/refresh", async (request, reply) => {
-    if (!validOrigin(request, configuration.server.publicOrigin, true)) {
+    if (!validOrigin(request, configuration.server.publicOrigin)) {
       return sendProblem(reply, {
         status: 403,
         code: "origin_not_allowed",
@@ -308,6 +448,113 @@ export async function registerHttpRoutes(
   );
 }
 
+/** Sends one attempt result while keeping session credentials out of plugins. */
+async function sendAuthenticationTransition(
+  reply: FastifyReply,
+  transition: AuthenticationTransition,
+  application: Application,
+  configuration: BackendConfiguration,
+) {
+  if (transition.status === "rejected") {
+    clearAttemptCookie(reply, configuration);
+    return authenticationFailed(reply);
+  }
+  if (transition.status === "unavailable") {
+    clearAttemptCookie(reply, configuration);
+    return authenticationUnavailable(reply);
+  }
+  if (transition.status === "interaction_required") {
+    setAttemptCookie(
+      reply,
+      `${transition.attemptId}.${transition.binding}`,
+      configuration,
+    );
+    return reply.send({
+      status: transition.status,
+      attemptId: transition.attemptId,
+      publicData: transition.publicData,
+    });
+  }
+  clearAttemptCookie(reply, configuration);
+  const credential = await createIssuedCredential(
+    transition.user,
+    application,
+    configuration,
+    reply,
+  );
+  return reply.send({ status: "authenticated", credential });
+}
+
+/** Issues one core session after provider-independent identity resolution. */
+async function issueSession(
+  reply: FastifyReply,
+  user: Parameters<Application["sessions"]["create"]>[0],
+  application: Application,
+  configuration: BackendConfiguration,
+) {
+  return createIssuedCredential(user, application, configuration, reply);
+}
+
+/** Creates and serializes a session while setting its refresh cookie. */
+async function createIssuedCredential(
+  user: Parameters<Application["sessions"]["create"]>[0],
+  application: Application,
+  configuration: BackendConfiguration,
+  reply: FastifyReply,
+) {
+  const issued = await application.sessions.create(user);
+  setRefreshCookie(reply, issued.refreshToken, configuration);
+  return accessCredential(issued);
+}
+
+/** Parses one generic provider selection plus bounded string field object. */
+function authenticationInput(value: unknown): {
+  readonly providerId: string;
+  readonly fields: Readonly<Record<string, string>>;
+} | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const body = value as Record<string, unknown>;
+  const fields = stringFields(body.fields);
+  return typeof body.providerId === "string" && fields !== null
+    ? { providerId: body.providerId, fields }
+    : null;
+}
+
+/** Narrows provider evidence to an own-property string map. */
+function stringFields(value: unknown): Readonly<Record<string, string>> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const entries = Object.entries(value);
+  return entries.every(([, item]) => typeof item === "string")
+    ? Object.fromEntries(entries)
+    : null;
+}
+
+/** Extracts an attempt's browser-only secret from its scoped cookie. */
+function attemptBinding(
+  request: FastifyRequest,
+  attemptId: string,
+): string | null {
+  const value = request.cookies[AUTH_ATTEMPT_COOKIE];
+  const separator = value?.indexOf(".") ?? -1;
+  return separator > 0 && value?.slice(0, separator) === attemptId
+    ? value.slice(separator + 1)
+    : null;
+}
+
+/** Checks canonical UUIDv7 syntax without retaining converted bytes. */
+function validEntityId(value: string): boolean {
+  try {
+    idToBytes(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Decodes one percent-encoded ASCII upload header without throwing. */
 function decodeUploadHeader(
   value: string | undefined,
@@ -398,6 +645,84 @@ function clearRefreshCookie(
   });
 }
 
+/** Sets the short-lived HttpOnly browser binding for one active auth attempt. */
+function setAttemptCookie(
+  reply: FastifyReply,
+  value: string,
+  configuration: BackendConfiguration,
+): void {
+  reply.setCookie(AUTH_ATTEMPT_COOKIE, value, {
+    path: "/auth/attempts",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: configuration.sessions.secureCookie,
+    maxAge: 5 * 60,
+  });
+}
+
+/** Expires the browser binding after completion or cancellation. */
+function clearAttemptCookie(
+  reply: FastifyReply,
+  configuration: BackendConfiguration,
+): void {
+  reply.clearCookie(AUTH_ATTEMPT_COOKIE, {
+    path: "/auth/attempts",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: configuration.sessions.secureCookie,
+  });
+}
+
+/** Sends the generic public credential rejection without lookup disclosure. */
+function authenticationFailed(reply: FastifyReply) {
+  return sendProblem(reply, {
+    status: 401,
+    code: "authentication_failed",
+    title: "Authentication failed",
+    detail: "The supplied credentials could not be accepted",
+  });
+}
+
+/** Reports a configured provider that cannot currently accept attempts. */
+function authenticationUnavailable(reply: FastifyReply) {
+  return sendProblem(reply, {
+    status: 503,
+    code: "authentication_provider_unavailable",
+    title: "Authentication method unavailable",
+    detail: "The selected authentication method is temporarily unavailable.",
+  });
+}
+
+/** Reports core-owned throttling without disclosing credential validity. */
+function authenticationRateLimited(reply: FastifyReply) {
+  return sendProblem(reply, {
+    status: 429,
+    code: "authentication_rate_limited",
+    title: "Too many authentication attempts",
+    detail: "Wait before trying to authenticate again.",
+  });
+}
+
+/** Sends the stable provider-independent input validation problem. */
+function invalidAuthenticationInput(reply: FastifyReply) {
+  return sendProblem(reply, {
+    status: 400,
+    code: "invalid_authentication_input",
+    title: "Invalid authentication input",
+    detail: "The selected authentication provider input is invalid.",
+  });
+}
+
+/** Sends the stable same-origin enforcement problem. */
+function originNotAllowed(reply: FastifyReply) {
+  return sendProblem(reply, {
+    status: 403,
+    code: "origin_not_allowed",
+    title: "Origin not allowed",
+    detail: "The request origin is not allowed.",
+  });
+}
+
 /** Sends the standard authentication-required problem response. */
 function unauthorized(reply: FastifyReply) {
   return sendProblem(reply, {
@@ -408,12 +733,7 @@ function unauthorized(reply: FastifyReply) {
   });
 }
 
-/** Validates same-origin state-changing requests with an optional absent origin. */
-function validOrigin(
-  request: FastifyRequest,
-  publicOrigin: string,
-  requireHeader = false,
-): boolean {
-  const origin = request.headers.origin;
-  return origin === publicOrigin || (!requireHeader && origin === undefined);
+/** Requires the exact configured browser origin on state-changing cookie routes. */
+function validOrigin(request: FastifyRequest, publicOrigin: string): boolean {
+  return request.headers.origin === publicOrigin;
 }

@@ -1,37 +1,31 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { ArrowRight, LockKeyhole, User } from "@lucide/vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
 
-import { useApplicationController } from "@/app/dependencies";
-import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
-import FormField from "@/view/presentation/controls/FormField.vue";
-import TextInput from "@/view/presentation/controls/TextInput.vue";
+import { authProviderFrontendHost } from "@/app/plugins/auth-provider-host";
+import AuthProviderLoginHost from "@/view/presentation/controls/AuthProviderLoginHost.vue";
+import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import LocaleSelector from "@/view/presentation/features/LocaleSelector.vue";
 import logoUrl from "@brand/logo.png";
 
-const controller = useApplicationController();
-const router = useRouter();
 const { t } = useI18n();
-const username = ref("");
-const password = ref("");
-const busy = ref(false);
-const error = ref<string | null>(null);
-
-/** Authenticates submitted credentials and enters the workspace view. */
-async function submit(): Promise<void> {
-  busy.value = true;
-  error.value = null;
-  try {
-    await controller.session.login(username.value, password.value);
-    await router.push("/main");
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : t("auth.failed");
-  } finally {
-    busy.value = false;
-  }
-}
+const providers = authProviderFrontendHost.entries();
+const selectedId = ref(
+  providers.find((provider) => provider.descriptor.availability === "available")
+    ?.descriptor.id ??
+    providers[0]?.descriptor.id ??
+    "",
+);
+const selected = computed(() =>
+  providers.find((provider) => provider.descriptor.id === selectedId.value),
+);
+const providerOptions = computed(() =>
+  providers.map((provider) => ({
+    value: provider.descriptor.id,
+    label: provider.descriptor.label,
+    disabled: provider.descriptor.availability === "unavailable",
+  })),
+);
 </script>
 
 <template>
@@ -42,55 +36,32 @@ async function submit(): Promise<void> {
       </div>
       <img class="login-logo" :src="logoUrl" alt="APInteract" />
       <h1 id="login-title">{{ t("auth.signIn") }}</h1>
-      <form class="login-form" @submit.prevent="submit">
-        <FormField
-          v-slot="{ controlId, describedBy, invalid }"
-          :label="t('auth.username')"
-        >
-          <span class="input-with-icon">
-            <User :size="17" aria-hidden="true" />
-            <TextInput
-              :id="controlId"
-              v-model="username"
-              :aria-describedby="describedBy"
-              :invalid="invalid"
-              autocomplete="username"
-              required
-              :disabled="busy"
-            />
-          </span>
-        </FormField>
-        <FormField
-          v-slot="{ controlId, describedBy, invalid }"
-          :label="t('auth.password')"
-        >
-          <span class="input-with-icon">
-            <LockKeyhole :size="17" aria-hidden="true" />
-            <TextInput
-              :id="controlId"
-              v-model="password"
-              type="password"
-              :aria-describedby="describedBy"
-              :invalid="invalid"
-              autocomplete="current-password"
-              required
-              :disabled="busy"
-            />
-          </span>
-        </FormField>
-        <p v-if="error" class="form-error" role="alert">{{ error }}</p>
-        <ButtonControl
-          class="login-submit"
-          variant="primary"
-          type="submit"
-          :busy="busy"
-        >
-          {{ busy ? t("auth.signingIn") : t("common.actions.continue") }}
-          <template #trailing>
-            <ArrowRight :size="17" aria-hidden="true" />
-          </template>
-        </ButtonControl>
-      </form>
+      <p v-if="providers.length === 0" class="form-error" role="alert">
+        No authentication method is available.
+      </p>
+      <SelectMenu
+        v-else-if="providers.length > 1"
+        v-model="selectedId"
+        class="auth-provider-selector"
+        label="Sign-in method"
+        :options="providerOptions"
+      />
+      <p
+        v-if="selected?.descriptor.description"
+        class="auth-provider-description"
+      >
+        {{ selected.descriptor.description }}
+      </p>
+      <AuthProviderLoginHost
+        v-if="
+          selected !== undefined &&
+            selected.descriptor.availability === 'available'
+        "
+        :instance-id="selected.descriptor.id"
+      />
+      <p v-else-if="selected !== undefined" class="form-error" role="status">
+        This sign-in method is temporarily unavailable.
+      </p>
     </section>
   </main>
 </template>

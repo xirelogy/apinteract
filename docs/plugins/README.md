@@ -1,8 +1,11 @@
 # APInteract Plugins
 
 APInteract plugins are independently compiled packages discovered at startup.
-Each package targets exactly one runtime—frontend or backend—and registers one
-or more implementations through typed providers from `@apinteract/plugin-api`.
+Ordinary packages target exactly one runtime—frontend or backend—and register
+one or more implementations through typed providers from
+`@apinteract/plugin-api`. Built-in authentication providers use a dedicated
+bundle format because one versioned package supplies matched backend and
+frontend contributions.
 
 Frontend plugins and backend plugins execute in different environments and
 cannot contribute across that boundary. They use the same package format.
@@ -355,10 +358,11 @@ Registration occurs during startup and must not start background work, mutate
 persistent state, or open network connections. Package discovery and
 registration complete before services or views consume contributions.
 
-Authentication providers, blob stores, delivery providers, persistence
-adapters, script runtimes, secret stores, logging sinks, and proxy selectors
-remain future extension points. They can reuse the same single-target package
-format while defining their own typed provider contracts.
+Authentication providers use the built-in-only dual-entrypoint package model
+described in [Authentication Provider Plugins](authentication-providers.md).
+Blob stores, delivery providers, persistence adapters, script runtimes, secret
+stores, logging sinks, and proxy selectors remain future extension points with
+their own typed contracts.
 
 ## Choosing Package Versions
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 import {
+  AUTH_PROVIDER_PLUGIN_MANIFEST_SCHEMA_VERSION,
   PLUGIN_API_VERSION,
   PLUGIN_MANIFEST_SCHEMA_VERSION,
 } from "@apinteract/plugin-api";
@@ -101,6 +102,34 @@ describe("plugin package discovery", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("accepts complete built-in auth bundles and rejects them from user roots", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apinteract-auth-plugins-"));
+    try {
+      const builtinRoot = join(root, "builtin");
+      const userRoot = join(root, "user");
+      await writeAuthPlugin(builtinRoot, "builtin.password");
+      await writeAuthPlugin(userRoot, "user.password");
+      const invalid: string[] = [];
+      const discovered = await discoverPluginPackages(
+        [
+          { path: builtinRoot, source: "built-in" },
+          { path: userRoot, source: "user" },
+        ],
+        (path) => invalid.push(path),
+      );
+      expect(discovered.map(({ manifest }) => manifest.id)).toEqual([
+        "builtin.password",
+      ]);
+      expect(invalid).toEqual([join(userRoot, "user.password")]);
+      expect(discovered[0]?.manifest).toMatchObject({
+        schemaVersion: AUTH_PROVIDER_PLUGIN_MANIFEST_SCHEMA_VERSION,
+        target: "auth-provider",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 /** Writes one minimal independently discoverable package fixture. */
@@ -133,6 +162,44 @@ async function writePlugin(
   );
   await writeFile(
     join(packagePath, "dist", "index.mjs"),
+    "export function register() {}\n",
+  );
+  return packagePath;
+}
+
+/** Writes one complete dual-entrypoint authentication bundle fixture. */
+async function writeAuthPlugin(root: string, id: string): Promise<string> {
+  const packagePath = join(root, id);
+  await mkdir(join(packagePath, "dist"), { recursive: true });
+  await writeFile(
+    join(packagePath, "package.json"),
+    JSON.stringify({ name: id, version: "1.0.0", type: "module" }),
+  );
+  await writeFile(
+    join(packagePath, "apinteract-plugin.json"),
+    JSON.stringify({
+      schemaVersion: AUTH_PROVIDER_PLUGIN_MANIFEST_SCHEMA_VERSION,
+      apiVersion: PLUGIN_API_VERSION,
+      id,
+      name: id,
+      version: "1.0.0",
+      target: "auth-provider",
+      entrypoints: {
+        backend: "dist/backend.mjs",
+        frontend: "dist/frontend.mjs",
+      },
+      providers: {
+        backend: ["authentication.provider"],
+        frontend: ["authentication.login"],
+      },
+    }),
+  );
+  await writeFile(
+    join(packagePath, "dist", "backend.mjs"),
+    "export function register() {}\n",
+  );
+  await writeFile(
+    join(packagePath, "dist", "frontend.mjs"),
     "export function register() {}\n",
   );
   return packagePath;

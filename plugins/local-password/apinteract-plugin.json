@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 2,
+  "apiVersion": 1,
+  "id": "builtin.local-password",
+  "name": "Local password",
+  "version": "1.0.0",
+  "target": "auth-provider",
+  "entrypoints": {
+    "backend": "dist/backend.mjs",
+    "frontend": "dist/frontend.mjs"
+  },
+  "providers": {
+    "backend": ["authentication.provider"],
+    "frontend": ["authentication.login"]
+  }
+}
