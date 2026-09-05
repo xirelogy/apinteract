@@ -55,7 +55,7 @@ const providerOptions = computed(() =>
       <AuthProviderLoginHost
         v-if="
           selected !== undefined &&
-            selected.descriptor.availability === 'available'
+          selected.descriptor.availability === 'available'
         "
         :instance-id="selected.descriptor.id"
       />
