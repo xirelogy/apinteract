@@ -7,43 +7,75 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: publish-plugin-api
   cancel-in-progress: false
 
 jobs:
+  verify:
+    name: Verify publishable artifact
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify-plugin-packages.yml
+    with:
+      package: plugin-api
+
   publish:
-    name: Verify and publish
+    name: Publish verified artifact
+    needs: verify
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 10
     environment: npm
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
-      - name: Check out tagged source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
       - name: Install Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
 
-      - name: Install the declared pnpm version
-        run: |
-          corepack enable
-          corepack install --global pnpm@8.15.0
+      - name: Download the verified package artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ needs.verify.outputs.artifact_name }}
+          path: ${{ runner.temp }}/apinteract-plugin-release
 
-      - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Validate release tag
+      - name: Validate the artifact, release tag, and npm tag
         id: release
+        env:
+          EXPECTED_TARBALL_SHA256: ${{ needs.verify.outputs.tarball_sha256 }}
         shell: bash
         run: |
           set -euo pipefail
-          package_name="@apinteract/plugin-api"
-          version="$(node -p "require('./packages/plugin-api/package.json').version")"
+          artifact_directory="${RUNNER_TEMP}/apinteract-plugin-release"
+          (
+            cd "${artifact_directory}"
+            sha256sum --check SHA256SUMS
+          )
+          shopt -s nullglob
+          tarballs=("${artifact_directory}"/*.tgz)
+          if (( ${#tarballs[@]} != 1 )); then
+            printf 'Expected exactly one plugin API tarball.\n' >&2
+            exit 1
+          fi
+          tarball="${tarballs[0]}"
+          actual_sha256="$(sha256sum "${tarball}" | awk '{print $1}')"
+          if [[ -z "${EXPECTED_TARBALL_SHA256}" || "${actual_sha256}" != "${EXPECTED_TARBALL_SHA256}" ]]; then
+            printf 'Verified plugin API tarball checksum does not match the workflow handoff.\n' >&2
+            exit 1
+          fi
+
+          manifest_file="${artifact_directory}/package.json"
+          tar -xOf "${tarball}" package/package.json >"${manifest_file}"
+          package_name="$(node -p "require(process.argv[1]).name" "${manifest_file}")"
+          version="$(node -p "require(process.argv[1]).version" "${manifest_file}")"
+          if [[ "${package_name}" != "@apinteract/plugin-api" ]]; then
+            printf 'Unexpected package name in verified tarball: %s\n' "${package_name}" >&2
+            exit 1
+          fi
           expected_tag="plugin-api-v${version}"
           if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
             printf 'Tag must exactly match the package version: %s\n' "${expected_tag}" >&2
@@ -56,26 +88,8 @@ jobs:
           else
             npm_tag="latest"
           fi
-          printf 'name=%s\nversion=%s\nnpm-tag=%s\n' \
-            "${package_name}" "${version}" "${npm_tag}" >>"${GITHUB_OUTPUT}"
-
-      - name: Run repository and external-consumer checks
-        run: pnpm check
-
-      - name: Pack the verified package
-        id: package
-        run: |
-          set -euo pipefail
-          pack_directory="$(mktemp -d "${RUNNER_TEMP}/apinteract-plugin-api.XXXXXXXX")"
-          pnpm --dir packages/plugin-api pack --pack-destination "${pack_directory}"
-          shopt -s nullglob
-          tarballs=("${pack_directory}"/*.tgz)
-          if (( ${#tarballs[@]} != 1 )); then
-            printf 'Expected exactly one plugin API tarball.\n' >&2
-            exit 1
-          fi
-          tarball="${tarballs[0]}"
-          printf 'tarball=%s\n' "${tarball}" >>"${GITHUB_OUTPUT}"
+          printf 'name=%s\nversion=%s\nnpm_tag=%s\ntarball=%s\n' \
+            "${package_name}" "${version}" "${npm_tag}" "${tarball}" >>"${GITHUB_OUTPUT}"
 
       - name: Refuse to overwrite an immutable npm version
         env:
@@ -96,5 +110,6 @@ jobs:
 
       - name: Publish to npm with provenance
         env:
-          NPM_TAG: ${{ steps.release.outputs.npm-tag }}
-        run: npm publish "${{ steps.package.outputs.tarball }}" --access public --tag "${NPM_TAG}" --provenance --registry https://registry.npmjs.org
+          NPM_TAG: ${{ steps.release.outputs.npm_tag }}
+          TARBALL: ${{ steps.release.outputs.tarball }}
+        run: npm publish "${TARBALL}" --ignore-scripts --access public --tag "${NPM_TAG}" --provenance --registry https://registry.npmjs.org

@@ -150,6 +150,17 @@ from the product image. Update their package manifests and release assertions,
 run `deploy/scripts/development check`, then commit and push the verified source
 before creating either release tag.
 
+Pull requests run the unprivileged `Verify plugin packages` workflow for both
+packages. It runs the complete repository gate, packs the public packages,
+performs an offline npm publication dry run without provenance or credentials,
+records SHA-256 checksums, and retains the tarballs as a seven-day workflow
+artifact. The dry run deliberately avoids npm's version lookup so an unchanged,
+already-published companion package can still be revalidated; the tagged
+publish job separately fails if its selected version already exists.
+After the workflow exists on the default branch, it can also be run manually
+against a selected Git ref for both packages or either package individually.
+Treat a successful run for the release commit as a prerequisite for tagging.
+
 The tag must exactly match the selected package and manifest version:
 
 - `plugin-api-vVERSION` publishes `@apinteract/plugin-api@VERSION`.
@@ -157,9 +168,14 @@ The tag must exactly match the selected package and manifest version:
 
 Push the API tag first whenever the SDK peer range requires that API release.
 Wait until the API version is available from npm before pushing the SDK tag.
-Each workflow refuses to overwrite an existing npm version and publishes its
-packed tarball with provenance. Stable versions use the `latest` npm dist-tag,
-OIDC test versions use `oidc`, and other prereleases use `next`.
+Each tag workflow invokes the same unprivileged verifier, then passes the
+resulting immutable GitHub artifact and its SHA-256 through to a separate
+publish job. Only that final job receives the `npm` environment and GitHub OIDC
+permission. It checks the downloaded artifact, package identity, exact release
+tag, and npm version availability without checking out or executing repository
+code or package lifecycle scripts, then publishes that exact tarball with
+provenance. Stable versions use the `latest` npm dist-tag, OIDC test versions
+use `oidc`, and other prereleases use `next`.
 
 npm trusted publishing must authorize `publish-plugin-api.yml` and
 `publish-plugin-sdk.yml` separately for the `xirelogy/apinteract` repository

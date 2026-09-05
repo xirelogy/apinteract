@@ -6,4 +6,5 @@ node_modules/
 playwright-report/
 pmo/artworks/
 test-results/
+var/
 pnpm-lock.yaml

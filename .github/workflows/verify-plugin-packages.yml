@@ -1,0 +1,127 @@
+name: Verify plugin packages
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package artifact to verify
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - plugin-api
+          - plugin-sdk
+  workflow_call:
+    inputs:
+      package:
+        description: Package artifact to verify
+        required: true
+        type: string
+    outputs:
+      artifact_name:
+        description: Name of the immutable verified-package artifact
+        value: ${{ jobs.verify.outputs.artifact_name }}
+      tarball_sha256:
+        description: SHA-256 of the sole tarball for a package-specific call
+        value: ${{ jobs.verify.outputs.tarball_sha256 }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-plugin-packages-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Check, pack, and inspect
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
+      tarball_sha256: ${{ steps.package.outputs.tarball_sha256 }}
+
+    steps:
+      - name: Check out selected source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Install the declared pnpm version
+        run: |
+          corepack enable
+          corepack install --global pnpm@8.15.0
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run repository and external-consumer checks
+        run: pnpm check
+
+      - name: Pack and dry-run the selected package artifacts
+        id: package
+        env:
+          SELECTED_PACKAGE: ${{ inputs.package || 'all' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${SELECTED_PACKAGE}" in
+            all)
+              package_directories=(packages/plugin-api packages/plugin-sdk)
+              expected_tarballs=2
+              ;;
+            plugin-api)
+              package_directories=(packages/plugin-api)
+              expected_tarballs=1
+              ;;
+            plugin-sdk)
+              package_directories=(packages/plugin-sdk)
+              expected_tarballs=1
+              ;;
+            *)
+              printf 'Unsupported package selection: %s\n' "${SELECTED_PACKAGE}" >&2
+              exit 1
+              ;;
+          esac
+
+          pack_directory="$(mktemp -d "${RUNNER_TEMP}/apinteract-plugin-packages.XXXXXXXX")"
+          for package_directory in "${package_directories[@]}"; do
+            pnpm --dir "${package_directory}" pack --pack-destination "${pack_directory}"
+          done
+
+          shopt -s nullglob
+          tarballs=("${pack_directory}"/*.tgz)
+          if (( ${#tarballs[@]} != expected_tarballs )); then
+            printf 'Expected %s package tarball(s), found %s.\n' \
+              "${expected_tarballs}" "${#tarballs[@]}" >&2
+            exit 1
+          fi
+          for tarball in "${tarballs[@]}"; do
+            npm publish "${tarball}" --dry-run --offline --ignore-scripts \
+              --access public --provenance=false --registry https://registry.npmjs.org
+          done
+
+          (
+            cd "${pack_directory}"
+            sha256sum -- *.tgz > SHA256SUMS
+          )
+          artifact_name="plugin-packages-${SELECTED_PACKAGE}-${GITHUB_SHA}"
+          printf 'artifact_name=%s\npack_directory=%s\n' \
+            "${artifact_name}" "${pack_directory}" >>"${GITHUB_OUTPUT}"
+          if (( expected_tarballs == 1 )); then
+            tarball_sha256="$(sha256sum "${tarballs[0]}" | awk '{print $1}')"
+            printf 'tarball_sha256=%s\n' "${tarball_sha256}" >>"${GITHUB_OUTPUT}"
+          fi
+
+      - name: Upload verified package artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: ${{ steps.package.outputs.pack_directory }}/
+          if-no-files-found: error
+          retention-days: 7

@@ -260,7 +260,7 @@ test("publishes the dedicated Docker Hub overview before mutating image tags", (
 test("shows automatically maintained release, Docker, and license badges", () => {
   assert.match(
     publicReadme,
-    /img\.shields\.io\/github\/v\/tag\/xirelogy\/apinteract\?include_prereleases&sort=semver&label=docker%20image/,
+    /img\.shields\.io\/github\/v\/tag\/xirelogy\/apinteract\?filter=v%2A&include_prereleases&sort=semver&label=docker%20image/,
   );
   assert.match(
     publicReadme,
