@@ -11,6 +11,10 @@ import type { AuthProviderPluginPackageManifest } from "@apinteract/plugin-api";
 
 import { AuthenticationService } from "../src/authentication/authentication-service.js";
 import { AuthProviderRegistry } from "../src/authentication/auth-provider-registry.js";
+import {
+  FirstUserBootstrapService,
+  WebBootstrapUnavailableError,
+} from "../src/authentication/first-user-bootstrap-service.js";
 import { createApplication } from "../src/bootstrap/application.js";
 import type { BackendConfiguration } from "../src/config.js";
 import type { IdentityService } from "../src/identity/identity-service.js";
@@ -18,6 +22,205 @@ import { SqliteDatabase } from "../src/persistence/sqlite-database.js";
 import { createBackendServer } from "../src/transport/server.js";
 
 describe("authentication provider integration", () => {
+  it("does not offer web setup without a local-password provider", async () => {
+    const providers = new AuthProviderRegistry();
+    providers.install(
+      testAuthManifest,
+      testInteractionModule([], []),
+      "built-in",
+    );
+    await providers.initialize([testAuthConfiguration], () => testServices);
+    const bootstrap = new FirstUserBootstrapService(true, providers, {
+      isInitialized: () => Promise.resolve(false),
+    } as IdentityService);
+    try {
+      await expect(bootstrap.status()).resolves.toEqual({
+        available: false,
+        providers: [],
+      });
+      await expect(
+        bootstrap.initialize(
+          "test-auth",
+          "admin",
+          "Administrator",
+          "password",
+          "client",
+        ),
+      ).rejects.toBeInstanceOf(WebBootstrapUnavailableError);
+    } finally {
+      await providers.close();
+    }
+  });
+
+  it("offers one-time web setup without establishing a session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apinteract-web-bootstrap-"));
+    const configuration = testConfiguration(root);
+    const application = await createApplication(configuration);
+    const server = await createBackendServer(application, configuration);
+    try {
+      const status = await server.inject({
+        method: "GET",
+        url: "/auth/bootstrap",
+      });
+      expect(status.statusCode).toBe(200);
+      expect(status.json()).toEqual({
+        available: true,
+        providers: [
+          {
+            id: "local-password",
+            label: "Username and password",
+          },
+        ],
+      });
+
+      const rejectedOrigin = await server.inject({
+        method: "POST",
+        url: "/auth/bootstrap",
+        headers: {
+          origin: "https://untrusted.example",
+          "content-type": "application/json",
+        },
+        payload: {
+          providerId: "local-password",
+          username: "admin",
+          displayName: "Administrator",
+          password: "bootstrap password",
+        },
+      });
+      expect(rejectedOrigin.statusCode).toBe(403);
+
+      const initialized = await server.inject({
+        method: "POST",
+        url: "/auth/bootstrap",
+        headers: {
+          origin: configuration.server.publicOrigin,
+          "content-type": "application/json",
+        },
+        payload: {
+          providerId: "local-password",
+          username: "admin",
+          displayName: "Administrator",
+          password: "bootstrap password",
+        },
+      });
+      expect(initialized.statusCode).toBe(204);
+      expect(initialized.body).toBe("");
+      expect(initialized.headers["set-cookie"]).toBeUndefined();
+
+      await expect(
+        server.inject({ method: "GET", url: "/auth/bootstrap" }),
+      ).resolves.toMatchObject({ statusCode: 200 });
+      expect(
+        (await server.inject({ method: "GET", url: "/auth/bootstrap" })).json(),
+      ).toEqual({ available: false, providers: [] });
+
+      const repeated = await server.inject({
+        method: "POST",
+        url: "/auth/bootstrap",
+        headers: {
+          origin: configuration.server.publicOrigin,
+          "content-type": "application/json",
+        },
+        payload: {
+          providerId: "local-password",
+          username: "other",
+          displayName: "Other",
+          password: "other password",
+        },
+      });
+      expect(repeated.statusCode).toBe(409);
+      expect(repeated.json()).toMatchObject({
+        code: "web_bootstrap_already_completed",
+      });
+    } finally {
+      await server.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("can disable web setup without disabling local-password login", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apinteract-web-bootstrap-off-"));
+    const base = testConfiguration(root);
+    const configuration: BackendConfiguration = {
+      ...base,
+      authentication: {
+        providers: base.authentication!.providers,
+        webBootstrap: false,
+      },
+    };
+    const application = await createApplication(configuration);
+    const server = await createBackendServer(application, configuration);
+    try {
+      const status = await server.inject({
+        method: "GET",
+        url: "/auth/bootstrap",
+      });
+      expect(status.json()).toEqual({ available: false, providers: [] });
+      const response = await server.inject({
+        method: "POST",
+        url: "/auth/bootstrap",
+        headers: {
+          origin: configuration.server.publicOrigin,
+          "content-type": "application/json",
+        },
+        payload: {
+          providerId: "local-password",
+          username: "admin",
+          displayName: "Administrator",
+          password: "bootstrap password",
+        },
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({
+        code: "web_bootstrap_unavailable",
+      });
+    } finally {
+      await server.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows only one concurrent first-user initialization claim", async () => {
+    const root = await mkdtemp(
+      join(tmpdir(), "apinteract-web-bootstrap-race-"),
+    );
+    const configuration = testConfiguration(root);
+    const application = await createApplication(configuration);
+    try {
+      const attempts = await Promise.allSettled([
+        application.firstUserBootstrap.initialize(
+          "local-password",
+          "first",
+          "First administrator",
+          "first password",
+          "first-client",
+        ),
+        application.firstUserBootstrap.initialize(
+          "local-password",
+          "second",
+          "Second administrator",
+          "second password",
+          "second-client",
+        ),
+      ]);
+      expect(
+        attempts.filter((attempt) => attempt.status === "fulfilled"),
+      ).toHaveLength(1);
+      expect(
+        attempts.filter((attempt) => attempt.status === "rejected"),
+      ).toHaveLength(1);
+      const users = await application.database.db
+        .selectFrom("users")
+        .selectAll()
+        .execute();
+      expect(users).toHaveLength(1);
+      expect(users[0]?.is_instance_admin).toBe(1);
+    } finally {
+      await application.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("creates, proves, and updates local-password material through the plugin", async () => {
     const root = await mkdtemp(join(tmpdir(), "apinteract-auth-provider-"));
     const configuration = testConfiguration(root);
@@ -77,6 +280,14 @@ describe("authentication provider integration", () => {
     );
     const server = await createBackendServer(application, configuration);
     try {
+      const bootstrapStatus = await server.inject({
+        method: "GET",
+        url: "/auth/bootstrap",
+      });
+      expect(bootstrapStatus.json()).toEqual({
+        available: false,
+        providers: [],
+      });
       const catalogResponse = await server.inject({
         method: "GET",
         url: "/auth/providers",

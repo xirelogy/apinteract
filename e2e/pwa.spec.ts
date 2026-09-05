@@ -43,15 +43,23 @@ test("exposes install metadata and recovers an authenticated online session", as
   expect(cachedUrls.length).toBeGreaterThan(0);
   for (const value of cachedUrls) {
     const url = new URL(value);
+    const isAuthPluginAsset =
+      /^\/auth\/plugins\/[a-z0-9]+(?:[.-][a-z0-9]+)*\/[a-f0-9]{64}\/.+$/u.test(
+        url.pathname,
+      );
     expect(url.origin).toBe("http://127.0.0.1:5173");
     expect(
       url.pathname.startsWith("/web-ui/") ||
         url.pathname === "/plugins/catalog.json" ||
+        isAuthPluginAsset ||
         /^\/plugins\/[a-z0-9]+(?:[.-][a-z0-9]+)*\/[a-f0-9]{64}\/.+$/u.test(
           url.pathname,
         ),
     ).toBe(true);
-    expect(url.pathname).not.toMatch(/^\/(?:auth|api|ws)(?:\/|$)/u);
+    expect(url.pathname).not.toMatch(/^\/(?:api|ws)(?:\/|$)/u);
+    if (!isAuthPluginAsset) {
+      expect(url.pathname).not.toMatch(/^\/auth(?:\/|$)/u);
+    }
   }
 
   await context.setOffline(true);

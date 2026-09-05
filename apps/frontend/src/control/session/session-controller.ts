@@ -2,6 +2,8 @@ import type {
   BackendHealth,
   CurrentSession,
   RequestAttachment,
+  WebBootstrapRequest,
+  WebBootstrapStatus,
 } from "@/model/contracts/backend";
 import type { AuthProviderFrontendResult } from "@apinteract/plugin-api/frontend/authentication";
 import { useApplicationStore } from "@/control/state/application-store";
@@ -38,6 +40,18 @@ export class SessionController {
     this.#http = http;
     this.#webSocket = webSocket;
     this.#webSocket.onDisconnect(() => this.#connectionLost());
+  }
+
+  /** Reads whether a fresh local-password instance can be initialized here. */
+  webBootstrapStatus(): Promise<WebBootstrapStatus> {
+    return this.#http.webBootstrapStatus();
+  }
+
+  /** Creates the first administrator while leaving authentication explicit. */
+  async initializeFirstAdministrator(
+    input: WebBootstrapRequest,
+  ): Promise<void> {
+    await this.#http.initializeFirstAdministrator(input);
   }
 
   /** Restores an access token or rotates the browser-managed refresh cookie. */

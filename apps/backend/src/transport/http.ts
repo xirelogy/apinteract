@@ -3,13 +3,21 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import type { Application } from "../bootstrap/application.js";
 import type { BackendConfiguration } from "../config.js";
-import { AuthenticationFailedError } from "../identity/identity-service.js";
+import {
+  AuthenticationFailedError,
+  InstanceAlreadyInitializedError,
+} from "../identity/identity-service.js";
 import {
   AuthenticationInputError,
   AuthenticationRateLimitError,
   type AuthenticationTransition,
 } from "../authentication/authentication-service.js";
 import { AuthProviderNotConfiguredError } from "../authentication/auth-provider-registry.js";
+import {
+  WebBootstrapInputError,
+  WebBootstrapRateLimitError,
+  WebBootstrapUnavailableError,
+} from "../authentication/first-user-bootstrap-service.js";
 import { idToBytes } from "../foundation/id.js";
 import { RequestAttachmentValidationError } from "../requests/request-attachment-service.js";
 import {
@@ -44,6 +52,53 @@ export async function registerHttpRoutes(
     { parseAs: "buffer", bodyLimit: 786_432 },
     (_request, body, done) => done(null, body),
   );
+
+  /** Reports whether this fresh instance offers local-password web setup. */
+  server.get("/auth/bootstrap", async (_request, reply) =>
+    reply
+      .header("Cache-Control", "no-store")
+      .send(await application.firstUserBootstrap.status()),
+  );
+
+  /** Atomically creates the first local-password administrator. */
+  server.post<{
+    Body: {
+      providerId?: unknown;
+      username?: unknown;
+      displayName?: unknown;
+      password?: unknown;
+    };
+  }>("/auth/bootstrap", async (request, reply) => {
+    if (!validOrigin(request, configuration.server.publicOrigin)) {
+      return originNotAllowed(reply);
+    }
+    const input = webBootstrapInput(request.body);
+    if (input === null) return invalidWebBootstrapInput(reply);
+    try {
+      await application.firstUserBootstrap.initialize(
+        input.providerId,
+        input.username,
+        input.displayName,
+        input.password,
+        request.ip,
+      );
+      return reply.code(204).send();
+    } catch (cause) {
+      if (cause instanceof InstanceAlreadyInitializedError) {
+        return webBootstrapAlreadyCompleted(reply);
+      }
+      if (cause instanceof WebBootstrapUnavailableError) {
+        return webBootstrapUnavailable(reply);
+      }
+      if (cause instanceof WebBootstrapRateLimitError) {
+        return webBootstrapRateLimited(reply);
+      }
+      if (cause instanceof WebBootstrapInputError) {
+        return invalidWebBootstrapInput(reply);
+      }
+      throw cause;
+    }
+  });
 
   /** Lists configured built-in login methods and immutable frontend modules. */
   server.get("/auth/providers", async (_request, reply) =>
@@ -522,6 +577,37 @@ function authenticationInput(value: unknown): {
     : null;
 }
 
+/** Parses the fixed core and local-password fields accepted during setup. */
+function webBootstrapInput(value: unknown): {
+  readonly providerId: string;
+  readonly username: string;
+  readonly displayName: string;
+  readonly password: string;
+} | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const body = value as Record<string, unknown>;
+  const allowed = new Set([
+    "providerId",
+    "username",
+    "displayName",
+    "password",
+  ]);
+  if (Object.keys(body).some((key) => !allowed.has(key))) return null;
+  return typeof body.providerId === "string" &&
+    typeof body.username === "string" &&
+    typeof body.displayName === "string" &&
+    typeof body.password === "string"
+    ? {
+        providerId: body.providerId,
+        username: body.username,
+        displayName: body.displayName,
+        password: body.password,
+      }
+    : null;
+}
+
 /** Narrows provider evidence to an own-property string map. */
 function stringFields(value: unknown): Readonly<Record<string, string>> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -710,6 +796,46 @@ function invalidAuthenticationInput(reply: FastifyReply) {
     code: "invalid_authentication_input",
     title: "Invalid authentication input",
     detail: "The selected authentication provider input is invalid.",
+  });
+}
+
+/** Sends bounded validation feedback without echoing submitted credentials. */
+function invalidWebBootstrapInput(reply: FastifyReply) {
+  return sendProblem(reply, {
+    status: 400,
+    code: "invalid_web_bootstrap_input",
+    title: "Invalid first-user setup input",
+    detail: "Complete every first-user setup field within its allowed length.",
+  });
+}
+
+/** Reports the permanent one-time initialization conflict. */
+function webBootstrapAlreadyCompleted(reply: FastifyReply) {
+  return sendProblem(reply, {
+    status: 409,
+    code: "web_bootstrap_already_completed",
+    title: "First-user setup already completed",
+    detail: "This APInteract instance has already been initialized.",
+  });
+}
+
+/** Hides disabled, incompatible, and unhealthy bootstrap paths alike. */
+function webBootstrapUnavailable(reply: FastifyReply) {
+  return sendProblem(reply, {
+    status: 404,
+    code: "web_bootstrap_unavailable",
+    title: "First-user setup unavailable",
+    detail: "Web-based first-user setup is not available.",
+  });
+}
+
+/** Bounds password hashing work exposed before the first user exists. */
+function webBootstrapRateLimited(reply: FastifyReply) {
+  return sendProblem(reply, {
+    status: 429,
+    code: "web_bootstrap_rate_limited",
+    title: "Too many setup attempts",
+    detail: "Wait before trying first-user setup again.",
   });
 }
 

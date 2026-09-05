@@ -31,7 +31,6 @@ try {
   ]);
   await runProcess("plugin build", ["plugins:build"]);
   await prepareRuntime();
-  await initializeAdministrator();
   if (productionFrontend) {
     await buildFrontend();
   }
@@ -170,29 +169,6 @@ async function prepareRuntime() {
 /** Serializes JSON-compatible values as strict YAML 1.2 configuration. */
 function serializeConfiguration(configuration) {
   return JSON.stringify(configuration, null, 2) + "\n";
-}
-
-/** Creates the single administrator used by browser authentication tests. */
-async function initializeAdministrator() {
-  await runProcess(
-    "administrator initialization",
-    [
-      "--filter",
-      "@apinteract/backend",
-      "exec",
-      "tsx",
-      "src/cli.ts",
-      "admin",
-      "init",
-      "--username",
-      "admin",
-      "--display-name",
-      "Administrator",
-      "--config",
-      backendConfigurationPath,
-    ],
-    "Browser-test-password-1!\n",
-  );
 }
 
 /** Starts one long-running component with scoped environment overrides. */

@@ -21,6 +21,24 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/auth/bootstrap": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Report first-user web setup availability */
+    get: operations["getWebBootstrapStatus"];
+    put?: never;
+    /** Create the first local-password administrator */
+    post: operations["initializeFirstAdministrator"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/auth/providers": {
     parameters: {
       query?: never;
@@ -301,6 +319,21 @@ export interface components {
     };
     AuthProviderCatalog: {
       providers: components["schemas"]["AuthProviderCatalogEntry"][];
+    };
+    WebBootstrapStatus: {
+      available: boolean;
+      providers: components["schemas"]["WebBootstrapProvider"][];
+    };
+    WebBootstrapProvider: {
+      id: string;
+      label: string;
+      description?: string;
+    };
+    WebBootstrapRequest: {
+      providerId: string;
+      username: string;
+      displayName: string;
+      password: string;
     };
     AuthProviderCatalogEntry: {
       manifest: components["schemas"]["AuthProviderPluginManifest"];
@@ -1902,6 +1935,63 @@ export interface operations {
           "application/json": components["schemas"]["BackendHealth"];
         };
       };
+    };
+  };
+  getWebBootstrapStatus: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Authoritative persisted setup state and eligible local-password instances. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebBootstrapStatus"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  initializeFirstAdministrator: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WebBootstrapRequest"];
+      };
+    };
+    responses: {
+      /** @description The first administrator was created. The user must sign in separately. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      /** @description Another request or initialization path already created the first user. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      429: components["responses"]["TooManyRequests"];
     };
   };
   listAuthenticationProviders: {

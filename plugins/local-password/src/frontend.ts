@@ -6,11 +6,12 @@ export function register(
   context: PluginRegistrationContext<AuthProviderFrontendPluginProviders>,
 ): void {
   context.register("authentication.login", {
-    mount(container, { actions }) {
+    mount(container, { actions, locale }) {
       const form = document.createElement("form");
       form.className = "login-form local-password-login";
-      const username = field("Username", "text", "username");
-      const password = field("Password", "password", "current-password");
+      const labels = localizedLabels(locale);
+      const username = field(labels.username, "text", "username");
+      const password = field(labels.password, "password", "current-password");
       const error = document.createElement("p");
       error.className = "form-error";
       error.setAttribute("role", "alert");
@@ -18,7 +19,7 @@ export function register(
       const submit = document.createElement("button");
       submit.className = "button-control primary-button login-submit";
       submit.type = "submit";
-      submit.textContent = "Continue";
+      submit.textContent = labels.continue;
       form.append(username.wrapper, password.wrapper, error, submit);
 
       /** Submits provider evidence only through the host-owned auth action. */
@@ -87,4 +88,19 @@ function field(
   input.required = true;
   wrapper.append(label, input);
   return { wrapper, input };
+}
+
+/** Provides the small built-in label set without coupling the plugin to Vue i18n. */
+function localizedLabels(locale: string): {
+  readonly username: string;
+  readonly password: string;
+  readonly continue: string;
+} {
+  if (locale === "zh-Hans") {
+    return { username: "用户名", password: "密码", continue: "继续" };
+  }
+  if (locale === "zh-Hant") {
+    return { username: "使用者名稱", password: "密碼", continue: "繼續" };
+  }
+  return { username: "Username", password: "Password", continue: "Continue" };
 }

@@ -18,6 +18,7 @@ services:
       - no-new-privileges:true
     environment:
       APINTERACT_AIO_PUBLIC_ORIGIN: "http://localhost:${APINTERACT_AIO_PORT:-8080}"
+      APINTERACT_AIO_WEB_BOOTSTRAP: "${APINTERACT_AIO_WEB_BOOTSTRAP:-}"
     ports:
       - "${APINTERACT_AIO_BIND_ADDRESS:-127.0.0.1}:${APINTERACT_AIO_PORT:-8080}:8080"
     tmpfs:

@@ -91,6 +91,7 @@ describe("authentication provider configuration", () => {
           configuration: {},
         },
       ]);
+      expect(configuration.authentication?.webBootstrap).toBe(true);
     } finally {
       await rm(rootPath, { recursive: true, force: true });
     }
@@ -118,6 +119,22 @@ describe("authentication provider configuration", () => {
       expect(
         configuration.authentication?.providers.map(({ id }) => id),
       ).toEqual(["company", "local"]);
+      const hardened = await loadAuthenticationConfiguration(rootPath, {
+        providers: [
+          {
+            id: "local",
+            plugin: "builtin.local-password",
+            label: "Password",
+          },
+        ],
+        webBootstrap: false,
+      });
+      expect(hardened.authentication?.webBootstrap).toBe(false);
+      await expect(
+        loadAuthenticationConfiguration(rootPath, {
+          webBootstrap: "sometimes",
+        }),
+      ).rejects.toThrow(/webBootstrap must be a boolean/u);
       await expect(
         loadAuthenticationConfiguration(rootPath, { providers: [] }),
       ).rejects.toThrow(/non-empty array/u);

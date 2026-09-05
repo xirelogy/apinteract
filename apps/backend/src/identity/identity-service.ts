@@ -25,6 +25,8 @@ export interface ApplicationUser {
 export class InstanceAlreadyInitializedError extends Error {}
 export class AuthenticationFailedError extends Error {}
 
+const INITIALIZATION_MARKER = "instance_administrator_initialized";
+
 /**
  * Owns application users and provider-subject linkage.
  *
@@ -69,6 +71,16 @@ export class IdentityService {
     const now = Date.now();
 
     return this.#database.transaction().execute(async (transaction) => {
+      const claimed = await transaction
+        .insertInto("instance_metadata")
+        .values({ key: INITIALIZATION_MARKER, value: String(now) })
+        .onConflict((conflict) => conflict.column("key").doNothing())
+        .executeTakeFirst();
+      if (claimed.numInsertedOrUpdatedRows !== 1n) {
+        throw new InstanceAlreadyInitializedError(
+          "The APInteract instance is already initialized",
+        );
+      }
       const existing = await transaction
         .selectFrom("users")
         .select(({ fn }) => fn.countAll<number>().as("count"))
@@ -112,6 +124,15 @@ export class IdentityService {
         isInstanceAdmin: true,
       };
     });
+  }
+
+  /** Reports whether any application user permanently closes first-user setup. */
+  async isInitialized(): Promise<boolean> {
+    const existing = await this.#database
+      .selectFrom("users")
+      .select(({ fn }) => fn.countAll<number>().as("count"))
+      .executeTakeFirstOrThrow();
+    return Number(existing.count) !== 0;
   }
 
   /** Resolves a validated provider assertion to one active application user. */

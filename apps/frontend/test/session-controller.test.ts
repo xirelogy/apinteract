@@ -24,6 +24,30 @@ afterEach(() => {
 });
 
 describe("SessionController restoration", () => {
+  it("creates the first administrator without establishing a session", async () => {
+    const initializeFirstAdministrator = vi.fn().mockResolvedValue(undefined);
+    const http = {
+      initializeFirstAdministrator,
+    } as unknown as BackendHttpClient;
+    const webSocket = createWebSocket();
+    const session = new SessionController(http, webSocket.client);
+    const input = {
+      providerId: "local-password",
+      username: "admin",
+      displayName: "Administrator",
+      password: "first password",
+    };
+
+    await expect(
+      session.initializeFirstAdministrator(input),
+    ).resolves.toBeUndefined();
+
+    expect(initializeFirstAdministrator).toHaveBeenCalledWith(input);
+    expect(webSocket.connect).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(accessTokenKey)).toBeNull();
+    expect(useApplicationStore().session).toBeNull();
+  });
+
   it("preserves a stored credential when the backend is unavailable", async () => {
     sessionStorage.setItem(accessTokenKey, "stored-token");
     const refresh = vi.fn();

@@ -239,6 +239,14 @@ several local-password instances exist, pass `--provider-instance ID` to the
 backend administrator command. These practices belong specifically to the
 local-password provider and are not implied for other login methods.
 
+On a fresh database, the normal web UI uses the same credential handler to
+create the first administrator and then closes setup permanently. It does not
+create a session; the administrator signs in with the newly chosen username
+and password. This convenience is enabled by default only when a healthy
+local-password instance is configured. Hardened deployments can set
+`authentication.webBootstrap` to `false` and retain `apinteract-admin init` as
+the operator-controlled path.
+
 Authentication bundles are currently built-in only. User-installed plugin
 roots remain available for ordinary frontend and backend plugins, but cannot
 add code to the anonymous login surface.

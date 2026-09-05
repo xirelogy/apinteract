@@ -10,7 +10,8 @@ bounded WebSocket message schemas used by the web frontend.
 
 ## Transport Roles
 
-- HTTP provides authentication, session refresh, health reporting, and exact
+- HTTP provides first-user setup, authentication, session refresh, health
+  reporting, and exact
   response-body transfer.
 - WebSocket provides authenticated commands, replies, and execution events.
 - The backend sends a native WebSocket ping every 25 seconds and expects a

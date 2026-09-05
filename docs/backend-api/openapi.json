@@ -77,6 +77,57 @@
         }
       }
     },
+    "/auth/bootstrap": {
+      "get": {
+        "tags": ["Authentication"],
+        "operationId": "getWebBootstrapStatus",
+        "summary": "Report first-user web setup availability",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Authoritative persisted setup state and eligible local-password instances.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WebBootstrapStatus" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      },
+      "post": {
+        "tags": ["Authentication"],
+        "operationId": "initializeFirstAdministrator",
+        "summary": "Create the first local-password administrator",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/WebBootstrapRequest" }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "The first administrator was created. The user must sign in separately."
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": {
+            "description": "Another request or initialization path already created the first user.",
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/Problem" }
+              }
+            }
+          },
+          "429": { "$ref": "#/components/responses/TooManyRequests" }
+        }
+      }
+    },
     "/auth/providers": {
       "get": {
         "tags": ["Authentication"],
@@ -785,6 +836,60 @@
           "providers": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/AuthProviderCatalogEntry" }
+          }
+        }
+      },
+      "WebBootstrapStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["available", "providers"],
+        "properties": {
+          "available": { "type": "boolean" },
+          "providers": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/WebBootstrapProvider" }
+          }
+        }
+      },
+      "WebBootstrapProvider": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        }
+      },
+      "WebBootstrapRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["providerId", "username", "displayName", "password"],
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "username": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "writeOnly": true
           }
         }
       },

@@ -64,6 +64,7 @@ test("generates matching private AIO component credentials", async () => {
     frontendRoot: "/test/frontend",
     environment: {
       APINTERACT_AIO_PUBLIC_ORIGIN: "http://localhost:9980",
+      APINTERACT_AIO_WEB_BOOTSTRAP: "false",
     },
     tokenFactory: () => Buffer.alloc(48, 7),
   });
@@ -76,6 +77,7 @@ test("generates matching private AIO component credentials", async () => {
   );
   assert.equal(prepared.backend.sessions.secureCookie, true);
   assert.equal(prepared.backend.sessions.accessLifetimeSeconds, 300);
+  assert.equal(prepared.backend.authentication.webBootstrap, false);
   assert.deepEqual(prepared.backend.scripts.variableWrites, {
     allowedScopes: ["workspace", "selected-environment"],
     allowSecrets: false,
@@ -135,6 +137,20 @@ test("uses the published local origin unless an administrator overrides it", asy
   assert.equal(prepared.backend.server.publicOrigin, "http://localhost:9980");
   assert.equal(prepared.backend.sessions.secureCookie, false);
   assert.equal(prepared.proxy.targetPolicy.privateNetworkAccess, "deny");
+});
+
+test("rejects an ambiguous web-bootstrap environment toggle", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "apinteract-aio-bootstrap-"));
+  await assert.rejects(
+    prepareRuntime({
+      administratorRoot: resolve(root, "configuration"),
+      runtimeRoot: resolve(root, "runtime"),
+      dataRoot: resolve(root, "data"),
+      cacheRoot: resolve(root, "cache"),
+      environment: { APINTERACT_AIO_WEB_BOOTSTRAP: "no" },
+    }),
+    /APINTERACT_AIO_WEB_BOOTSTRAP must be true or false/u,
+  );
 });
 
 /** Requires a generated runtime file to remain readable only by its owner. */

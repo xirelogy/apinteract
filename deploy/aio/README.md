@@ -46,9 +46,33 @@ an appropriate ingress and an HTTPS `publicOrigin`; see
 strongest deployment identity; `latest` follows every release tag, including
 pre-releases.
 
-Open the configured public origin followed by `/web-ui/` and sign in with the
-administrator you create. Opening the origin root redirects to that canonical
-UI path.
+Open the configured public origin followed by `/web-ui/`. On a fresh data
+volume, APInteract presents a setup form for the first administrator. After
+creation, sign in with the username and password you just chose. Opening the
+origin root redirects to the canonical UI path.
+
+Web setup is available by default because it is the simplest onboarding path.
+Creating the first user through either the web UI or command line permanently
+closes it for that database. Complete setup before exposing a fresh deployment
+to people who should not become its administrator.
+
+### Hardened First-User Initialization
+
+Deployments that require an operator-controlled initialization boundary can
+disable web setup before first startup:
+
+```sh
+APINTERACT_AIO_WEB_BOOTSTRAP=false deploy/scripts/aio up
+deploy/scripts/aio init-admin
+```
+
+For a mounted backend configuration, set the equivalent persistent option:
+
+```yaml
+configVersion: 1
+authentication:
+  webBootstrap: false
+```
 
 The administrator command reads the password interactively and does not place
 it in a command argument or environment variable. If an administrator loses
@@ -227,10 +251,11 @@ executing user's access to a workspace or resource.
 
 Authentication methods are also selected by startup configuration. The image
 currently includes the local-password provider; omitting this section enables
-one default instance:
+one default instance and first-user web setup:
 
 ```yaml
 authentication:
+  webBootstrap: true
   providers:
     - id: local-password
       plugin: builtin.local-password
@@ -240,6 +265,9 @@ authentication:
 ```
 
 The instance `id` is the switch used by login and credential administration.
+Set `webBootstrap: false` to require command-line initialization. For Compose
+deployments, `APINTERACT_AIO_WEB_BOOTSTRAP=false` overrides the generated
+runtime value without changing the mounted administrator file.
 See [Authentication provider plugins](../../docs/plugins/authentication-providers.md)
 for the ownership and identity-linking model.
 

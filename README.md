@@ -64,17 +64,18 @@ Replace `VERSION` with a version shown in the Docker Hub tag list. The `latest`
 alias follows new releases, while a version or immutable digest keeps
 deployments predictable.
 
-Start the service and create its first administrator:
+Start the service:
 
 ```sh
 docker compose up -d
-docker compose exec --user 10001:10001 apinteract apinteract-admin init
 ```
 
-Open <http://127.0.0.1:8080/web-ui/> and sign in. See the
+Open <http://127.0.0.1:8080/web-ui/>. A fresh installation guides you through
+creating the first administrator, then asks you to sign in with that account.
+See the
 [all-in-one deployment guide](deploy/aio/README.md) for immutable digest
-pinning, public-origin configuration, reverse-proxy networking, storage,
-backup, and verification guidance.
+pinning, hardened command-line initialization, public-origin configuration,
+reverse-proxy networking, storage, backup, and verification guidance.
 
 ## Develop From Source
 

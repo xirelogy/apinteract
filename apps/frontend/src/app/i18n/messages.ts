@@ -45,6 +45,25 @@ export const enUsMessages = {
     signIn: "Sign in",
     signingIn: "Signing in",
     username: "Username",
+    setup: {
+      title: "Set up APInteract",
+      introduction:
+        "Create the first administrator account. Web setup closes permanently after this account is created.",
+      checking: "Checking first-user setup…",
+      statusFailed: "First-user setup status could not be loaded.",
+      method: "Account method",
+      displayName: "Display name",
+      usernameHint: "Use this name when signing in.",
+      passwordHint: "Choose a password that is difficult to guess.",
+      confirmPassword: "Confirm password",
+      passwordMismatch: "The passwords do not match.",
+      create: "Create administrator",
+      creating: "Creating administrator…",
+      completed:
+        "Administrator account created. Sign in with the username and password you just chose.",
+      failed: "The administrator account could not be created.",
+      rateLimited: "Too many setup attempts. Wait before trying again.",
+    },
   },
   pwa: {
     offlineTitle: "APInteract is offline",

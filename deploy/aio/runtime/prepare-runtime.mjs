@@ -78,6 +78,10 @@ export async function prepareRuntime(options = {}) {
   const defaultPublicOrigin =
     (options.environment ?? process.env).APINTERACT_AIO_PUBLIC_ORIGIN ??
     DEFAULT_BACKEND_CONFIGURATION.server.publicOrigin;
+  const webBootstrap = optionalBooleanEnvironment(
+    (options.environment ?? process.env).APINTERACT_AIO_WEB_BOOTSTRAP,
+    "APINTERACT_AIO_WEB_BOOTSTRAP",
+  );
   const tokenFactory =
     options.tokenFactory ?? (() => randomBytes(GENERATED_TOKEN_BYTES));
 
@@ -131,6 +135,14 @@ export async function prepareRuntime(options = {}) {
     frontend: {
       distPath: frontendRoot,
     },
+    ...(webBootstrap === undefined
+      ? {}
+      : {
+          authentication: {
+            ...recordOrEmpty(backend.authentication, "config.authentication"),
+            webBootstrap,
+          },
+        }),
   };
 
   const proxy = mergeRecords(
@@ -163,6 +175,14 @@ export async function prepareRuntime(options = {}) {
     proxy: effectiveProxy,
     bearerToken,
   };
+}
+
+/** Parses one optional true/false deployment toggle without loose coercion. */
+function optionalBooleanEnvironment(value, name) {
+  if (value === undefined || value === "") return undefined;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`${name} must be true or false`);
 }
 
 /** Creates all durable and runtime-owned directories required before startup. */
@@ -257,7 +277,10 @@ function validateBackendConfigurationKeys(configuration) {
     configuration.authentication,
     "config.authentication",
   );
-  requireKnownKeys(authentication, "config.authentication", ["providers"]);
+  requireKnownKeys(authentication, "config.authentication", [
+    "providers",
+    "webBootstrap",
+  ]);
   if (authentication.providers !== undefined) {
     if (!Array.isArray(authentication.providers)) {
       throw new Error("config.authentication.providers must be an array");

@@ -4,6 +4,7 @@ import { AuditService } from "../audit/audit-service.js";
 import { AuthenticationService } from "../authentication/authentication-service.js";
 import { AuthProviderRegistry } from "../authentication/auth-provider-registry.js";
 import { CredentialRepository } from "../authentication/credential-repository.js";
+import { FirstUserBootstrapService } from "../authentication/first-user-bootstrap-service.js";
 import { LocalBlobStore } from "../blobs/local-blob-store.js";
 import { ExecutionService } from "../executions/execution-service.js";
 import { EnvironmentService } from "../environments/environment-service.js";
@@ -33,6 +34,7 @@ export interface Application {
   readonly blobs: LocalBlobStore;
   readonly identity: IdentityService;
   readonly authentication: AuthenticationService;
+  readonly firstUserBootstrap: FirstUserBootstrapService;
   readonly authProviders: AuthProviderRegistry;
   readonly sessions: SessionService;
   readonly workspaces: WorkspaceService;
@@ -159,6 +161,11 @@ export async function createApplication(
     authProviders,
     identity,
   );
+  const firstUserBootstrap = new FirstUserBootstrapService(
+    configuration.authentication?.webBootstrap ?? true,
+    authProviders,
+    identity,
+  );
   const plugins = new PluginService(pluginRuntime.plugins, discoveredPlugins);
   const imports = new ImportService(requests, pluginRuntime.imports);
   const proxy = new ProxyClient(
@@ -193,6 +200,7 @@ export async function createApplication(
     blobs,
     identity,
     authentication,
+    firstUserBootstrap,
     authProviders,
     sessions,
     workspaces,

@@ -25,19 +25,32 @@ export default defineConfig({
   },
   projects: [
     {
+      name: "onboarding",
+      testMatch: /onboarding\.setup\.ts/u,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
       name: "chromium",
+      dependencies: ["onboarding"],
+      testIgnore: /onboarding\.setup\.ts/u,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "firefox",
+      dependencies: ["onboarding"],
+      testIgnore: /onboarding\.setup\.ts/u,
       use: { ...devices["Desktop Firefox"] },
     },
     {
       name: "webkit",
+      dependencies: ["onboarding"],
+      testIgnore: /onboarding\.setup\.ts/u,
       use: { ...devices["Desktop Safari"] },
     },
     {
       name: "mobile-chromium",
+      dependencies: ["onboarding"],
+      testIgnore: /onboarding\.setup\.ts/u,
       use: { ...devices["Pixel 7"] },
     },
   ],

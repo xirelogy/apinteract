@@ -43,6 +43,7 @@ export interface BackendConfiguration {
   };
   readonly authentication?: {
     readonly providers: readonly AuthenticationProviderConfiguration[];
+    readonly webBootstrap?: boolean;
   };
   readonly plugins?: {
     readonly builtinPath: string;
@@ -66,6 +67,15 @@ const identifierPattern = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u;
 const MAX_AUTH_CONFIGURATION_DEPTH = 8;
 const MAX_AUTH_CONFIGURATION_ITEMS = 128;
 const MAX_AUTH_CONFIGURATION_STRING = 4096;
+const DEFAULT_AUTHENTICATION_PROVIDERS = [
+  {
+    id: "local-password",
+    plugin: "builtin.local-password",
+    label: "Username and password",
+    description: "Sign in with your APInteract username and password.",
+    configuration: {},
+  },
+] as const;
 
 /** Requires a configuration value to be a non-array object. */
 function record(value: unknown, location: string): Record<string, unknown> {
@@ -164,17 +174,12 @@ function authenticationProviders(
   value: unknown,
 ): readonly AuthenticationProviderConfiguration[] {
   if (value === undefined) {
-    return [
-      {
-        id: "local-password",
-        plugin: "builtin.local-password",
-        label: "Username and password",
-        description: "Sign in with your APInteract username and password.",
-        configuration: {},
-      },
-    ];
+    return DEFAULT_AUTHENTICATION_PROVIDERS;
   }
   const authentication = record(value, "config.authentication");
+  if (authentication.providers === undefined) {
+    return DEFAULT_AUTHENTICATION_PROVIDERS;
+  }
   if (
     !Array.isArray(authentication.providers) ||
     authentication.providers.length === 0
@@ -278,7 +283,12 @@ export async function loadBackendConfiguration(
     scripts.variableWrites ?? {},
     "config.scripts.variableWrites",
   );
-  const authentication = authenticationProviders(document.authentication);
+  const authenticationValue = document.authentication;
+  const authentication = authenticationProviders(authenticationValue);
+  const authenticationRecord =
+    authenticationValue === undefined
+      ? {}
+      : record(authenticationValue, "config.authentication");
 
   const secureCookie =
     sessions.secureCookie === undefined ? true : sessions.secureCookie;
@@ -349,7 +359,14 @@ export async function loadBackendConfiguration(
         "/opt/apinteract/frontend",
       ),
     },
-    authentication: { providers: authentication },
+    authentication: {
+      providers: authentication,
+      webBootstrap: boolean(
+        authenticationRecord.webBootstrap,
+        "config.authentication.webBootstrap",
+        true,
+      ),
+    },
     plugins: {
       builtinPath: text(
         plugins.builtinPath,

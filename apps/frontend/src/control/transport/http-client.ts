@@ -4,6 +4,8 @@ import type {
   CurrentSession,
   Problem,
   RequestAttachment,
+  WebBootstrapRequest,
+  WebBootstrapStatus,
 } from "@/model/contracts/backend";
 import type {
   AuthProviderPublicDescriptor,
@@ -45,6 +47,22 @@ export class BackendUnavailableError extends Error {}
  * for browser-cookie exchange and byte-oriented transfers.
  */
 export class BackendHttpClient {
+  /** Reads authoritative first-user web setup availability. */
+  async webBootstrapStatus(): Promise<WebBootstrapStatus> {
+    return this.#request<WebBootstrapStatus>("/auth/bootstrap", {});
+  }
+
+  /** Creates the first administrator without establishing a browser session. */
+  async initializeFirstAdministrator(
+    input: WebBootstrapRequest,
+  ): Promise<void> {
+    await this.#request<void>("/auth/bootstrap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+  }
+
   /** Reads backend and proxy readiness metadata for the options view. */
   async health(): Promise<BackendHealth> {
     const response = await this.#fetch("/health", {});
