@@ -35,6 +35,15 @@ const name = ref(props.tab.draft.name);
 const collectionRoots = computed(() =>
   props.rootNodes.filter((node) => node.kind === "collection"),
 );
+const boundCollection = computed(() =>
+  props.tab.pendingParentCollectionId === null
+    ? null
+    : findCollection(
+        props.rootNodes,
+        props.collectionChildren,
+        props.tab.pendingParentCollectionId,
+      ),
+);
 const parentCollectionId = ref(
   props.tab.pendingParentCollectionId ?? collectionRoots.value[0]?.nodeId ?? "",
 );
@@ -47,6 +56,11 @@ const expandedCollectionIds = ref(
 );
 const canSave = computed(
   () => name.value.trim() !== "" && parentCollectionId.value !== "",
+);
+const hasNoCollectionDestination = computed(
+  () =>
+    props.tab.pendingParentCollectionId === null &&
+    collectionRoots.value.length === 0,
 );
 const treeNavigation = useTreeNavigation();
 
@@ -102,6 +116,31 @@ function collectionPath(
   }
   return [];
 }
+
+/** Finds a loaded collection by identifier without changing picker state. */
+function findCollection(
+  nodes: readonly TreeNode[],
+  children: Readonly<Record<string, CollectionChildrenState>>,
+  collectionId: string,
+): TreeNode | null {
+  for (const node of nodes) {
+    if (node.kind !== "collection") {
+      continue;
+    }
+    if (node.nodeId === collectionId) {
+      return node;
+    }
+    const match = findCollection(
+      children[node.nodeId]?.children ?? [],
+      children,
+      collectionId,
+    );
+    if (match !== null) {
+      return match;
+    }
+  }
+  return null;
+}
 </script>
 
 <template>
@@ -138,7 +177,18 @@ function collectionPath(
             :disabled="busy"
           />
         </FormField>
-        <fieldset class="collection-picker-field">
+        <div
+          v-if="tab.pendingParentCollectionId !== null"
+          class="request-save-destination"
+        >
+          <span class="request-save-destination-label">
+            {{ t("collection.destination") }}
+          </span>
+          <strong>{{
+            boundCollection?.name ?? tab.pendingParentCollectionId
+          }}</strong>
+        </div>
+        <fieldset v-else class="collection-picker-field">
           <legend>{{ t("collection.label") }}</legend>
           <div v-if="collectionRoots.length > 0" class="collection-picker">
             <ul
@@ -165,7 +215,7 @@ function collectionPath(
             </ul>
           </div>
         </fieldset>
-        <p v-if="collectionRoots.length === 0" class="dialog-empty-message">
+        <p v-if="hasNoCollectionDestination" class="dialog-empty-message">
           {{ t("collection.createBeforeSaving") }}
         </p>
         <footer class="resource-dialog-actions">

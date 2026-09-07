@@ -529,6 +529,15 @@ async function saveRequest(draft: RequestDraftInput): Promise<void> {
   }
   controller.updateRequestDraft(tab.tabId, draft);
   if (tab.request === null) {
+    const name = draft.name.trim();
+    if (tab.pendingParentCollectionId !== null && name !== "") {
+      await controller.saveTemporaryRequest(
+        tab.tabId,
+        name,
+        tab.pendingParentCollectionId,
+      );
+      return;
+    }
     saveDialogTab.value =
       requestTabs.value.find((candidate) => candidate.tabId === tab.tabId) ??
       null;

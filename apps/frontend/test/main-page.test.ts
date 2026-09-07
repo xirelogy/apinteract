@@ -3,7 +3,7 @@
 import { createPinia, setActivePinia } from "pinia";
 import { createI18n } from "vue-i18n";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { shallowMount } from "@vue/test-utils";
+import { flushPromises, shallowMount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 
 import { applicationControllerKey } from "../src/app/dependencies";
@@ -170,6 +170,90 @@ describe("MainPage", () => {
     expect(
       wrapper.getComponent(EnvironmentManager).attributes("revisions"),
     ).toBeUndefined();
+  });
+
+  it("saves a named collection-bound draft without asking for its parent again", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useApplicationStore();
+    const workspaceId = "019facab-1eee-765f-bd9f-ac2449151da0";
+    const collectionId = "019facab-1eee-765f-bd9f-ac2449151da1";
+    const draft = {
+      name: "List users",
+      description: "",
+      notes: "",
+      method: "GET" as const,
+      targetMode: "composed" as const,
+      targetUrl: "/users",
+      query: [],
+      headers: [],
+      requestBody: { kind: "none" as const },
+      body: "",
+      preRequestScript: "",
+      postResponseScript: "",
+    };
+    store.$patch({
+      selectedWorkspaceId: workspaceId,
+      workspaces: [{ workspaceId, name: "Workspace", role: "owner" }],
+      requestTabs: [
+        {
+          tabId: "collection-draft",
+          workspaceId,
+          request: null,
+          draft,
+          baseline: null,
+          variableProfile: null,
+          variableDraft: [],
+          variableBaseline: [],
+          pendingParentCollectionId: collectionId,
+          inheritedTarget: "https://example.test",
+          inheritedHeaders: [],
+          execution: null,
+          exchangeSummaries: [],
+          selectedExchangeId: null,
+          selectedExchange: null,
+          revisions: [],
+          viewingRevision: null,
+          busy: false,
+        },
+      ],
+      activeRequestTabId: "collection-draft",
+      activeWorkbenchTabId: "collection-draft",
+      workbenchTabOrder: ["collection-draft"],
+    });
+    const updateRequestDraft = vi.fn();
+    const saveTemporaryRequest = vi.fn().mockResolvedValue(undefined);
+    const controller = {
+      initializeWorkspace: vi.fn().mockResolvedValue(undefined),
+      updateRequestDraft,
+      saveTemporaryRequest,
+      session: { logout: vi.fn() },
+    } as unknown as ApplicationController;
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/", component: { template: "<div />" } }],
+    });
+    const wrapper = shallowMount(MainPage, {
+      global: {
+        plugins: [pinia, i18n, router],
+        provide: { [applicationControllerKey as symbol]: controller },
+      },
+    });
+
+    wrapper.getComponent(RequestEditor).vm.$emit("save", draft);
+    await flushPromises();
+
+    expect(updateRequestDraft).toHaveBeenCalledWith("collection-draft", draft);
+    expect(saveTemporaryRequest).toHaveBeenCalledWith(
+      "collection-draft",
+      "List users",
+      collectionId,
+    );
   });
 
   it("confirms and closes all tabs only in the selected workspace", async () => {

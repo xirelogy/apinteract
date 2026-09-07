@@ -2636,6 +2636,21 @@
   grid-template-columns: var(--control-height-compact) minmax(0, 1fr);
 }
 
+.request-save-destination {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-primary);
+}
+
+.request-save-destination-label {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+}
+
 .resource-dialog-actions {
   justify-content: flex-end;
   gap: var(--space-2);
