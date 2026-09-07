@@ -8,6 +8,9 @@ The canonical contract is the
 [OpenAPI JSON document](openapi.json). It defines the HTTP operations and the
 bounded WebSocket message schemas used by the web frontend.
 
+Deployment settings, defaults, accepted values, and the AIO override boundary
+are documented in the [backend configuration reference](configuration.md).
+
 ## Transport Roles
 
 - HTTP provides first-user setup, authentication, session refresh, health

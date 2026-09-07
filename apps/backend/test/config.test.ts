@@ -1,6 +1,6 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -71,6 +71,93 @@ describe("backend scripting configuration", () => {
         allowedScopes: ["workspace"],
         allowSecrets: false,
       });
+    } finally {
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("backend configuration structure", () => {
+  it("loads the shipped AIO administrator sample with runtime-owned values", async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), "apinteract-config-"));
+    const path = join(rootPath, "backend.yaml");
+    try {
+      const sample = await readFile(
+        resolve(
+          import.meta.dirname,
+          "../../../deploy/aio/configuration/backend.yaml",
+        ),
+        "utf8",
+      );
+      await writeFile(
+        path,
+        `${sample}\nproxy:\n  endpoint: http://127.0.0.1:8081\n  bearerToken: generated-test-token\n`,
+      );
+
+      const configuration = await loadBackendConfiguration(path);
+
+      expect(configuration.server.publicOrigin).toBe("http://localhost:8080");
+      expect(configuration.authentication?.providers[0]?.plugin).toBe(
+        "builtin.local-password",
+      );
+      expect(configuration.scripts?.variableWrites.allowedScopes).toEqual([
+        "request",
+        "parent-collection",
+        "workspace",
+        "selected-environment",
+      ]);
+    } finally {
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unknown host-owned properties", async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), "apinteract-config-"));
+    const path = join(rootPath, "backend.yaml");
+    try {
+      await writeFile(
+        path,
+        JSON.stringify({
+          configVersion: 1,
+          proxy: { endpoint: "http://proxy.test", bearerToken: "token" },
+          sessions: { unsupported: "secret-value" },
+        }),
+      );
+
+      await expect(loadBackendConfiguration(path)).rejects.toThrow(
+        /config\.sessions\.unsupported is not supported/u,
+      );
+    } finally {
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects invalid listener ports and browser origins", async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), "apinteract-config-"));
+    const path = join(rootPath, "backend.yaml");
+    try {
+      const base = {
+        configVersion: 1,
+        proxy: { endpoint: "http://proxy.test", bearerToken: "token" },
+      };
+      await writeFile(
+        path,
+        JSON.stringify({ ...base, server: { port: 65_536 } }),
+      );
+      await expect(loadBackendConfiguration(path)).rejects.toThrow(
+        /config\.server\.port must be an integer from 1 through 65535/u,
+      );
+
+      await writeFile(
+        path,
+        JSON.stringify({
+          ...base,
+          server: { publicOrigin: "https://example.test/web-ui" },
+        }),
+      );
+      await expect(loadBackendConfiguration(path)).rejects.toThrow(
+        /config\.server\.publicOrigin must be an HTTP origin without a path/u,
+      );
     } finally {
       await rm(rootPath, { recursive: true, force: true });
     }

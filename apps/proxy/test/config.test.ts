@@ -1,6 +1,6 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -21,6 +21,30 @@ afterEach(async () => {
 });
 
 describe("proxy configuration", () => {
+  it("loads the shipped AIO administrator sample with its generated principal", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "apinteract-proxy-config-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "proxy.yaml");
+    const sample = await readFile(
+      resolve(
+        import.meta.dirname,
+        "../../../deploy/aio/configuration/proxy.yaml",
+      ),
+      "utf8",
+    );
+    await writeFile(
+      path,
+      `${sample}\nprincipals:\n  - id: aio-backend\n    bearerToken: generated-test-token\n`,
+    );
+
+    const configuration = await loadProxyConfiguration(path);
+
+    expect(configuration.cache.retentionMs).toBe(900_000);
+    expect(configuration.limits).toEqual(DEFAULT_PROXY_LIMITS);
+    expect(configuration.targetPolicy.privateNetworkAccess).toBe("deny");
+    expect(configuration.transportObservations.enabled).toBe(true);
+  });
+
   it("applies secure policy and finite resource defaults", async () => {
     const configuration = await load({
       configVersion: 1,

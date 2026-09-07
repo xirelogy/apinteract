@@ -1,4 +1,5 @@
 services:
   apinteract:
     volumes:
-      - ./configuration:/etc/apinteract:ro
+      - ./configuration/backend.yaml:/etc/apinteract/backend.yaml:ro
+      - ./configuration/proxy.yaml:/etc/apinteract/proxy.yaml:ro

@@ -30,6 +30,21 @@ volumes:
   apinteract-cache:
 ```
 
+Administrator configuration is optional. When needed, mount either component
+file or both as an individual read-only bind mount:
+
+```yaml
+volumes:
+  - apinteract-data:/data
+  - apinteract-cache:/cache
+  - ./backend.yaml:/etc/apinteract/backend.yaml:ro
+  - ./proxy.yaml:/etc/apinteract/proxy.yaml:ro
+```
+
+Remove either file line when only the other component needs customization. See
+[Administrator Configuration](#administrator-configuration) for complete
+mounting examples, expanded defaults, and every precedence rule.
+
 Replace `VERSION` with a published image version without the Git tag's leading
 `v`.
 
@@ -213,21 +228,245 @@ the effective configuration is generated during startup.
 
 ## Administrator Configuration
 
-The image has safe AIO defaults and does not require an administrator
-configuration mount. To customize the supported configuration subset, copy
-the examples and include the read-only Compose override:
+The image has safe defaults and needs no administrator configuration for a
+normal local deployment. Mount a file only when its component needs a setting
+changed. The canonical mounts are:
 
-```sh
-cp -R deploy/aio/configuration /path/to/apinteract-configuration
-docker compose \
-  -f deploy/aio/compose.yaml \
-  -f deploy/aio/compose.configuration.example.yaml \
-  up -d --build
+```text
+backend.yaml -> /etc/apinteract/backend.yaml:ro
+proxy.yaml   -> /etc/apinteract/proxy.yaml:ro
 ```
 
-Adjust the override's host path if the configuration directory is outside
-`deploy/aio/`. Configuration files are strict YAML 1.2 and begin with
-`configVersion: 1`.
+The host files must exist as regular readable files before creating the
+container.
+
+### Docker Compose mounts
+
+Add one or both bind mounts directly to the service. This complete example uses
+both:
+
+```yaml
+services:
+  apinteract:
+    image: xirelogy/apinteract:VERSION
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:8080:8080
+    volumes:
+      - apinteract-data:/data
+      - apinteract-cache:/cache
+      - ./backend.yaml:/etc/apinteract/backend.yaml:ro
+      - ./proxy.yaml:/etc/apinteract/proxy.yaml:ro
+
+volumes:
+  apinteract-data:
+  apinteract-cache:
+```
+
+For backend-only configuration, retain only the `backend.yaml` bind mount. For
+proxy-only configuration, retain only `proxy.yaml`. Relative host paths are
+resolved from the directory containing the Compose file.
+
+The repository also includes `deploy/aio/compose.configuration.example.yaml`
+as an optional two-file override for `deploy/aio/compose.yaml`. It is a
+convenience, not a required configuration mechanism.
+
+Operators who always manage both files together may instead mount their parent
+directory read-only:
+
+```yaml
+volumes:
+  - ./configuration:/etc/apinteract:ro
+```
+
+Individual file mounts are preferred because they make the active component
+configuration explicit and allow either file to be omitted.
+
+### `docker run` mounts
+
+The equivalent image-only command is:
+
+```sh
+docker run -d --name apinteract \
+  --restart unless-stopped \
+  --read-only \
+  --security-opt no-new-privileges \
+  -p 127.0.0.1:8080:8080 \
+  --mount type=volume,source=apinteract-data,target=/data \
+  --mount type=volume,source=apinteract-cache,target=/cache \
+  --mount type=bind,source=/etc/apinteract/backend.yaml,target=/etc/apinteract/backend.yaml,readonly \
+  --mount type=bind,source=/etc/apinteract/proxy.yaml,target=/etc/apinteract/proxy.yaml,readonly \
+  --tmpfs /run:size=16m,mode=0755,exec \
+  --tmpfs /tmp:size=64m,mode=1777 \
+  xirelogy/apinteract:VERSION
+```
+
+Remove either bind-mount line when only one file is present. Absolute host paths
+make this command independent of a source checkout.
+
+### Expanded AIO defaults
+
+The following blocks show the complete effective default behavior. They include
+AIO-owned values so operators can understand the running components; they are
+not templates for replacing generated credentials. Component-level defaults
+that the generated `/run/apinteract/*.yaml` files omit are filled by the
+component loaders before startup.
+
+Default backend behavior:
+
+```yaml
+configVersion: 1
+server:
+  host: 0.0.0.0
+  port: 8080
+  publicOrigin: http://localhost:8080
+persistence:
+  databasePath: /data/database/apinteract.sqlite3
+  migrationBackupDirectory: /data/backups
+blobs:
+  rootPath: /data/blobs
+  stagingPath: /data/blob-staging
+audit:
+  rootPath: /data/audit
+proxy:
+  endpoint: http://127.0.0.1:8081
+  bearerToken: "<generated privately at startup>"
+sessions:
+  secureCookie: false
+  accessLifetimeSeconds: 900
+  refreshIdleLifetimeSeconds: 604800
+  refreshAbsoluteLifetimeSeconds: 2592000
+frontend:
+  distPath: /opt/apinteract/frontend
+authentication:
+  webBootstrap: true
+  providers:
+    - id: local-password
+      plugin: builtin.local-password
+      label: Username and password
+      description: Sign in with your APInteract username and password.
+      configuration: {}
+plugins:
+  builtinPath: /opt/apinteract/plugins
+  userPath: /data/plugins
+scripts:
+  variableWrites:
+    allowedScopes:
+      - request
+      - parent-collection
+      - workspace
+      - selected-environment
+    allowSecrets: true
+```
+
+Default proxy behavior:
+
+```yaml
+configVersion: 1
+server:
+  host: 127.0.0.1
+  port: 8081
+cache:
+  path: /cache
+  retentionMs: 900000
+limits:
+  maxMetadataBytes: 1048576
+  maxRequestHeaderCount: 1024
+  maxRequestBodyBytes: 786432
+  maxResponseBodyBytes: 1073741824
+  maxCacheBytesPerPrincipal: 2147483648
+  maxConcurrentExecutionsPerPrincipal: 16
+targetPolicy:
+  privateNetworkAccess: deny
+  allowCidrs: []
+  denyCidrs: []
+transportObservations:
+  enabled: true
+principals:
+  - id: aio-backend
+    bearerToken: "<same generated private credential>"
+```
+
+### Merge and precedence rules
+
+Administrator files are strict YAML 1.2 documents beginning with
+`configVersion: 1`. Unknown properties are rejected. Objects merge recursively
+over the defaults, while arrays replace the complete default array. A file may
+therefore contain `configVersion` and only the sections being changed.
+
+Startup applies values in this order, from lowest to highest precedence:
+
+1. packaged AIO defaults;
+2. the environment-derived default public origin;
+3. mounted administrator YAML; and
+4. the explicit web-bootstrap environment override and security-sensitive
+   AIO-owned values.
+
+The environment conveniences are limited to:
+
+| Variable                       | Purpose                                                                                         |
+| ------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `APINTERACT_AIO_BIND_ADDRESS`  | Host address used by the maintained Compose port publication; it does not alter component YAML. |
+| `APINTERACT_AIO_PORT`          | Host published port and the default loopback public origin used by the maintained Compose file. |
+| `APINTERACT_AIO_PUBLIC_ORIGIN` | Default backend browser origin when mounted YAML does not set `server.publicOrigin`.            |
+| `APINTERACT_AIO_WEB_BOOTSTRAP` | `true` or `false` override for first-user web setup.                                            |
+
+Mounted `server.publicOrigin` wins over `APINTERACT_AIO_PUBLIC_ORIGIN`.
+`APINTERACT_AIO_WEB_BOOTSTRAP` is applied after the mounted authentication
+section. Other component properties have no environment-variable equivalent.
+
+The initializer always owns and overrides:
+
+- backend listener `0.0.0.0:8080`;
+- local proxy endpoint and generated bearer credential;
+- proxy listener `127.0.0.1:8081` and its single `aio-backend` principal;
+- compiled frontend path; and
+- refresh-cookie security, derived from the effective public origin.
+
+It also derives the default durable backend paths from `/data` and the proxy
+cache path from `/cache`. Administrator files may override those paths, unlike
+the AIO-owned values above, but the replacements must remain writable inside
+the container and durable data should stay on the `/data` volume.
+
+Administrator input stays read-only under `/etc/apinteract`. The initializer
+writes private effective files and the generated credential under
+`/run/apinteract` with owner-only permissions. Do not mount, edit, or persist
+`/run/apinteract`; it is regenerated when the container starts.
+
+### Maintained sample files
+
+Source checkouts provide safe, validated examples:
+
+```text
+deploy/aio/configuration/backend.yaml
+deploy/aio/configuration/proxy.yaml
+```
+
+Copy either file to the host path used by the corresponding bind mount and edit
+only the required values. The complete supported component keys, accepted
+values, defaults, and AIO override behavior are documented separately:
+
+- [Backend configuration reference](../../docs/backend-api/configuration.md)
+- [Proxy configuration reference](../../docs/proxy-api/configuration.md)
+
+### Common backend changes
+
+Set the exact external HTTPS origin when a reverse proxy serves the UI:
+
+```yaml
+configVersion: 1
+server:
+  publicOrigin: https://apinteract.example.com
+```
+
+Disable browser-based first-user setup while retaining the default local
+password provider:
+
+```yaml
+configVersion: 1
+authentication:
+  webBootstrap: false
+```
 
 Post-response scripts can save ordinary and secret variable values in all
 available scopes by default. Administrators can narrow this automation policy
@@ -235,8 +474,6 @@ in `backend.yaml`; an empty `allowedScopes` list disables persistent writes:
 
 ```yaml
 configVersion: 1
-server:
-  publicOrigin: https://apinteract.example.com
 scripts:
   variableWrites:
     allowedScopes:
@@ -254,6 +491,7 @@ currently includes the local-password provider; omitting this section enables
 one default instance and first-user web setup:
 
 ```yaml
+configVersion: 1
 authentication:
   webBootstrap: true
   providers:
@@ -271,24 +509,83 @@ runtime value without changing the mounted administrator file.
 See [Authentication provider plugins](../../docs/plugins/authentication-providers.md)
 for the ownership and identity-linking model.
 
-The initializer always owns these AIO-specific values:
+### Common proxy changes
 
-- backend listener `0.0.0.0:8080`;
-- local proxy endpoint and generated bearer credential;
-- proxy listener `127.0.0.1:8081` and recognized local principal;
-- compiled frontend path; and
-- refresh-cookie security derived from the exact public origin.
+Raise selected resource limits without repeating unchanged defaults:
 
-This prevents an administrator file from exposing the internal proxy or
-replacing its runtime-owned identity. Other supported backend storage,
-session, origin, proxy cache, resource-limit, outbound target-policy, and
-transport-observation settings merge over the packaged defaults. Private and
-unique-local targets are denied by default. Set
-`targetPolicy.privateNetworkAccess` to `allow` for LAN or sibling-container
-targets; loopback and link-local targets remain denied. Detailed connection and
-TLS observations are enabled by default and can be disabled with
-`transportObservations.enabled: false` in `proxy.yaml`; first-byte and total
-timings remain available.
+```yaml
+configVersion: 1
+limits:
+  maxRequestBodyBytes: 16777216
+  maxResponseBodyBytes: 2147483648
+  maxConcurrentExecutionsPerPrincipal: 32
+```
+
+Permit all ordinary private network targets while retaining one explicit
+exclusion:
+
+```yaml
+configVersion: 1
+targetPolicy:
+  privateNetworkAccess: allow
+  allowCidrs: []
+  denyCidrs:
+    - 192.168.20.0/24
+```
+
+Alternatively, keep private networks denied and allow only selected ranges:
+
+```yaml
+configVersion: 1
+targetPolicy:
+  privateNetworkAccess: deny
+  allowCidrs:
+    - 10.20.0.0/16
+  denyCidrs:
+    - 10.20.5.0/24
+```
+
+Loopback, link-local, unspecified, multicast, and other non-unicast
+special-use ranges remain blocked even when `privateNetworkAccess` is `allow`
+or an `allowCidrs` entry contains them.
+
+Detailed connection and TLS observations are enabled by default. Disable them
+with `transportObservations.enabled: false` in `proxy.yaml`; first-byte and
+total timings remain available.
+
+### Apply changes and troubleshoot startup
+
+Recreate the container after changing a mounted file so the initializer can
+merge and validate it again:
+
+```sh
+docker compose up -d --force-recreate
+docker compose logs apinteract
+```
+
+For `docker run`, stop and remove the old container, then repeat the same
+creation command. Named `/data` and `/cache` volumes remain separate from the
+container lifecycle.
+
+Common failures are:
+
+- **The host source does not exist.** Create the file first. Docker's `-v`
+  syntax may create a directory at a missing host path, which then fails when
+  mounted over a file. Prefer `--mount` for `docker run` because it reports a
+  missing bind source immediately.
+- **Unknown key or wrong value type.** Read the first startup validation error,
+  correct the strict YAML property or value, and recreate the container.
+- **Invalid or duplicate YAML keys.** Use spaces, keep keys unique, and avoid
+  YAML aliases. Both files must parse as one object with `configVersion: 1`.
+- **Permission denied.** Make the host file readable by the container runtime;
+  keep it read-only in the container and restrict host access when it contains
+  secrets.
+- **Changes appear ignored.** Confirm the file targets `/etc/apinteract`, not
+  `/run/apinteract`, then recreate rather than merely signaling the running
+  component.
+- **A configured path is unwritable.** The supplied container has writable
+  storage only at `/data`, `/cache`, `/run`, and `/tmp`. Durable backend paths
+  should remain under `/data`; proxy cache belongs under `/cache`.
 
 ## Persistent Data And Backup
 

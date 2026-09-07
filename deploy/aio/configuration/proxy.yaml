@@ -1,10 +1,25 @@
 configVersion: 1
+
+# Retain completed execution frames for 15 minutes in disposable AIO cache.
 cache:
   path: /cache
   retentionMs: 900000
+
+# Enforce the packaged per-principal request, response, cache, and concurrency ceilings.
+limits:
+  maxMetadataBytes: 1048576
+  maxRequestHeaderCount: 1024
+  maxRequestBodyBytes: 786432
+  maxResponseBodyBytes: 1073741824
+  maxCacheBytesPerPrincipal: 2147483648
+  maxConcurrentExecutionsPerPrincipal: 16
+
+# Deny private networks unless a deployment deliberately enables or allowlists them.
 targetPolicy:
   privateNetworkAccess: deny
   allowCidrs: []
   denyCidrs: []
+
+# Capture bounded socket, timing, TLS, trust, and certificate observations.
 transportObservations:
   enabled: true

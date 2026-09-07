@@ -85,6 +85,19 @@ function record(value: unknown, location: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/** Rejects unsupported properties without rendering their potentially sensitive values. */
+function requireKnownKeys(
+  value: Record<string, unknown>,
+  location: string,
+  keys: readonly string[],
+): void {
+  const supported = new Set(keys);
+  const unknown = Object.keys(value).find((key) => !supported.has(key));
+  if (unknown !== undefined) {
+    throw new Error(`${location}.${unknown} is not supported`);
+  }
+}
+
 /** Reads a non-empty string or applies its documented default. */
 function text(value: unknown, location: string, defaultValue?: string): string {
   if (value === undefined && defaultValue !== undefined) {
@@ -109,6 +122,36 @@ function integer(
     throw new Error(`${location} must be a positive safe integer`);
   }
   return value as number;
+}
+
+/** Reads a valid TCP port or applies its documented default. */
+function port(value: unknown, location: string, defaultValue: number): number {
+  const parsed = integer(value, location, defaultValue);
+  if (parsed > 65_535) {
+    throw new Error(`${location} must be an integer from 1 through 65535`);
+  }
+  return parsed;
+}
+
+/** Reads one exact HTTP browser origin without credentials, path, query, or fragment. */
+function httpOrigin(
+  value: unknown,
+  location: string,
+  defaultValue: string,
+): string {
+  const source = text(value, location, defaultValue);
+  try {
+    const parsed = new URL(source);
+    if (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.origin === source
+    ) {
+      return source;
+    }
+  } catch {
+    // Report one stable configuration error below.
+  }
+  throw new Error(`${location} must be an HTTP origin without a path`);
 }
 
 /** Reads a boolean or applies its documented default. */
@@ -177,6 +220,10 @@ function authenticationProviders(
     return DEFAULT_AUTHENTICATION_PROVIDERS;
   }
   const authentication = record(value, "config.authentication");
+  requireKnownKeys(authentication, "config.authentication", [
+    "providers",
+    "webBootstrap",
+  ]);
   if (authentication.providers === undefined) {
     return DEFAULT_AUTHENTICATION_PROVIDERS;
   }
@@ -192,6 +239,13 @@ function authenticationProviders(
   return authentication.providers.map((entry, index) => {
     const location = `config.authentication.providers[${index}]`;
     const provider = record(entry, location);
+    requireKnownKeys(provider, location, [
+      "id",
+      "plugin",
+      "label",
+      "description",
+      "configuration",
+    ]);
     const id = text(provider.id, `${location}.id`);
     const plugin = text(provider.plugin, `${location}.plugin`);
     if (
@@ -267,6 +321,19 @@ export async function loadBackendConfiguration(
   path: string,
 ): Promise<BackendConfiguration> {
   const document = record(parse(await readFile(path, "utf8")), "config");
+  requireKnownKeys(document, "config", [
+    "configVersion",
+    "server",
+    "persistence",
+    "blobs",
+    "audit",
+    "proxy",
+    "sessions",
+    "frontend",
+    "authentication",
+    "plugins",
+    "scripts",
+  ]);
   if (document.configVersion !== 1) {
     throw new Error("config.configVersion must be 1");
   }
@@ -283,6 +350,27 @@ export async function loadBackendConfiguration(
     scripts.variableWrites ?? {},
     "config.scripts.variableWrites",
   );
+  requireKnownKeys(server, "config.server", ["host", "port", "publicOrigin"]);
+  requireKnownKeys(persistence, "config.persistence", [
+    "databasePath",
+    "migrationBackupDirectory",
+  ]);
+  requireKnownKeys(blobs, "config.blobs", ["rootPath", "stagingPath"]);
+  requireKnownKeys(audit, "config.audit", ["rootPath"]);
+  requireKnownKeys(proxy, "config.proxy", ["endpoint", "bearerToken"]);
+  requireKnownKeys(sessions, "config.sessions", [
+    "secureCookie",
+    "accessLifetimeSeconds",
+    "refreshIdleLifetimeSeconds",
+    "refreshAbsoluteLifetimeSeconds",
+  ]);
+  requireKnownKeys(frontend, "config.frontend", ["distPath"]);
+  requireKnownKeys(plugins, "config.plugins", ["builtinPath", "userPath"]);
+  requireKnownKeys(scripts, "config.scripts", ["variableWrites"]);
+  requireKnownKeys(variableWrites, "config.scripts.variableWrites", [
+    "allowedScopes",
+    "allowSecrets",
+  ]);
   const authenticationValue = document.authentication;
   const authentication = authenticationProviders(authenticationValue);
   const authenticationRecord =
@@ -300,8 +388,8 @@ export async function loadBackendConfiguration(
     configVersion: 1,
     server: {
       host: text(server.host, "config.server.host", "0.0.0.0"),
-      port: integer(server.port, "config.server.port", 8080),
-      publicOrigin: text(
+      port: port(server.port, "config.server.port", 8080),
+      publicOrigin: httpOrigin(
         server.publicOrigin,
         "config.server.publicOrigin",
         "http://localhost:8080",

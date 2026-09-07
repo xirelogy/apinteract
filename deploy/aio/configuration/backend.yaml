@@ -1,10 +1,26 @@
 configVersion: 1
+
+# Exact origin shown to browsers. Replace this with the external HTTPS origin
+# when APInteract is behind an ingress.
 server:
-  publicOrigin: https://apinteract.example.com
+  publicOrigin: http://localhost:8080
+
+# Keep one built-in username/password login method and permit one-time web setup.
 authentication:
+  webBootstrap: true
   providers:
     - id: local-password
       plugin: builtin.local-password
       label: Username and password
       description: Sign in with your APInteract username and password.
       configuration: {}
+
+# Bound the persistent destinations and secret writes available to scripts.
+scripts:
+  variableWrites:
+    allowedScopes:
+      - request
+      - parent-collection
+      - workspace
+      - selected-environment
+    allowSecrets: true

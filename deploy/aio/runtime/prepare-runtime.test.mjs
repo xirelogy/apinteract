@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdtemp,
+  mkdir,
+  readFile,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -199,4 +206,51 @@ test("rejects unsupported administrator properties", async () => {
     }),
     /config\.unsupported is not supported/u,
   );
+});
+
+test("prepares the shipped administrator samples independently and together", async () => {
+  const sampleRoot = resolve(import.meta.dirname, "../configuration");
+  for (const fileNames of [
+    ["backend.yaml"],
+    ["proxy.yaml"],
+    ["backend.yaml", "proxy.yaml"],
+  ]) {
+    const root = await mkdtemp(resolve(tmpdir(), "apinteract-aio-samples-"));
+    const administratorRoot = resolve(root, "configuration");
+    await mkdir(administratorRoot);
+    await Promise.all(
+      fileNames.map((fileName) =>
+        copyFile(
+          resolve(sampleRoot, fileName),
+          resolve(administratorRoot, fileName),
+        ),
+      ),
+    );
+
+    const prepared = await prepareRuntime({
+      administratorRoot,
+      runtimeRoot: resolve(root, "runtime"),
+      dataRoot: resolve(root, "data"),
+      cacheRoot: resolve(root, "cache"),
+      environment: {},
+      tokenFactory: () => Buffer.alloc(48, 7),
+    });
+
+    assert.equal(prepared.backend.configVersion, 1);
+    assert.equal(prepared.proxy.configVersion, 1);
+    assert.equal(prepared.backend.server.host, "0.0.0.0");
+    assert.equal(prepared.proxy.server.host, "127.0.0.1");
+    assert.equal(prepared.proxy.principals[0].id, "aio-backend");
+    if (fileNames.includes("backend.yaml")) {
+      assert.equal(
+        prepared.backend.server.publicOrigin,
+        "http://localhost:8080",
+      );
+      assert.equal(prepared.backend.authentication.webBootstrap, true);
+    }
+    if (fileNames.includes("proxy.yaml")) {
+      assert.equal(prepared.proxy.limits.maxRequestBodyBytes, 786_432);
+      assert.equal(prepared.proxy.transportObservations.enabled, true);
+    }
+  }
 });
