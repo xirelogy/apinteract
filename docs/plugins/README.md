@@ -315,7 +315,8 @@ selection is deterministic.
 
 Frontend plugins are trusted executable browser code, but request and response
 content is untrusted input. A plugin must not insert response markup into the
-application document. HTML display uses the host's network-inert sandbox.
+application document. HTML display uses the host's network-restricted,
+opaque-origin sandbox.
 Raster images remain subject to host-owned byte, dimension, and pixel limits.
 The raster plugin owns supported media types and header parsing, then supplies
 an `inspect(mediaType, boundedHeaderBytes)` callback to the generic image

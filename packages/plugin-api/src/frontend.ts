@@ -139,7 +139,7 @@ export interface WireBodyEditorMountOptions {
   readonly onChange: (body: RequestBodyDefinition) => void;
 }
 
-/** Configures an isolated document surface for untrusted response markup. */
+/** Configures an opaque-origin, network-restricted document surface for untrusted response markup. */
 export interface SandboxedDocumentMountOptions {
   readonly source: string;
   readonly title: string;

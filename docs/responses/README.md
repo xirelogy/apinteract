@@ -23,20 +23,27 @@ Raw and is labelled instead of being corrected silently.
 ## HTML preview safety
 
 Complete `text/html` and `application/xhtml+xml` previews can be opened in the
-**Preview** tab. Response HTML is untrusted and does not run in APInteract's
-document:
+**Preview** tab. Response HTML is untrusted and never runs in APInteract's
+application document:
 
-- active elements and URL-bearing attributes are sanitized;
-- the preview runs in an iframe with an empty sandbox permission set;
-- scripts, forms, navigation, popups, downloads, and same-origin access are
-  unavailable; and
+- embedded browsing, form, and network-bearing elements and attributes are
+  sanitized;
+- same-document fragment links are retained for document-local behavior;
+- inline classic scripts may enhance the preview after the user opens its tab;
+- the preview runs in an opaque-origin iframe whose only sandbox permission is
+  script execution;
+- forms, popups, downloads, external scripts, module loading, and same-origin
+  access are unavailable; and
 - a restrictive preview Content Security Policy blocks remote and local
-  network resources.
+  subresources and connection APIs.
 
-Consequently, pages that depend on scripts, external styles, fonts, frames, or
-images will not look identical to the live site. APInteract does not offer a
-"load remote content" bypass because merely fetching a response-controlled URL
-could disclose network information or contact a private service.
+This permits self-contained document behavior such as Symfony VarDumper
+expand, collapse, and search controls without exposing APInteract credentials
+or application state. Pages that depend on external scripts, styles, fonts,
+frames, or images will not look identical to the live site. APInteract does not
+offer a "load remote content" bypass because merely fetching a
+response-controlled URL could disclose network information or contact a
+private service.
 
 ## Images and binary bodies
 
