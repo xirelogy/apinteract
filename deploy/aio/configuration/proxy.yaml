@@ -6,3 +6,5 @@ targetPolicy:
   privateNetworkAccess: deny
   allowCidrs: []
   denyCidrs: []
+transportObservations:
+  enabled: true

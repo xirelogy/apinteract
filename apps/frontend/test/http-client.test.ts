@@ -59,6 +59,32 @@ describe("BackendHttpClient", () => {
     });
   });
 
+  it("downloads an execution-scoped certificate with bearer authentication", async () => {
+    const pem =
+      "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n";
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(pem, {
+        status: 200,
+        headers: { "Content-Type": "application/x-pem-file" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const fingerprint = "a".repeat(64);
+
+    const certificate =
+      await new BackendHttpClient().downloadExecutionTransportCertificate(
+        "access-token",
+        "execution/id",
+        fingerprint,
+      );
+
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/executions/execution%2Fid/transport-certificates/${fingerprint}`,
+      { headers: { Authorization: "Bearer access-token" } },
+    );
+    await expect(certificate.text()).resolves.toBe(pem);
+  });
+
   it("returns health metadata even when dependencies make the backend not ready", async () => {
     const health = {
       status: "not_ready",

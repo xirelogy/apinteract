@@ -1,5 +1,7 @@
+import { createHash, X509Certificate } from "node:crypto";
 import type { Kysely, Transaction } from "kysely";
 
+import type { components as BackendComponents } from "@apinteract/api-contracts/backend";
 import type { components as ProxyComponents } from "@apinteract/api-contracts/proxy";
 
 import type { AuditService } from "../audit/audit-service.js";
@@ -50,8 +52,18 @@ import {
 
 type ResponseHead = ProxyComponents["schemas"]["ResponseHead"];
 type ResponseComplete = ProxyComponents["schemas"]["ResponseComplete"];
+type ProxyTransportObservation =
+  ProxyComponents["schemas"]["TransportObservation"];
+type ExecutionTransportMetadata =
+  BackendComponents["schemas"]["ExecutionTransportMetadata"];
+type ExecutionTransportTimings =
+  BackendComponents["schemas"]["ExecutionTransportTimings"];
 /** Maximum characters retained in the WebSocket-safe outgoing body preview. */
 const OUTGOING_BODY_PREVIEW_CHARACTERS = 262_144;
+/** Maximum raw DER retained for one execution certificate chain. */
+const MAX_TRANSPORT_CERTIFICATE_BYTES = 256 * 1_024;
+/** Maximum certificates retained from one execution TLS peer chain. */
+const MAX_TRANSPORT_CERTIFICATES = 16;
 
 export interface ExecutionEvent {
   readonly type:
@@ -79,6 +91,10 @@ export interface ExecutionView {
   readonly bodyBlobId?: EntityId;
   readonly createdAt: string;
   readonly completedAt?: string;
+  readonly timings?: ExecutionTransportTimings;
+  readonly transportMetadataCollected: boolean;
+  readonly transportMetadataUnavailableReason?: "disabled" | "unsupported";
+  readonly transportMetadata?: ExecutionTransportMetadata;
   readonly error?: {
     readonly code: string;
     readonly message: string;
@@ -117,6 +133,19 @@ export interface ExecutionBody {
   readonly storageKey: string;
   readonly byteLength: number;
   readonly sha256: string;
+}
+
+/** Canonical DER bytes for one certificate referenced by an authorized execution. */
+export interface ExecutionTransportCertificate {
+  readonly der: Buffer;
+  readonly sha256Fingerprint: string;
+}
+
+interface ExecutionTransportResult {
+  readonly collected: boolean;
+  readonly unavailableReason?: "disabled" | "unsupported";
+  readonly timings?: ExecutionTransportTimings;
+  readonly observation?: ProxyTransportObservation;
 }
 
 /** Optional persistence capability used by post-response automation. */
@@ -273,6 +302,7 @@ export class ExecutionService {
       state: "running",
       bodyComplete: false,
       createdAt: new Date(prepared.createdAt).toISOString(),
+      transportMetadataCollected: false,
       scriptLogs: [],
       scriptTests: [],
     };
@@ -322,6 +352,46 @@ export class ExecutionService {
   /** Opens a previously authorized response body from blob storage. */
   openBody(storageKey: string) {
     return this.#blobs.open(storageKey);
+  }
+
+  /** Resolves exact certificate bytes through an execution-scoped authorization check. */
+  async transportCertificate(
+    userId: EntityId,
+    executionId: EntityId,
+    sha256Fingerprint: string,
+  ): Promise<ExecutionTransportCertificate> {
+    const row = await this.#database
+      .selectFrom("executions as execution")
+      .innerJoin(
+        "execution_transport_certificates as reference",
+        "reference.execution_id",
+        "execution.id",
+      )
+      .innerJoin(
+        "transport_certificates as certificate",
+        "certificate.sha256_fingerprint",
+        "reference.sha256_fingerprint",
+      )
+      .select([
+        "execution.workspace_id",
+        "certificate.der_bytes",
+        "certificate.sha256_fingerprint",
+      ])
+      .where("execution.id", "=", idToBytes(executionId))
+      .where("reference.sha256_fingerprint", "=", sha256Fingerprint)
+      .executeTakeFirst();
+    if (row === undefined) {
+      throw new ResourceNotFoundError("Execution certificate not found");
+    }
+    await this.#workspaces.requireCanRead(
+      this.#database,
+      userId,
+      bytesToId(row.workspace_id),
+    );
+    return {
+      der: Buffer.from(row.der_bytes),
+      sha256Fingerprint: row.sha256_fingerprint,
+    };
   }
 
   /** Streams a prepared request through the proxy into terminal persistence. */
@@ -614,6 +684,7 @@ export class ExecutionService {
           scripts,
           outgoingRequest,
           variableWrites,
+          transportResultFromComplete(head, complete),
         );
         publish({
           type: "execution.completed",
@@ -639,6 +710,7 @@ export class ExecutionService {
       scripts,
       outgoingRequest,
       [],
+      transportResultFromComplete(head, complete),
     );
     publish({
       type: "execution.completed",
@@ -677,6 +749,7 @@ export class ExecutionService {
       scripts,
       outgoingRequest,
       [],
+      transportResultFromFailure(head, cause),
     );
     publish({
       type: "execution.failed",
@@ -696,8 +769,10 @@ export class ExecutionService {
     scripts: ScriptSummary,
     outgoingRequest: OutgoingRequestView | undefined,
     variableWrites: readonly ScriptVariableWrite[],
+    transportResult: ExecutionTransportResult,
   ): Promise<ExecutionView> {
     const completedAt = Date.now();
+    let executionTransportMetadata: ExecutionTransportMetadata | undefined;
     const committedVariableWrites = variableWrites.map(
       scriptVariableWriteResult,
     );
@@ -710,6 +785,12 @@ export class ExecutionService {
     // committed atomically. Crash recovery may need to remove an orphan file
     // that was renamed before this transaction began.
     await this.#database.transaction().execute(async (transaction) => {
+      executionTransportMetadata = await this.#persistTransportMetadata(
+        transaction,
+        prepared.executionId,
+        transportResult.observation,
+        completedAt,
+      );
       await this.#applyVariableWrites(
         transaction,
         prepared,
@@ -753,6 +834,17 @@ export class ExecutionService {
           body_sha256: blob?.sha256 ?? null,
           error_json: error === null ? null : JSON.stringify(error),
           script_result_json: JSON.stringify(persistedScripts),
+          transport_metadata_collected: transportResult.collected ? 1 : 0,
+          transport_metadata_unavailable_reason:
+            transportResult.unavailableReason ?? null,
+          transport_metadata_json:
+            executionTransportMetadata === undefined
+              ? null
+              : JSON.stringify(executionTransportMetadata),
+          transport_timings_json:
+            transportResult.timings === undefined
+              ? null
+              : JSON.stringify(transportResult.timings),
           completed_at: completedAt,
         })
         .where("id", "=", idToBytes(prepared.executionId))
@@ -792,6 +884,19 @@ export class ExecutionService {
       ...(preview === undefined ? {} : { bodyPreview: preview }),
       createdAt: new Date(prepared.createdAt).toISOString(),
       completedAt: new Date(completedAt).toISOString(),
+      ...(transportResult.timings === undefined
+        ? {}
+        : { timings: transportResult.timings }),
+      transportMetadataCollected: transportResult.collected,
+      ...(transportResult.unavailableReason === undefined
+        ? {}
+        : {
+            transportMetadataUnavailableReason:
+              transportResult.unavailableReason,
+          }),
+      ...(executionTransportMetadata === undefined
+        ? {}
+        : { transportMetadata: executionTransportMetadata }),
       ...(error === null ? {} : { error: { ...error, errors: [] as const } }),
       ...(outgoingRequest === undefined ? {} : { outgoingRequest }),
       scriptLogs: scripts.logs,
@@ -800,6 +905,93 @@ export class ExecutionService {
         ? {}
         : { scriptVariableWrites: committedVariableWrites }),
       ...(scripts.error === undefined ? {} : { scriptError: scripts.error }),
+    };
+  }
+
+  /** Stores canonical certificates and returns a compact execution observation. */
+  async #persistTransportMetadata(
+    transaction: Transaction<DatabaseSchema>,
+    executionId: EntityId,
+    observation: ProxyTransportObservation | undefined,
+    observedAt: number,
+  ): Promise<ExecutionTransportMetadata | undefined> {
+    if (observation === undefined) return undefined;
+    const { tls: proxyTls, ...observationWithoutTls } = observation;
+    if (proxyTls === undefined) {
+      return observationWithoutTls;
+    }
+    const certificateSummaries: BackendComponents["schemas"]["ExecutionCertificateSummary"][] =
+      [];
+    const peerCertificateChain = proxyTls.peerCertificateChain ?? [];
+    if (peerCertificateChain.length > MAX_TRANSPORT_CERTIFICATES) {
+      throw new Error("Proxy certificate chain exceeds the certificate limit");
+    }
+    let retainedCertificateBytes = 0;
+    const retainedFingerprints = new Set<string>();
+    for (const [chainPosition, certificate] of peerCertificateChain.entries()) {
+      const der = decodeCanonicalBase64(certificate.derBase64);
+      retainedCertificateBytes += der.byteLength;
+      if (retainedCertificateBytes > MAX_TRANSPORT_CERTIFICATE_BYTES) {
+        throw new Error("Proxy certificate chain exceeds the DER byte limit");
+      }
+      const fingerprint = createHash("sha256").update(der).digest("hex");
+      if (fingerprint !== certificate.sha256Fingerprint) {
+        throw new Error(
+          "Proxy certificate fingerprint does not match DER bytes",
+        );
+      }
+      if (retainedFingerprints.has(fingerprint)) {
+        throw new Error(
+          "Proxy certificate chain contains a duplicate certificate",
+        );
+      }
+      retainedFingerprints.add(fingerprint);
+      const summary = certificateSummary(der, fingerprint, chainPosition);
+      await transaction
+        .insertInto("transport_certificates")
+        .values({
+          sha256_fingerprint: fingerprint,
+          der_bytes: der,
+          subject: summary.subject ?? null,
+          issuer: summary.issuer ?? null,
+          valid_from:
+            summary.validFrom === undefined
+              ? null
+              : Date.parse(summary.validFrom),
+          valid_to:
+            summary.validTo === undefined ? null : Date.parse(summary.validTo),
+          serial_number: summary.serialNumber ?? null,
+          subject_alternative_names_json:
+            summary.subjectAlternativeNames === undefined
+              ? null
+              : JSON.stringify(summary.subjectAlternativeNames),
+          created_at: observedAt,
+        })
+        .onConflict((conflict) =>
+          conflict.column("sha256_fingerprint").doNothing(),
+        )
+        .execute();
+      const stored = await transaction
+        .selectFrom("transport_certificates")
+        .select("der_bytes")
+        .where("sha256_fingerprint", "=", fingerprint)
+        .executeTakeFirstOrThrow();
+      if (!Buffer.from(stored.der_bytes).equals(der)) {
+        throw new Error("Certificate fingerprint collision detected");
+      }
+      await transaction
+        .insertInto("execution_transport_certificates")
+        .values({
+          execution_id: idToBytes(executionId),
+          sha256_fingerprint: fingerprint,
+          chain_position: chainPosition,
+        })
+        .execute();
+      certificateSummaries.push(summary);
+    }
+    return {
+      ...observationWithoutTls,
+      tls: executionTlsMetadata(proxyTls, certificateSummaries),
     };
   }
 
@@ -853,6 +1045,169 @@ export class ExecutionService {
       this.#variableWritePolicy,
     );
   }
+}
+
+/** Replaces raw peer DER with compact summaries for execution JSON storage. */
+function executionTlsMetadata(
+  value: NonNullable<ProxyTransportObservation["tls"]>,
+  peerCertificateChain: BackendComponents["schemas"]["ExecutionCertificateSummary"][],
+): BackendComponents["schemas"]["ExecutionTlsMetadata"] {
+  return {
+    verificationMode: value.verificationMode,
+    ...(value.authorized === undefined ? {} : { authorized: value.authorized }),
+    ...(value.authorizationErrorCode === undefined
+      ? {}
+      : { authorizationErrorCode: value.authorizationErrorCode }),
+    ...(value.protocol === undefined ? {} : { protocol: value.protocol }),
+    ...(value.alpnProtocol === undefined
+      ? {}
+      : { alpnProtocol: value.alpnProtocol }),
+    ...(value.serverName === undefined ? {} : { serverName: value.serverName }),
+    ...(value.cipher === undefined ? {} : { cipher: value.cipher }),
+    ...(peerCertificateChain.length === 0 ? {} : { peerCertificateChain }),
+    ...(value.peerCertificateChainCaptureComplete === undefined
+      ? {}
+      : {
+          peerCertificateChainCaptureComplete:
+            value.peerCertificateChainCaptureComplete,
+        }),
+    ...(value.omittedPeerCertificateCount === undefined
+      ? {}
+      : { omittedPeerCertificateCount: value.omittedPeerCertificateCount }),
+  };
+}
+
+/** Projects a successful proxy terminal frame onto backend persistence input. */
+function transportResultFromComplete(
+  head: ResponseHead,
+  complete: ResponseComplete,
+): ExecutionTransportResult {
+  return {
+    collected: complete.transportMetadataCollected,
+    ...(complete.transportMetadataUnavailableReason === undefined
+      ? {}
+      : { unavailableReason: complete.transportMetadataUnavailableReason }),
+    timings: complete.timings,
+    ...(head.transport === undefined ? {} : { observation: head.transport }),
+  };
+}
+
+/** Retains proxy observations and timings from a terminal execution failure. */
+function transportResultFromFailure(
+  head: ResponseHead | undefined,
+  cause: unknown,
+): ExecutionTransportResult {
+  if (cause instanceof ProxyExecutionError) {
+    const observation = cause.detail.transport ?? head?.transport;
+    return {
+      collected: cause.detail.transportMetadataCollected,
+      ...(cause.detail.transportMetadataUnavailableReason === undefined
+        ? {}
+        : {
+            unavailableReason: cause.detail.transportMetadataUnavailableReason,
+          }),
+      timings: cause.detail.timings,
+      ...(observation === undefined ? {} : { observation }),
+    };
+  }
+  return {
+    collected: head?.transport !== undefined,
+    ...(head?.transport === undefined ? {} : { observation: head.transport }),
+  };
+}
+
+/** Decodes a canonical non-empty Base64 string at the proxy trust boundary. */
+function decodeCanonicalBase64(value: string): Buffer {
+  if (
+    value.length === 0 ||
+    value.length > Math.ceil(MAX_TRANSPORT_CERTIFICATE_BYTES / 3) * 4 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(
+      value,
+    )
+  ) {
+    throw new Error("Proxy certificate DER is not canonical Base64");
+  }
+  const decoded = Buffer.from(value, "base64");
+  if (decoded.toString("base64") !== value) {
+    throw new Error("Proxy certificate DER is not canonical Base64");
+  }
+  return decoded;
+}
+
+/** Parses optional display fields after validating canonical X.509 DER. */
+function certificateSummary(
+  der: Buffer,
+  sha256Fingerprint: string,
+  chainPosition: number,
+): BackendComponents["schemas"]["ExecutionCertificateSummary"] {
+  const identity = { sha256Fingerprint, chainPosition };
+  let certificate: X509Certificate;
+  try {
+    certificate = new X509Certificate(der);
+  } catch (cause) {
+    throw new Error("Proxy certificate DER is not a valid X.509 certificate", {
+      cause,
+    });
+  }
+  const validFrom = validCertificateDate(certificate.validFrom);
+  const validTo = validCertificateDate(certificate.validTo);
+  const subjectAlternativeNames = splitSubjectAlternativeNames(
+    certificate.subjectAltName,
+  );
+  return {
+    ...identity,
+    ...(certificate.subject.length === 0
+      ? {}
+      : { subject: certificate.subject }),
+    ...(certificate.issuer.length === 0 ? {} : { issuer: certificate.issuer }),
+    ...(validFrom === undefined ? {} : { validFrom }),
+    ...(validTo === undefined ? {} : { validTo }),
+    ...(certificate.serialNumber.length === 0
+      ? {}
+      : { serialNumber: certificate.serialNumber }),
+    ...(subjectAlternativeNames.length === 0
+      ? {}
+      : { subjectAlternativeNames }),
+  };
+}
+
+/** Converts a runtime certificate date to canonical UTC when it is valid. */
+function validCertificateDate(value: string): string | undefined {
+  const milliseconds = Date.parse(value);
+  return Number.isFinite(milliseconds)
+    ? new Date(milliseconds).toISOString()
+    : undefined;
+}
+
+/** Splits Node's safely quoted subject-alt-name display without losing commas. */
+function splitSubjectAlternativeNames(value: string | undefined): string[] {
+  if (value === undefined || value.length === 0) return [];
+  const names: string[] = [];
+  let start = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quoted) {
+      escaped = true;
+      continue;
+    }
+    if (character === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (!quoted && character === "," && value[index + 1] === " ") {
+      names.push(value.slice(start, index));
+      start = index + 2;
+      index += 1;
+    }
+  }
+  names.push(value.slice(start));
+  return names.filter((name) => name.length > 0);
 }
 
 /** Removes plaintext from one committed write before it enters execution results. */

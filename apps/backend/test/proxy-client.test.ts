@@ -7,7 +7,7 @@ describe("ProxyClient readiness", () => {
 
   it("accepts only the compatible ready proxy health contract", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ status: "ready", apiVersion: "0.1.1" }), {
+      new Response(JSON.stringify({ status: "ready", apiVersion: "0.1.2" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
@@ -46,7 +46,7 @@ describe("ProxyClient readiness", () => {
         new Response(
           JSON.stringify({
             status: "ready",
-            apiVersion: "0.1.1",
+            apiVersion: "0.1.2",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -57,7 +57,7 @@ describe("ProxyClient readiness", () => {
       new ProxyClient("http://127.0.0.1:8081", "token").healthDetails(),
     ).resolves.toEqual({
       ready: true,
-      protocolVersion: "0.1.1",
+      protocolVersion: "0.1.2",
     });
   });
 

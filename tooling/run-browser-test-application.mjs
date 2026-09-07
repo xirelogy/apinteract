@@ -123,6 +123,7 @@ async function prepareRuntime() {
           allowCidrs: [],
           denyCidrs: [],
         },
+        transportObservations: { enabled: true },
         principals: [
           {
             id: "browser-test-backend",

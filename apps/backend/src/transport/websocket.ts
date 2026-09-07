@@ -120,7 +120,7 @@ export async function registerWebSocketRoute(
 
     sendEvent(socket, "system.ready", createEntityId(), {
       protocolVersion: 1,
-      backendApiVersion: "0.1.0",
+      backendApiVersion: "0.1.1",
     });
 
     socket.on("message", (data: RawData, isBinary: boolean) => {

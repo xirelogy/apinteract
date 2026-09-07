@@ -99,6 +99,7 @@ function proxyConfiguration() {
       allowCidrs: [],
       denyCidrs: [],
     },
+    transportObservations: { enabled: true },
     principals: [
       {
         id: "development-backend",

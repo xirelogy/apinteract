@@ -60,6 +60,9 @@ export const DEFAULT_PROXY_CONFIGURATION = Object.freeze({
     allowCidrs: [],
     denyCidrs: [],
   },
+  transportObservations: {
+    enabled: true,
+  },
 });
 
 /**
@@ -310,6 +313,7 @@ function validateProxyConfigurationKeys(configuration) {
     "cache",
     "limits",
     "targetPolicy",
+    "transportObservations",
     "principals",
   ]);
   requireKnownKeys(
@@ -338,6 +342,14 @@ function validateProxyConfigurationKeys(configuration) {
     recordOrEmpty(configuration.targetPolicy, "config.targetPolicy"),
     "config.targetPolicy",
     ["privateNetworkAccess", "allowCidrs", "denyCidrs"],
+  );
+  requireKnownKeys(
+    recordOrEmpty(
+      configuration.transportObservations,
+      "config.transportObservations",
+    ),
+    "config.transportObservations",
+    ["enabled"],
   );
   if (configuration.principals !== undefined) {
     if (!Array.isArray(configuration.principals)) {

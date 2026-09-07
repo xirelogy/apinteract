@@ -21,6 +21,17 @@ interface ExecutionBody {
 }
 
 interface CapabilitiesBody {
+  readonly apiVersion: string;
+  readonly features: {
+    readonly transportMetadata: {
+      readonly collectionEnabled: boolean;
+      readonly remoteEndpoint: boolean;
+      readonly localEndpoint: boolean;
+      readonly connectionReuse: boolean;
+      readonly tlsSummary: boolean;
+      readonly peerCertificateChain: boolean;
+    };
+  };
   readonly limits: {
     readonly maxConcurrentExecutionsPerPrincipal: number;
     readonly maxRequestBodyBytes: number;
@@ -72,6 +83,19 @@ describe("proxy runtime contract", () => {
     });
 
     expect(response.statusCode).toBe(200);
+    expect(response.json<CapabilitiesBody>()).toMatchObject({
+      apiVersion: "0.1.2",
+      features: {
+        transportMetadata: {
+          collectionEnabled: true,
+          remoteEndpoint: true,
+          localEndpoint: true,
+          connectionReuse: true,
+          tlsSummary: true,
+          peerCertificateChain: true,
+        },
+      },
+    });
     expect(response.json<CapabilitiesBody>().limits).toMatchObject({
       maxConcurrentExecutionsPerPrincipal: 2,
       maxRequestBodyBytes: 64,
@@ -330,6 +354,7 @@ async function createServer(
       allowCidrs: [],
       denyCidrs: [],
     },
+    transportObservations: { enabled: true },
     principals: [{ id: "backend", bearerToken: "test-token" }],
   };
   const server = createProxyServer(configuration);

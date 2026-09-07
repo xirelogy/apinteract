@@ -36,6 +36,7 @@ function execution(overrides: Partial<ExecutionView> = {}): ExecutionView {
     bodyBytes: 0,
     createdAt: "2026-08-29T00:00:00.000Z",
     completedAt: "2026-08-29T00:00:01.000Z",
+    transportMetadataCollected: false,
     scriptLogs: [],
     scriptTests: [],
     ...overrides,

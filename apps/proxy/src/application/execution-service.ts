@@ -1,11 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, rm } from "node:fs/promises";
-import {
-  request as httpRequest,
-  type ClientRequest,
-  type IncomingMessage,
-} from "node:http";
-import { request as httpsRequest } from "node:https";
+import { type ClientRequest, type IncomingMessage } from "node:http";
 import { join } from "node:path";
 
 import type { components } from "@apinteract/api-contracts/proxy";
@@ -20,11 +15,14 @@ import {
 } from "../protocol/frame-store.js";
 import { DEFAULT_PROXY_USER_AGENT } from "../version.js";
 import { type TargetApprover, TargetResolutionError } from "./target-policy.js";
+import { TargetTransport, TargetTransportError } from "./target-transport.js";
 
 type CreateExecutionRequest = components["schemas"]["CreateExecutionRequest"];
 type ExecutionSession = components["schemas"]["ExecutionSession"];
 type TargetRequest = components["schemas"]["TargetRequest"];
 type ExecutionStreamError = components["schemas"]["ExecutionStreamError"];
+type ExecutionTimings = components["schemas"]["ExecutionTimings"];
+type TransportObservation = components["schemas"]["TransportObservation"];
 
 const TERMINAL_FRAME_RESERVE_BYTES = 4_096;
 const MAX_EXPIRY_TOMBSTONES = 10_000;
@@ -62,6 +60,9 @@ interface ManagedExecution {
   totalTimer?: NodeJS.Timeout;
   expiryTimer?: NodeJS.Timeout;
   responseReaderActive: boolean;
+  transportStartedAt?: number;
+  transport: TransportObservation | undefined;
+  timings: Omit<ExecutionTimings, "totalMs">;
 }
 
 interface PendingExecutionCreation {
@@ -90,6 +91,8 @@ interface ExecutionFailureOptions {
   readonly message: string;
   readonly phase: ExecutionStreamError["phase"];
   readonly retryable: boolean;
+  readonly transport?: TransportObservation | undefined;
+  readonly timings?: Omit<ExecutionTimings, "totalMs"> | undefined;
 }
 
 /** Dependencies and enforceable limits owned by one execution service. */
@@ -98,6 +101,8 @@ export interface ExecutionServiceOptions {
   readonly retentionMs: number;
   readonly limits: ProxyLimitsConfiguration;
   readonly targetPolicy: TargetApprover;
+  readonly transportObservationsEnabled?: boolean;
+  readonly targetTransport?: TargetTransport;
   readonly reportCleanupError?: (cause: unknown) => void;
 }
 
@@ -149,6 +154,8 @@ export class ExecutionService {
   readonly #retentionMs: number;
   readonly #limits: ProxyLimitsConfiguration;
   readonly #targetPolicy: TargetApprover;
+  readonly #transportObservationsEnabled: boolean;
+  readonly #targetTransport: TargetTransport;
   readonly #reportCleanupError: (cause: unknown) => void;
   readonly #executions = new Map<string, ManagedExecution>();
   readonly #idempotency = new Map<string, string>();
@@ -163,6 +170,9 @@ export class ExecutionService {
     this.#retentionMs = options.retentionMs;
     this.#limits = options.limits;
     this.#targetPolicy = options.targetPolicy;
+    this.#transportObservationsEnabled =
+      options.transportObservationsEnabled ?? true;
+    this.#targetTransport = options.targetTransport ?? new TargetTransport();
     this.#reportCleanupError = options.reportCleanupError ?? (() => undefined);
   }
 
@@ -280,6 +290,8 @@ export class ExecutionService {
       terminalReserveBytes: TERMINAL_FRAME_RESERVE_BYTES,
       terminating: false,
       responseReaderActive: false,
+      transport: undefined,
+      timings: {},
     };
     this.#executions.set(id, execution);
     this.#idempotency.set(key, id);
@@ -459,6 +471,7 @@ export class ExecutionService {
       clearTimeout(tombstone.timer);
     }
     this.#expiredExecutions.clear();
+    this.#targetTransport.close();
   }
 
   /** Performs policy-approved target HTTP I/O and records its terminal response. */
@@ -466,7 +479,13 @@ export class ExecutionService {
     try {
       const target = execution.target;
       const url = new URL(target.url);
+      execution.transportStartedAt = performance.now();
       const approved = await this.#targetPolicy.approve(url);
+      if (this.#transportObservationsEnabled) {
+        execution.timings = {
+          dnsMs: performance.now() - execution.transportStartedAt,
+        };
+      }
       if (this.#isTerminal(execution)) {
         return;
       }
@@ -480,13 +499,24 @@ export class ExecutionService {
         headers["Content-Length"] = String(target.body.length);
       }
 
-      const response = await this.#openResponse(
-        execution,
+      const opened = await this.#targetTransport.open({
+        target,
         url,
-        approved.lookup,
+        lookup: approved.lookup,
         headers,
         requestBody,
-      );
+        startedAt: execution.transportStartedAt,
+        ...(execution.timings.dnsMs === undefined
+          ? {}
+          : { dnsMs: execution.timings.dnsMs }),
+        collectObservations: this.#transportObservationsEnabled,
+        onRequest: (request) => {
+          execution.request = request;
+        },
+      });
+      execution.timings = opened.timings;
+      execution.transport = opened.transport;
+      const response = opened.response;
       if (this.#isTerminal(execution)) {
         response.destroy();
         return;
@@ -498,6 +528,9 @@ export class ExecutionService {
         httpVersion: "HTTP/1.1",
         headers: this.#orderedResponseHeaders(response),
         receivedAt: new Date().toISOString(),
+        ...(execution.transport === undefined
+          ? {}
+          : { transport: execution.transport }),
       });
 
       const digest = createHash("sha256");
@@ -537,7 +570,11 @@ export class ExecutionService {
         {
           bodyBytes,
           bodySha256: digest.digest("hex"),
-          timings: {},
+          timings: this.#terminalTimings(execution),
+          transportMetadataCollected: this.#transportObservationsEnabled,
+          ...(this.#transportObservationsEnabled
+            ? {}
+            : { transportMetadataUnavailableReason: "disabled" }),
           completedAt: new Date().toISOString(),
         },
         true,
@@ -547,107 +584,22 @@ export class ExecutionService {
       if (this.#isTerminal(execution)) {
         return;
       }
+      if (
+        cause instanceof TargetResolutionError &&
+        this.#transportObservationsEnabled &&
+        execution.transportStartedAt !== undefined
+      ) {
+        execution.timings = {
+          dnsMs: performance.now() - execution.transportStartedAt,
+        };
+      }
+      if (cause instanceof TargetTransportError) {
+        execution.timings = { ...execution.timings, ...cause.timings };
+        execution.transport = cause.transport ?? execution.transport;
+      }
       const failure = this.#toFailure(cause, execution.responseState);
       await this.#fail(execution, failure);
     }
-  }
-
-  /** Opens a target request with distinct connection and response-head timers. */
-  #openResponse(
-    execution: ManagedExecution,
-    url: URL,
-    lookup: NonNullable<Parameters<typeof httpRequest>[1]>["lookup"],
-    headers: Record<string, string | string[]>,
-    requestBody: Buffer,
-  ): Promise<IncomingMessage> {
-    const target = execution.target;
-    const requestFunction =
-      url.protocol === "https:" ? httpsRequest : httpRequest;
-    return new Promise((resolve, reject) => {
-      let responseHeaderTimer: NodeJS.Timeout | undefined;
-      const connectTimer = setTimeout(() => {
-        request.destroy(
-          new ExecutionFailure({
-            category: "network",
-            code: "connect_timeout",
-            message: "The target connection timed out.",
-            phase: "connect",
-            retryable: true,
-          }),
-        );
-      }, target.behavior.connectTimeoutMs);
-      connectTimer.unref();
-      const request = requestFunction(
-        url,
-        {
-          method: target.method,
-          headers,
-          lookup,
-          rejectUnauthorized: target.behavior.tlsVerification === "strict",
-        },
-        (response) => {
-          clearTimeout(connectTimer);
-          if (responseHeaderTimer !== undefined) {
-            clearTimeout(responseHeaderTimer);
-          }
-          const socket = response.socket;
-          response.setTimeout(target.behavior.responseIdleTimeoutMs, () => {
-            response.destroy(
-              new ExecutionFailure({
-                category: "network",
-                code: "response_idle_timeout",
-                message: "The target response became idle.",
-                phase: "response",
-                retryable: true,
-              }),
-            );
-          });
-          /** Clears the captured socket timer even after Node detaches it. */
-          const clearIdleTimeout = (): void => {
-            socket.setTimeout(0);
-          };
-          response.once("end", clearIdleTimeout);
-          response.once("aborted", clearIdleTimeout);
-          response.once("error", clearIdleTimeout);
-          response.once("close", clearIdleTimeout);
-          resolve(response);
-        },
-      );
-      execution.request = request;
-      request.once("socket", (socket) => {
-        /** Starts response-head timing after transport connection establishment. */
-        const connected = (): void => {
-          clearTimeout(connectTimer);
-          responseHeaderTimer = setTimeout(() => {
-            request.destroy(
-              new ExecutionFailure({
-                category: "network",
-                code: "response_header_timeout",
-                message: "The target did not send response headers in time.",
-                phase: "response",
-                retryable: true,
-              }),
-            );
-          }, target.behavior.responseHeaderTimeoutMs);
-          responseHeaderTimer.unref();
-        };
-        if (url.protocol === "https:") {
-          socket.once("secureConnect", connected);
-        } else if (socket.connecting) {
-          socket.once("connect", connected);
-        } else {
-          connected();
-        }
-      });
-      request.once("error", (cause) => {
-        clearTimeout(connectTimer);
-        if (responseHeaderTimer !== undefined) {
-          clearTimeout(responseHeaderTimer);
-        }
-        reject(cause);
-      });
-      request.end(requestBody);
-    });
   }
 
   /** Validates custom OpenAPI extensions and effective per-principal ceilings. */
@@ -804,6 +756,77 @@ export class ExecutionService {
     if (cause instanceof ExecutionFailure) {
       return cause.detail;
     }
+    if (cause instanceof TargetTransportError) {
+      const code = cause.causeCode;
+      if (code === "APINTERACT_CONNECT_TIMEOUT") {
+        return {
+          category: "network",
+          code: "connect_timeout",
+          message: cause.message,
+          phase: "connect",
+          retryable: true,
+          ...(cause.transport === undefined
+            ? {}
+            : { transport: cause.transport }),
+          timings: cause.timings,
+        };
+      }
+      if (code === "APINTERACT_RESPONSE_HEADER_TIMEOUT") {
+        return {
+          category: "network",
+          code: "response_header_timeout",
+          message: cause.message,
+          phase: "response",
+          retryable: true,
+          ...(cause.transport === undefined
+            ? {}
+            : { transport: cause.transport }),
+          timings: cause.timings,
+        };
+      }
+      if (code === "APINTERACT_RESPONSE_IDLE_TIMEOUT") {
+        return {
+          category: "network",
+          code: "response_idle_timeout",
+          message: cause.message,
+          phase: "response",
+          retryable: true,
+          ...(cause.transport === undefined
+            ? {}
+            : { transport: cause.transport }),
+          timings: cause.timings,
+        };
+      }
+      if (
+        cause.transport?.tls !== undefined ||
+        code?.startsWith("ERR_TLS") === true ||
+        code?.startsWith("CERT_") === true ||
+        code?.includes("SELF_SIGNED") === true ||
+        code?.includes("ISSUER_CERT") === true
+      ) {
+        return {
+          category: "network",
+          code: "tls_handshake_failed",
+          message: "The target TLS handshake failed.",
+          phase: "tls",
+          retryable: false,
+          ...(cause.transport === undefined
+            ? {}
+            : { transport: cause.transport }),
+          timings: cause.timings,
+        };
+      }
+      const known = this.#knownNetworkFailure(code);
+      if (known !== undefined) {
+        return {
+          ...known,
+          ...(cause.transport === undefined
+            ? {}
+            : { transport: cause.transport }),
+          timings: cause.timings,
+        };
+      }
+    }
     if (cause instanceof TargetResolutionError) {
       return {
         category: cause.code === "dns_resolution_failed" ? "network" : "proxy",
@@ -880,7 +903,20 @@ export class ExecutionService {
       return;
     }
     execution.terminating = true;
-    const error: ExecutionStreamError = failure;
+    const transport = failure.transport ?? execution.transport;
+    const error: ExecutionStreamError = {
+      category: failure.category,
+      code: failure.code,
+      message: failure.message,
+      phase: failure.phase,
+      retryable: failure.retryable,
+      ...(transport === undefined ? {} : { transport }),
+      timings: this.#terminalTimings(execution, failure.timings),
+      transportMetadataCollected: this.#transportObservationsEnabled,
+      ...(this.#transportObservationsEnabled
+        ? {}
+        : { transportMetadataUnavailableReason: "disabled" }),
+    };
     execution.error = error;
     try {
       if (!execution.frameStore.terminal) {
@@ -1013,6 +1049,21 @@ export class ExecutionService {
     };
     tombstone.timer.unref();
     this.#expiredExecutions.set(executionId, tombstone);
+  }
+
+  /** Finalizes observed phase timings with the current total transport time. */
+  #terminalTimings(
+    execution: ManagedExecution,
+    additional: Omit<ExecutionTimings, "totalMs"> = {},
+  ): ExecutionTimings {
+    return {
+      ...execution.timings,
+      ...additional,
+      totalMs:
+        execution.transportStartedAt === undefined
+          ? 0
+          : performance.now() - execution.transportStartedAt,
+    };
   }
 
   /** Subtracts an accounted value and removes empty principal entries. */

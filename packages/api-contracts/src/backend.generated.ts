@@ -213,6 +213,27 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/executions/{executionId}/transport-certificates/{fingerprint}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        executionId: components["parameters"]["ExecutionId"];
+        /** @description Lowercase SHA-256 fingerprint of DER certificate bytes referenced by this execution. */
+        fingerprint: string;
+      };
+      cookie?: never;
+    };
+    /** Download an observed execution certificate as PEM */
+    get: operations["downloadExecutionTransportCertificate"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/plugins/catalog.json": {
     parameters: {
       query?: never;
@@ -1714,6 +1735,12 @@ export interface components {
       bodyBlobId?: components["schemas"]["BlobId"];
       createdAt: components["schemas"]["UtcDateTime"];
       completedAt?: components["schemas"]["UtcDateTime"];
+      timings?: components["schemas"]["ExecutionTransportTimings"];
+      /** @description Whether the proxy attempted to collect transport observations for this execution. */
+      transportMetadataCollected: boolean;
+      /** @enum {string} */
+      transportMetadataUnavailableReason?: "disabled" | "unsupported";
+      transportMetadata?: components["schemas"]["ExecutionTransportMetadata"];
       error?: components["schemas"]["WebSocketError"];
       scriptLogs: components["schemas"]["ScriptLogEntry"][];
       scriptTests: components["schemas"]["ScriptTestResult"][];
@@ -1721,6 +1748,74 @@ export interface components {
       scriptVariableWrites?: components["schemas"]["ScriptVariableWriteResult"][];
       scriptError?: components["schemas"]["ScriptPhaseError"];
       outgoingRequest?: components["schemas"]["OutgoingRequestView"];
+    };
+    ExecutionTransportTimings: {
+      dnsMs?: number;
+      connectMs?: number;
+      tlsMs?: number;
+      firstByteMs?: number;
+      totalMs: number;
+    };
+    ExecutionTransportMetadata: {
+      localEndpoint?: components["schemas"]["ExecutionNetworkEndpoint"];
+      remoteEndpoint?: components["schemas"]["ExecutionNetworkEndpoint"];
+      connectionReused?: boolean;
+      tls?: components["schemas"]["ExecutionTlsMetadata"];
+    };
+    ExecutionNetworkEndpoint:
+      | {
+          /** Format: ipv4 */
+          address: string;
+          port: number;
+          /** @constant */
+          family: "ipv4";
+        }
+      | {
+          /** Format: ipv6 */
+          address: string;
+          port: number;
+          /** @constant */
+          family: "ipv6";
+        };
+    ExecutionTlsMetadata: {
+      /** @enum {string} */
+      verificationMode: "strict" | "insecure";
+      authorized?: boolean;
+      authorizationErrorCode?: components["schemas"]["ExecutionTlsAuthorizationErrorCode"];
+      /** @enum {string} */
+      protocol?: "TLSv1.2" | "TLSv1.3";
+      /** @enum {string|null} */
+      alpnProtocol?: "http/1.1" | null;
+      serverName?: string | null;
+      cipher?: components["schemas"]["ExecutionTlsCipher"];
+      peerCertificateChain?: components["schemas"]["ExecutionCertificateSummary"][];
+      peerCertificateChainCaptureComplete?: boolean;
+      omittedPeerCertificateCount?: number;
+    };
+    /** @enum {string} */
+    ExecutionTlsAuthorizationErrorCode:
+      | "self_signed_certificate"
+      | "unknown_certificate_authority"
+      | "hostname_mismatch"
+      | "certificate_expired"
+      | "certificate_not_yet_valid"
+      | "certificate_revoked"
+      | "invalid_certificate_chain"
+      | "unsupported_certificate"
+      | "other_verification_error";
+    ExecutionTlsCipher: {
+      name: string;
+      standardName?: string | null;
+    };
+    ExecutionCertificateSummary: {
+      sha256Fingerprint: string;
+      chainPosition: number;
+      subject?: string;
+      issuer?: string;
+      validFrom?: components["schemas"]["UtcDateTime"];
+      validTo?: components["schemas"]["UtcDateTime"];
+      serialNumber?: string;
+      subjectAlternativeNames?: string[];
     };
     /** @description Secret-redacted representation of the materialized request handed to the proxy. It is absent when execution fails before proxy dispatch. */
     OutgoingRequestView: {
@@ -2258,6 +2353,34 @@ export interface operations {
       };
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  downloadExecutionTransportCertificate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        executionId: components["parameters"]["ExecutionId"];
+        /** @description Lowercase SHA-256 fingerprint of DER certificate bytes referenced by this execution. */
+        fingerprint: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description PEM encoding of the exact observed certificate. */
+      200: {
+        headers: {
+          "Content-Disposition"?: string;
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/x-pem-file": string;
+        };
+      };
+      401: components["responses"]["Unauthorized"];
       404: components["responses"]["NotFound"];
     };
   };

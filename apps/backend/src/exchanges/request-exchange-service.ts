@@ -1,5 +1,7 @@
 import type { Kysely } from "kysely";
 
+import type { components as BackendComponents } from "@apinteract/api-contracts/backend";
+
 import type { LocalBlobStore } from "../blobs/local-blob-store.js";
 import {
   safeUtf8Preview,
@@ -16,6 +18,10 @@ import { ResourceNotFoundError } from "../workspaces/workspace-service.js";
 
 const EXCHANGE_LIMIT = 200;
 const BODY_PREVIEW_LIMIT_BYTES = 256 * 1024;
+type ExecutionTransportMetadata =
+  BackendComponents["schemas"]["ExecutionTransportMetadata"];
+type ExecutionTransportTimings =
+  BackendComponents["schemas"]["ExecutionTransportTimings"];
 
 export type RequestExchangeKind = "execution" | "capture";
 
@@ -226,6 +232,8 @@ export class RequestExchangeService {
           : {}),
         createdAt: occurredAt,
         completedAt: new Date(row.imported_at).toISOString(),
+        transportMetadataCollected: false,
+        transportMetadataUnavailableReason: "disabled",
         scriptLogs: [],
         scriptTests: [],
       },
@@ -252,6 +260,10 @@ export class RequestExchangeService {
         "execution.body_sha256",
         "execution.error_json",
         "execution.script_result_json",
+        "execution.transport_metadata_collected",
+        "execution.transport_metadata_unavailable_reason",
+        "execution.transport_metadata_json",
+        "execution.transport_timings_json",
         "execution.created_at",
         "execution.completed_at",
         "blob.storage_key",
@@ -307,6 +319,12 @@ export class RequestExchangeService {
         ...(row.completed_at === null
           ? {}
           : { completedAt: new Date(row.completed_at).toISOString() }),
+        ...parseTransportResult(
+          row.transport_metadata_collected,
+          row.transport_metadata_unavailable_reason,
+          row.transport_metadata_json,
+          row.transport_timings_json,
+        ),
         ...parseExecutionError(row.error_json),
         scriptLogs: scripts.logs,
         scriptTests: scripts.tests,
@@ -440,4 +458,147 @@ function parseExecutionError(
     // Damaged optional failure metadata must not hide the retained response.
   }
   return {};
+}
+
+/** Reconstructs optional transport evidence without trusting damaged JSON rows. */
+function parseTransportResult(
+  collected: 0 | 1,
+  unavailableReason: "disabled" | "unsupported" | null,
+  metadataJson: string | null,
+  timingsJson: string | null,
+): Pick<
+  ExecutionView,
+  | "timings"
+  | "transportMetadataCollected"
+  | "transportMetadataUnavailableReason"
+  | "transportMetadata"
+> {
+  const timings = parseTransportTimings(timingsJson);
+  const metadata = parseTransportMetadata(metadataJson);
+  return {
+    transportMetadataCollected: collected === 1,
+    ...(unavailableReason === null
+      ? {}
+      : { transportMetadataUnavailableReason: unavailableReason }),
+    ...(timings === undefined ? {} : { timings }),
+    ...(metadata === undefined ? {} : { transportMetadata: metadata }),
+  };
+}
+
+/** Parses non-negative persisted phase durations and requires total duration. */
+function parseTransportTimings(
+  value: string | null,
+): ExecutionTransportTimings | undefined {
+  const parsed = parseJsonRecord(value);
+  if (parsed === undefined || !isNonNegativeNumber(parsed.totalMs)) {
+    return undefined;
+  }
+  const optionalNames = ["dnsMs", "connectMs", "tlsMs", "firstByteMs"] as const;
+  if (
+    optionalNames.some(
+      (name) =>
+        parsed[name] !== undefined && !isNonNegativeNumber(parsed[name]),
+    )
+  ) {
+    return undefined;
+  }
+  return parsed as ExecutionTransportTimings;
+}
+
+/** Parses the compact transport observation written by terminal persistence. */
+function parseTransportMetadata(
+  value: string | null,
+): ExecutionTransportMetadata | undefined {
+  const parsed = parseJsonRecord(value);
+  if (parsed === undefined) return undefined;
+  if (
+    parsed.connectionReused !== undefined &&
+    typeof parsed.connectionReused !== "boolean"
+  ) {
+    return undefined;
+  }
+  if (
+    (parsed.localEndpoint !== undefined &&
+      !isNetworkEndpoint(parsed.localEndpoint)) ||
+    (parsed.remoteEndpoint !== undefined &&
+      !isNetworkEndpoint(parsed.remoteEndpoint)) ||
+    (parsed.tls !== undefined && !isTlsMetadata(parsed.tls))
+  ) {
+    return undefined;
+  }
+  return parsed as ExecutionTransportMetadata;
+}
+
+/** Parses one JSON object while treating malformed optional evidence as absent. */
+function parseJsonRecord(
+  value: string | null,
+): Record<string, unknown> | undefined {
+  if (value === null) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Validates the stable address family and port portion of an endpoint. */
+function isNetworkEndpoint(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.address === "string" &&
+    Number.isInteger(candidate.port) &&
+    Number(candidate.port) >= 1 &&
+    Number(candidate.port) <= 65_535 &&
+    (candidate.family === "ipv4" || candidate.family === "ipv6")
+  );
+}
+
+/** Validates the required TLS mode and compact certificate summaries. */
+function isTlsMetadata(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    candidate.verificationMode !== "strict" &&
+    candidate.verificationMode !== "insecure"
+  ) {
+    return false;
+  }
+  if (
+    candidate.peerCertificateChain !== undefined &&
+    (!Array.isArray(candidate.peerCertificateChain) ||
+      candidate.peerCertificateChain.length > 16 ||
+      !candidate.peerCertificateChain.every(isCertificateSummary))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Validates the immutable identity and order of a certificate summary. */
+function isCertificateSummary(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.sha256Fingerprint === "string" &&
+    /^[0-9a-f]{64}$/u.test(candidate.sha256Fingerprint) &&
+    Number.isInteger(candidate.chainPosition) &&
+    Number(candidate.chainPosition) >= 0
+  );
+}
+
+/** Reports whether a persisted timing is finite and non-negative. */
+function isNonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }

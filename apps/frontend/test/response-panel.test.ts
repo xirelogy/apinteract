@@ -27,6 +27,7 @@ describe("ResponsePanel body transfer", () => {
       bodyBytes: 0,
       createdAt: "2026-07-28T00:00:00.000Z",
       completedAt: "2026-07-28T00:00:01.000Z",
+      transportMetadataCollected: false,
       scriptLogs: [],
       scriptTests: [],
     };
@@ -96,6 +97,106 @@ describe("ResponsePanel body transfer", () => {
     ]);
   });
 
+  it("shows terminal transport results without exposing the local endpoint", async () => {
+    const fingerprint = "a".repeat(64);
+    const execution: ExecutionView = {
+      executionId: "019fa8be-a510-76b9-b73b-69f4c7af7991",
+      state: "completed",
+      status: 200,
+      headers: [{ name: "content-type", value: "application/json" }],
+      bodyComplete: true,
+      bodyBytes: 0,
+      createdAt: "2026-07-28T00:00:00.000Z",
+      completedAt: "2026-07-28T00:00:01.000Z",
+      timings: {
+        dnsMs: 1.25,
+        connectMs: 2.5,
+        tlsMs: 3.75,
+        firstByteMs: 8,
+        totalMs: 12.5,
+      },
+      transportMetadataCollected: true,
+      transportMetadata: {
+        localEndpoint: {
+          address: "10.0.0.2",
+          port: 53_000,
+          family: "ipv4",
+        },
+        remoteEndpoint: {
+          address: "203.0.113.8",
+          port: 443,
+          family: "ipv4",
+        },
+        connectionReused: false,
+        tls: {
+          verificationMode: "insecure",
+          authorized: false,
+          authorizationErrorCode: "self_signed_certificate",
+          protocol: "TLSv1.3",
+          alpnProtocol: "http/1.1",
+          serverName: "example.test",
+          cipher: { name: "TLS_AES_256_GCM_SHA384" },
+          peerCertificateChainCaptureComplete: true,
+          omittedPeerCertificateCount: 0,
+          peerCertificateChain: [
+            {
+              sha256Fingerprint: fingerprint,
+              chainPosition: 0,
+              subject: "CN=example.test",
+              issuer: "CN=example.test",
+              serialNumber: "01",
+              subjectAlternativeNames: ["DNS:example.test"],
+            },
+          ],
+        },
+      },
+      scriptLogs: [],
+      scriptTests: [],
+    };
+    const downloadTransportCertificate = vi.fn();
+    const wrapper = mount(ResponsePanel, {
+      props: { execution, downloadTransportCertificate },
+      global: {
+        plugins: [
+          createI18n({
+            legacy: false,
+            locale: "en-US",
+            messages: { "en-US": enUsMessages },
+          }),
+        ],
+      },
+    });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text() === "Connection")
+      ?.trigger("click");
+    const connection = wrapper.get(".connection-results");
+    expect(connection.text()).toContain("203.0.113.8:443");
+    expect(connection.text()).not.toContain("10.0.0.2");
+    expect(connection.text()).toContain("Self-signed certificate");
+    expect(connection.text()).toContain("12.5 ms");
+    expect(connection.text()).toContain(fingerprint);
+    await connection
+      .get('button[aria-label="Download certificate"]')
+      .trigger("click");
+    expect(downloadTransportCertificate).toHaveBeenCalledWith(
+      execution.executionId,
+      fingerprint,
+    );
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Headers"))
+      ?.trigger("click");
+    const headers = wrapper.get('[role="tabpanel"][data-state="active"]');
+    const hiddenConnection = wrapper.get(".connection-results");
+    expect(headers.text()).toContain("content-type");
+    expect(headers.text()).toContain("application/json");
+    expect(hiddenConnection.attributes("hidden")).toBeDefined();
+    expect(getComputedStyle(hiddenConnection.element).display).toBe("none");
+  });
+
   it("shows the materialized outgoing request in its own result tab", async () => {
     const execution: ExecutionView = {
       executionId: "019fa8be-a510-76b9-b73b-69f4c7af7874",
@@ -105,6 +206,7 @@ describe("ResponsePanel body transfer", () => {
       bodyBytes: 2,
       createdAt: "2026-07-28T00:00:00.000Z",
       completedAt: "2026-07-28T00:00:01.000Z",
+      transportMetadataCollected: false,
       outgoingRequest: {
         method: "POST",
         url: { value: "https://example.test/items?id=1", redacted: false },
@@ -174,6 +276,7 @@ describe("ResponsePanel body transfer", () => {
       bodyBlobId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
       createdAt: "2026-07-28T00:00:00.000Z",
       completedAt: "2026-07-28T00:00:01.000Z",
+      transportMetadataCollected: false,
       scriptLogs: [],
       scriptTests: [],
     };
@@ -210,6 +313,7 @@ describe("ResponsePanel body transfer", () => {
       bodyBytes: 84,
       createdAt: "2026-07-28T00:00:00.000Z",
       completedAt: "2026-07-28T00:00:01.000Z",
+      transportMetadataCollected: false,
       scriptLogs: [],
       scriptTests: [],
     };
@@ -242,6 +346,7 @@ describe("ResponsePanel body transfer", () => {
       bodyBlobId: "019fa8be-a510-76b9-b73b-69f4c7af7876",
       createdAt: "2026-07-28T00:00:00.000Z",
       completedAt: "2026-07-28T00:00:01.000Z",
+      transportMetadataCollected: false,
       error: {
         code: "execution_failed",
         message: "The proxy is unavailable.",
@@ -282,6 +387,7 @@ describe("ResponsePanel body transfer", () => {
       bodyPreview: "partial",
       createdAt: "2026-07-28T00:00:00.000Z",
       completedAt: "2026-07-28T00:00:01.000Z",
+      transportMetadataCollected: false,
       error: {
         code: "upstream_disconnected",
         message: "The upstream disconnected.",
@@ -332,6 +438,7 @@ describe("ResponsePanel body transfer", () => {
       bodyBytes: 0,
       createdAt: "2026-07-28T00:00:00.000Z",
       completedAt: "2026-07-28T00:00:01.000Z",
+      transportMetadataCollected: false,
       error: {
         code: "execution_failed",
         message: "The post-processing step failed.",
@@ -402,6 +509,7 @@ describe("ResponsePanel body transfer", () => {
       bodyBytes: 2,
       createdAt: "2026-07-28T00:00:00.000Z",
       completedAt: "2026-07-28T00:00:01.000Z",
+      transportMetadataCollected: false,
       scriptLogs: [
         {
           sequence: 1,
@@ -503,6 +611,7 @@ describe("ResponsePanel body transfer", () => {
       bodyBytes: 2,
       createdAt: "2026-07-28T00:00:00.000Z",
       completedAt: "2026-07-28T00:00:01.000Z",
+      transportMetadataCollected: false,
       scriptLogs: [],
       scriptTests: [],
       scriptVariableWrites: [
@@ -555,6 +664,7 @@ describe("ResponsePanel body transfer", () => {
       bodyPreview: source,
       createdAt: "2026-08-29T00:00:00.000Z",
       completedAt: "2026-08-29T00:00:01.000Z",
+      transportMetadataCollected: false,
       scriptLogs: [],
       scriptTests: [],
     };
@@ -634,6 +744,7 @@ describe("ResponsePanel body transfer", () => {
       bodyPreview: source,
       createdAt: "2026-08-29T00:00:00.000Z",
       completedAt: "2026-08-29T00:00:01.000Z",
+      transportMetadataCollected: false,
       scriptLogs: [],
       scriptTests: [],
     };
@@ -688,6 +799,7 @@ describe("ResponsePanel body transfer", () => {
       bodyPreview: html,
       createdAt: "2026-08-29T00:00:00.000Z",
       completedAt: "2026-08-29T00:00:01.000Z",
+      transportMetadataCollected: false,
       scriptLogs: [],
       scriptTests: [],
     };
@@ -735,6 +847,7 @@ describe("ResponsePanel body transfer", () => {
       bodyBlobId: "019fa8be-a510-76b9-b73b-69f4c7af7924",
       createdAt: "2026-08-29T00:00:00.000Z",
       completedAt: "2026-08-29T00:00:01.000Z",
+      transportMetadataCollected: false,
       scriptLogs: [],
       scriptTests: [],
     };

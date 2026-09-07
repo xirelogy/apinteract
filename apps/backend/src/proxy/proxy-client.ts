@@ -88,7 +88,7 @@ export class ProxyClient {
         ready:
           response.ok &&
           health.status === "ready" &&
-          health.apiVersion === "0.1.1",
+          health.apiVersion === "0.1.2",
         protocolVersion:
           typeof health.apiVersion === "string" ? health.apiVersion : null,
       };

@@ -48,6 +48,11 @@ export interface ProxyTargetPolicyConfiguration {
   readonly denyCidrs: readonly string[];
 }
 
+/** Controls collection of optional target connection and TLS observations. */
+export interface ProxyTransportObservationsConfiguration {
+  readonly enabled: boolean;
+}
+
 /** Complete validated configuration consumed by one proxy process. */
 export interface ProxyConfiguration {
   readonly configVersion: 1;
@@ -61,6 +66,7 @@ export interface ProxyConfiguration {
   };
   readonly limits: ProxyLimitsConfiguration;
   readonly targetPolicy: ProxyTargetPolicyConfiguration;
+  readonly transportObservations: ProxyTransportObservationsConfiguration;
   readonly principals: readonly ProxyPrincipalConfiguration[];
 }
 
@@ -92,6 +98,14 @@ function requireKnownKeys(
 function requireString(value: unknown, location: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`${location} must be a non-empty string`);
+  }
+  return value;
+}
+
+/** Requires an explicit boolean configuration value. */
+function requireBoolean(value: unknown, location: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new Error(`${location} must be a boolean`);
   }
   return value;
 }
@@ -281,6 +295,7 @@ export async function loadProxyConfiguration(
     "cache",
     "limits",
     "targetPolicy",
+    "transportObservations",
     "principals",
   ]);
   if (document.configVersion !== 1) {
@@ -291,6 +306,13 @@ export async function loadProxyConfiguration(
   requireKnownKeys(server, "config.server", ["host", "port"]);
   const cache = requireRecord(document.cache ?? {}, "config.cache");
   requireKnownKeys(cache, "config.cache", ["path", "retentionMs"]);
+  const transportObservations = requireRecord(
+    document.transportObservations ?? {},
+    "config.transportObservations",
+  );
+  requireKnownKeys(transportObservations, "config.transportObservations", [
+    "enabled",
+  ]);
   const rawPrincipals = document.principals;
   if (!Array.isArray(rawPrincipals) || rawPrincipals.length === 0) {
     throw new Error("config.principals must contain at least one principal");
@@ -332,6 +354,15 @@ export async function loadProxyConfiguration(
     },
     limits: loadLimits(document.limits),
     targetPolicy: loadTargetPolicy(document.targetPolicy),
+    transportObservations: {
+      enabled:
+        transportObservations.enabled === undefined
+          ? true
+          : requireBoolean(
+              transportObservations.enabled,
+              "config.transportObservations.enabled",
+            ),
+    },
     principals,
   };
 }

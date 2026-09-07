@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash, X509Certificate } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -130,6 +130,9 @@ describe("ExecutionService shutdown", () => {
             type: "complete",
             bodyBytes: responseBody.byteLength,
             bodySha256: createHash("sha256").update(responseBody).digest("hex"),
+            timings: { firstByteMs: 1, totalMs: 2 },
+            transportMetadataCollected: false,
+            transportMetadataUnavailableReason: "disabled",
           });
         },
       } as unknown as ProxyClient;
@@ -314,6 +317,17 @@ describe("ExecutionService shutdown", () => {
         `,
       );
       const responseBody = Buffer.from('{"created":true}');
+      const certificate = new X509Certificate(
+        await readFile(
+          new URL(
+            "../../proxy/test/fixtures/localhost-cert.pem",
+            import.meta.url,
+          ),
+        ),
+      );
+      const certificateFingerprint = createHash("sha256")
+        .update(certificate.raw)
+        .digest("hex");
       let sentMethod = "";
       let sentUrl = "";
       let chainedUrl = "";
@@ -357,12 +371,43 @@ describe("ExecutionService shutdown", () => {
             status: 201,
             headers: [{ name: "content-type", value: "application/json" }],
             httpVersion: "HTTP/1.1",
+            transport: {
+              remoteEndpoint: {
+                address: "203.0.113.10",
+                port: 443,
+                family: "ipv4",
+              },
+              connectionReused: false,
+              tls: {
+                verificationMode: "strict",
+                authorized: true,
+                protocol: "TLSv1.3",
+                alpnProtocol: "http/1.1",
+                serverName: "example.test",
+                peerCertificateChain: [
+                  {
+                    derBase64: certificate.raw.toString("base64"),
+                    sha256Fingerprint: certificateFingerprint,
+                  },
+                ],
+                peerCertificateChainCaptureComplete: true,
+                omittedPeerCertificateCount: 0,
+              },
+            },
           });
           await sink.body(responseBody);
           await sink.complete({
             type: "complete",
             bodyBytes: responseBody.byteLength,
             bodySha256: createHash("sha256").update(responseBody).digest("hex"),
+            timings: {
+              dnsMs: 1,
+              connectMs: 2,
+              tlsMs: 3,
+              firstByteMs: 4,
+              totalMs: 5,
+            },
+            transportMetadataCollected: true,
           });
         },
       } as unknown as ProxyClient;
@@ -477,6 +522,20 @@ describe("ExecutionService shutdown", () => {
       const terminal = events.at(-1);
       expect(terminal?.type).toBe("execution.completed");
       expect(terminal?.payload).toMatchObject({
+        timings: { dnsMs: 1, connectMs: 2, tlsMs: 3, totalMs: 5 },
+        transportMetadataCollected: true,
+        transportMetadata: {
+          remoteEndpoint: { address: "203.0.113.10", port: 443 },
+          tls: {
+            authorized: true,
+            peerCertificateChain: [
+              {
+                sha256Fingerprint: certificateFingerprint,
+                chainPosition: 0,
+              },
+            ],
+          },
+        },
         outgoingRequest: {
           method: "POST",
           url: { value: "https://example.test/test", redacted: false },
@@ -544,6 +603,24 @@ describe("ExecutionService shutdown", () => {
           },
         ],
       });
+      const terminalView = terminal?.payload as
+        | { readonly executionId?: string }
+        | undefined;
+      if (terminalView?.executionId === undefined) {
+        throw new Error("Expected a completed execution identifier");
+      }
+      const storedCertificate = await executions.transportCertificate(
+        userId,
+        terminalView.executionId,
+        certificateFingerprint,
+      );
+      expect(storedCertificate.der.equals(certificate.raw)).toBe(true);
+      await expect(
+        database.db
+          .selectFrom("transport_certificates")
+          .select(({ fn }) => fn.countAll<number>().as("count"))
+          .executeTakeFirstOrThrow(),
+      ).resolves.toEqual({ count: 1 });
       expect(failingEvents.at(-1)?.payload).toMatchObject({
         state: "completed",
         scriptError: {

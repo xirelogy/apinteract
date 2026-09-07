@@ -4,7 +4,7 @@
     "title": "APInteract Backend API",
     "summary": "Public contract for APInteract frontend and backend communication.",
     "description": "This specification is the canonical source of truth for the APInteract backend API used by browser clients.",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "license": {
       "name": "MIT",
       "identifier": "MIT"
@@ -485,6 +485,55 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
+        }
+      }
+    },
+    "/api/executions/{executionId}/transport-certificates/{fingerprint}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExecutionId"
+        },
+        {
+          "name": "fingerprint",
+          "in": "path",
+          "required": true,
+          "description": "Lowercase SHA-256 fingerprint of DER certificate bytes referenced by this execution.",
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      ],
+      "get": {
+        "tags": ["Executions"],
+        "operationId": "downloadExecutionTransportCertificate",
+        "summary": "Download an observed execution certificate as PEM",
+        "security": [
+          {
+            "accessToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PEM encoding of the exact observed certificate.",
+            "headers": {
+              "Content-Disposition": {
+                "schema": { "type": "string" }
+              },
+              "ETag": {
+                "schema": { "type": "string" }
+              }
+            },
+            "content": {
+              "application/x-pem-file": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
@@ -4279,6 +4328,7 @@
           "state",
           "bodyComplete",
           "createdAt",
+          "transportMetadataCollected",
           "scriptLogs",
           "scriptTests"
         ],
@@ -4328,6 +4378,20 @@
           "completedAt": {
             "$ref": "#/components/schemas/UtcDateTime"
           },
+          "timings": {
+            "$ref": "#/components/schemas/ExecutionTransportTimings"
+          },
+          "transportMetadataCollected": {
+            "type": "boolean",
+            "description": "Whether the proxy attempted to collect transport observations for this execution."
+          },
+          "transportMetadataUnavailableReason": {
+            "type": "string",
+            "enum": ["disabled", "unsupported"]
+          },
+          "transportMetadata": {
+            "$ref": "#/components/schemas/ExecutionTransportMetadata"
+          },
           "error": {
             "$ref": "#/components/schemas/WebSocketError"
           },
@@ -4351,6 +4415,138 @@
           },
           "outgoingRequest": {
             "$ref": "#/components/schemas/OutgoingRequestView"
+          }
+        }
+      },
+      "ExecutionTransportTimings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["totalMs"],
+        "properties": {
+          "dnsMs": { "type": "number", "minimum": 0 },
+          "connectMs": { "type": "number", "minimum": 0 },
+          "tlsMs": { "type": "number", "minimum": 0 },
+          "firstByteMs": { "type": "number", "minimum": 0 },
+          "totalMs": { "type": "number", "minimum": 0 }
+        }
+      },
+      "ExecutionTransportMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "localEndpoint": {
+            "$ref": "#/components/schemas/ExecutionNetworkEndpoint"
+          },
+          "remoteEndpoint": {
+            "$ref": "#/components/schemas/ExecutionNetworkEndpoint"
+          },
+          "connectionReused": { "type": "boolean" },
+          "tls": { "$ref": "#/components/schemas/ExecutionTlsMetadata" }
+        }
+      },
+      "ExecutionNetworkEndpoint": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["address", "port", "family"],
+            "properties": {
+              "address": { "type": "string", "format": "ipv4" },
+              "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+              "family": { "type": "string", "const": "ipv4" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["address", "port", "family"],
+            "properties": {
+              "address": { "type": "string", "format": "ipv6" },
+              "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+              "family": { "type": "string", "const": "ipv6" }
+            }
+          }
+        ]
+      },
+      "ExecutionTlsMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["verificationMode"],
+        "properties": {
+          "verificationMode": {
+            "type": "string",
+            "enum": ["strict", "insecure"]
+          },
+          "authorized": { "type": "boolean" },
+          "authorizationErrorCode": {
+            "$ref": "#/components/schemas/ExecutionTlsAuthorizationErrorCode"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": ["TLSv1.2", "TLSv1.3"]
+          },
+          "alpnProtocol": {
+            "type": ["string", "null"],
+            "enum": ["http/1.1", null]
+          },
+          "serverName": { "type": ["string", "null"], "maxLength": 253 },
+          "cipher": { "$ref": "#/components/schemas/ExecutionTlsCipher" },
+          "peerCertificateChain": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "$ref": "#/components/schemas/ExecutionCertificateSummary"
+            }
+          },
+          "peerCertificateChainCaptureComplete": { "type": "boolean" },
+          "omittedPeerCertificateCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ExecutionTlsAuthorizationErrorCode": {
+        "type": "string",
+        "enum": [
+          "self_signed_certificate",
+          "unknown_certificate_authority",
+          "hostname_mismatch",
+          "certificate_expired",
+          "certificate_not_yet_valid",
+          "certificate_revoked",
+          "invalid_certificate_chain",
+          "unsupported_certificate",
+          "other_verification_error"
+        ]
+      },
+      "ExecutionTlsCipher": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "standardName": { "type": ["string", "null"], "minLength": 1 }
+        }
+      },
+      "ExecutionCertificateSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sha256Fingerprint", "chainPosition"],
+        "properties": {
+          "sha256Fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "chainPosition": { "type": "integer", "minimum": 0, "maximum": 15 },
+          "subject": { "type": "string" },
+          "issuer": { "type": "string" },
+          "validFrom": { "$ref": "#/components/schemas/UtcDateTime" },
+          "validTo": { "$ref": "#/components/schemas/UtcDateTime" },
+          "serialNumber": { "type": "string" },
+          "subjectAlternativeNames": {
+            "type": "array",
+            "items": { "type": "string" }
           }
         }
       },

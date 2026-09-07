@@ -574,4 +574,107 @@ describe("SqliteDatabase migrations", () => {
       await rm(rootPath, { recursive: true, force: true });
     }
   });
+
+  it("marks executions from before transport metadata collection as disabled", async () => {
+    const rootPath = await mkdtemp(
+      join(tmpdir(), "apinteract-transport-migration-"),
+    );
+    const databasePath = join(rootPath, "apinteract.sqlite3");
+    const backupDirectory = join(rootPath, "backups");
+    try {
+      const current = await SqliteDatabase.open(databasePath, backupDirectory);
+      const userId = Buffer.alloc(16, 31);
+      const workspaceId = Buffer.alloc(16, 32);
+      const executionId = Buffer.alloc(16, 33);
+      const createdAt = Date.now();
+      await current.db
+        .insertInto("users")
+        .values({
+          id: userId,
+          status: "active",
+          username: "transport-migration-user",
+          display_name: "Transport Migration User",
+          is_instance_admin: 0,
+          created_at: createdAt,
+          deleted_at: null,
+        })
+        .execute();
+      await current.db
+        .insertInto("workspaces")
+        .values({
+          id: workspaceId,
+          name: "Transport migration",
+          description_text: "",
+          notes_markdown: "",
+          revision: 0,
+          headers_json: "[]",
+          base_url_template: "",
+          created_by: userId,
+          created_at: createdAt,
+          deleted_by: null,
+          deleted_at: null,
+        })
+        .execute();
+      await current.db
+        .insertInto("executions")
+        .values({
+          id: executionId,
+          workspace_id: workspaceId,
+          request_id: null,
+          request_revision_id: null,
+          created_by: userId,
+          state: "completed",
+          snapshot_json: "{}",
+          response_status: 204,
+          response_headers_json: "[]",
+          response_blob_id: null,
+          body_complete: 1,
+          body_bytes: 0,
+          body_sha256: null,
+          error_json: null,
+          script_result_json: null,
+          created_at: createdAt,
+          completed_at: createdAt,
+        })
+        .execute();
+      await current.close();
+
+      const driver = new BetterSqlite3(databasePath);
+      driver.pragma("foreign_keys = OFF");
+      driver.exec(`
+        DROP TRIGGER execution_transport_certificate_gc;
+        DROP TABLE execution_transport_certificates;
+        DROP TABLE transport_certificates;
+        ALTER TABLE executions DROP COLUMN transport_metadata_collected;
+        ALTER TABLE executions DROP COLUMN transport_metadata_unavailable_reason;
+        ALTER TABLE executions DROP COLUMN transport_metadata_json;
+        ALTER TABLE executions DROP COLUMN transport_timings_json;
+        DELETE FROM schema_migrations
+        WHERE id = '0020_execution_transport_metadata';
+      `);
+      driver.close();
+
+      const migrated = await SqliteDatabase.open(databasePath, backupDirectory);
+      await expect(
+        migrated.db
+          .selectFrom("executions")
+          .select([
+            "transport_metadata_collected",
+            "transport_metadata_unavailable_reason",
+            "transport_metadata_json",
+            "transport_timings_json",
+          ])
+          .where("id", "=", executionId)
+          .executeTakeFirstOrThrow(),
+      ).resolves.toEqual({
+        transport_metadata_collected: 0,
+        transport_metadata_unavailable_reason: "disabled",
+        transport_metadata_json: null,
+        transport_timings_json: null,
+      });
+      await migrated.close();
+    } finally {
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
 });

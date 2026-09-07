@@ -229,8 +229,34 @@ export interface ExecutionTable {
   body_sha256: string | null;
   error_json: string | null;
   script_result_json: string | null;
+  transport_metadata_collected: Generated<0 | 1>;
+  transport_metadata_unavailable_reason: Generated<
+    "disabled" | "unsupported" | null
+  >;
+  transport_metadata_json: Generated<string | null>;
+  transport_timings_json: Generated<string | null>;
   created_at: number;
   completed_at: number | null;
+}
+
+/** Canonical content-addressed DER certificate and optional parsed summary. */
+export interface TransportCertificateTable {
+  sha256_fingerprint: string;
+  der_bytes: Uint8Array;
+  subject: string | null;
+  issuer: string | null;
+  valid_from: number | null;
+  valid_to: number | null;
+  serial_number: string | null;
+  subject_alternative_names_json: string | null;
+  created_at: number;
+}
+
+/** Orders deduplicated observed certificates within one execution chain. */
+export interface ExecutionTransportCertificateTable {
+  execution_id: BinaryId;
+  sha256_fingerprint: string;
+  chain_position: number;
 }
 
 export interface BlobTable {
@@ -339,6 +365,8 @@ export interface DatabaseSchema {
   request_revisions: RequestRevisionTable;
   request_versions: RequestVersionTable;
   executions: ExecutionTable;
+  transport_certificates: TransportCertificateTable;
+  execution_transport_certificates: ExecutionTransportCertificateTable;
   blobs: BlobTable;
   blob_references: BlobReferenceTable;
   request_attachments: RequestAttachmentTable;

@@ -163,6 +163,22 @@ export class BackendHttpClient {
     return response.blob();
   }
 
+  /** Downloads one execution-scoped observed certificate as deterministic PEM. */
+  async downloadExecutionTransportCertificate(
+    accessToken: string,
+    executionId: string,
+    sha256Fingerprint: string,
+  ): Promise<Blob> {
+    const response = await this.#fetch(
+      `/api/executions/${encodeURIComponent(executionId)}/transport-certificates/${encodeURIComponent(sha256Fingerprint)}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!response.ok) {
+      throw await this.#problem(response);
+    }
+    return response.blob();
+  }
+
   /** Uploads exact file bytes and returns their immutable workspace metadata. */
   async uploadRequestAttachment(
     accessToken: string,

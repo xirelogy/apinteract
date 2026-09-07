@@ -207,6 +207,21 @@ export class SessionController {
     return this.#http.downloadExecutionBody(this.#accessToken, executionId);
   }
 
+  /** Downloads an observed certificate through the active authenticated session. */
+  async downloadExecutionTransportCertificate(
+    executionId: string,
+    sha256Fingerprint: string,
+  ): Promise<Blob> {
+    if (this.#accessToken === null) {
+      throw new Error("An authenticated session is required");
+    }
+    return this.#http.downloadExecutionTransportCertificate(
+      this.#accessToken,
+      executionId,
+      sha256Fingerprint,
+    );
+  }
+
   /** Uploads one multipart file through the active bearer-authenticated session. */
   async uploadRequestAttachment(
     workspaceId: string,

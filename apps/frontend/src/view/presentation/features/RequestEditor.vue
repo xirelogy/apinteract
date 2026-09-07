@@ -102,6 +102,9 @@ const props = withDefaults(
     recoveryWarnings?: readonly RequestRecoveryWarning[];
     uploadAttachment?: ((file: File) => Promise<RequestAttachment>) | null;
     loadResponseBody?: ((executionId: string) => Promise<Blob>) | null;
+    downloadTransportCertificate?:
+      | ((executionId: string, sha256Fingerprint: string) => void)
+      | null;
   }>(),
   {
     inheritedTarget: "",
@@ -118,6 +121,7 @@ const props = withDefaults(
     recoveryWarnings: () => [],
     uploadAttachment: null,
     loadResponseBody: null,
+    downloadTransportCertificate: null,
   },
 );
 const i18n = useI18n();
@@ -1555,6 +1559,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
         :exchange-summaries="exchangeSummaries"
         :selected-exchange-id="selectedExchangeId"
         :load-body="loadResponseBody"
+        :download-transport-certificate="downloadTransportCertificate"
         @download="emit('download', $event)"
         @select-exchange="emit('selectExchange', $event)"
       />

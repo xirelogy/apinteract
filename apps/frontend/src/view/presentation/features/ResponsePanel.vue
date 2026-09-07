@@ -38,6 +38,9 @@ const props = defineProps<{
   exchangeSummaries?: readonly RequestExchangeSummary[];
   selectedExchangeId?: string | null;
   loadBody?: ((executionId: string) => Promise<Blob>) | null;
+  downloadTransportCertificate?:
+    | ((executionId: string, sha256Fingerprint: string) => void)
+    | null;
 }>();
 const emit = defineEmits<{
   download: [executionId: string];
@@ -53,6 +56,7 @@ type CoreResponseDetailTab =
   | "request"
   | "raw"
   | "headers"
+  | "connection"
   | "scripts";
 type ResponseDetailTab = CoreResponseDetailTab | `viewer:${string}`;
 const selectedTab = ref<ResponseDetailTab>("raw");
@@ -62,6 +66,12 @@ type ScriptTest = ExecutionView["scriptTests"][number];
 type ScriptError = NonNullable<ExecutionView["scriptError"]>;
 type ScriptVariableWrite = NonNullable<
   ExecutionView["scriptVariableWrites"]
+>[number];
+type TlsTransportMetadata = NonNullable<
+  NonNullable<ExecutionView["transportMetadata"]>["tls"]
+>;
+type TransportCertificateSummary = NonNullable<
+  TlsTransportMetadata["peerCertificateChain"]
 >[number];
 const scriptFailureCodes = new Set([
   "syntax_error",
@@ -168,6 +178,29 @@ const hasResponseBody = computed(() => {
   );
 });
 
+/** Reports whether a terminal APInteract execution has connection results to show. */
+const hasConnectionResult = computed(() => {
+  const execution = props.execution;
+  return (
+    execution !== null &&
+    props.capturedResponse !== true &&
+    execution.state !== "created" &&
+    execution.state !== "running" &&
+    (execution.timings !== undefined ||
+      execution.transportMetadataCollected ||
+      execution.transportMetadataUnavailableReason !== undefined ||
+      execution.transportMetadata !== undefined)
+  );
+});
+
+/** Reports whether a connection result contains no displayable observation. */
+const hasNoConnectionData = computed(
+  () =>
+    props.execution?.timings === undefined &&
+    props.execution?.transportMetadata === undefined &&
+    props.execution?.transportMetadataUnavailableReason === undefined,
+);
+
 /** Classifies retained response evidence without fetching exact blob bytes. */
 const content = computed(() =>
   props.execution === null
@@ -227,6 +260,7 @@ const resultDetailTabs = computed<readonly ResponseDetailTab[]>(() => {
       "raw",
       ...derivedDetailTabs.value,
       "headers",
+      ...(hasConnectionResult.value ? (["connection"] as const) : []),
       "scripts",
     ];
   }
@@ -239,6 +273,7 @@ const resultDetailTabs = computed<readonly ResponseDetailTab[]>(() => {
       : ([] as const)),
     ...derivedDetailTabs.value,
     ...(hasResponseHead.value ? (["headers"] as const) : ([] as const)),
+    ...(hasConnectionResult.value ? (["connection"] as const) : ([] as const)),
     ...(scriptResultCards.value.length > 0
       ? (["scripts"] as const)
       : ([] as const)),
@@ -328,6 +363,66 @@ const activeTab = computed<ResponseDetailTab>({
 /** Formats a byte count with locale-aware plural selection. */
 function formatBytes(count: number): string {
   return t("response.bytes", { count }, count);
+}
+
+/** Formats one observed duration without implying unavailable phase precision. */
+function formatDuration(milliseconds: number): string {
+  return t("response.connection.milliseconds", {
+    value: new Intl.NumberFormat(locale.value, {
+      maximumFractionDigits: 2,
+    }).format(milliseconds),
+  });
+}
+
+/** Formats an endpoint while keeping IPv6 addresses visually unambiguous. */
+function formatEndpoint(endpoint: {
+  readonly address: string;
+  readonly port: number;
+  readonly family: "ipv4" | "ipv6";
+}): string {
+  return endpoint.family === "ipv6"
+    ? `[${endpoint.address}]:${endpoint.port}`
+    : `${endpoint.address}:${endpoint.port}`;
+}
+
+/** Returns the localized strict-verification result for the observed TLS peer. */
+function tlsAuthorizationLabel(tls: TlsTransportMetadata): string {
+  if (tls.authorized === true) return t("response.connection.authorized");
+  if (tls.authorizationErrorCode !== undefined) {
+    return t(
+      `response.connection.authorizationError.${tls.authorizationErrorCode}`,
+    );
+  }
+  return t("response.connection.authorizationUnknown");
+}
+
+/** Returns the preferred standardized name for an observed TLS cipher. */
+function tlsCipherLabel(cipher: TlsTransportMetadata["cipher"]): string {
+  return cipher?.standardName ?? cipher?.name ?? "";
+}
+
+/** Displays a nullable TLS negotiation value consistently. */
+function optionalTlsValue(value: string | null): string {
+  return value ?? t("response.connection.none");
+}
+
+/** Returns the localized position label for one peer certificate. */
+function certificateLabel(certificate: TransportCertificateSummary): string {
+  return certificate.chainPosition === 0
+    ? t("response.connection.leafCertificate")
+    : t("response.connection.chainCertificate", {
+        position: certificate.chainPosition + 1,
+      });
+}
+
+/** Requests an authenticated PEM download for one observed certificate. */
+function downloadCertificate(sha256Fingerprint: string): void {
+  const execution = props.execution;
+  if (execution === null) return;
+  props.downloadTransportCertificate?.(
+    execution.executionId,
+    sha256Fingerprint,
+  );
 }
 
 /** Localizes stable script failure codes while preserving unknown diagnostics. */
@@ -458,6 +553,7 @@ function formatTestDiagnostic(test: ScriptTest): string {
       <TabsList class="response-tabs" :label="t('response.details')">
         <TabsTrigger
           v-if="visibleDetailTabs.includes('error')"
+          key="error"
           class="tab-button"
           value="error"
         >
@@ -465,6 +561,7 @@ function formatTestDiagnostic(test: ScriptTest): string {
         </TabsTrigger>
         <TabsTrigger
           v-if="visibleDetailTabs.includes('request')"
+          key="request"
           class="tab-button"
           value="request"
         >
@@ -472,6 +569,7 @@ function formatTestDiagnostic(test: ScriptTest): string {
         </TabsTrigger>
         <TabsTrigger
           v-if="visibleDetailTabs.includes('raw')"
+          key="raw"
           class="tab-button"
           value="raw"
         >
@@ -479,6 +577,7 @@ function formatTestDiagnostic(test: ScriptTest): string {
         </TabsTrigger>
         <TabsTrigger
           v-if="content?.viewer !== undefined"
+          :key="`viewer:${content.viewer.id}`"
           class="tab-button"
           :value="`viewer:${content.viewer.id}`"
         >
@@ -486,6 +585,7 @@ function formatTestDiagnostic(test: ScriptTest): string {
         </TabsTrigger>
         <TabsTrigger
           v-if="visibleDetailTabs.includes('headers')"
+          key="headers"
           class="tab-button"
           value="headers"
         >
@@ -493,7 +593,16 @@ function formatTestDiagnostic(test: ScriptTest): string {
           <span class="tab-count">{{ execution.headers?.length ?? 0 }}</span>
         </TabsTrigger>
         <TabsTrigger
+          v-if="visibleDetailTabs.includes('connection')"
+          key="connection"
+          class="tab-button"
+          value="connection"
+        >
+          {{ t("response.connection.tab") }}
+        </TabsTrigger>
+        <TabsTrigger
           v-if="visibleDetailTabs.includes('scripts')"
+          key="scripts"
           class="tab-button"
           value="scripts"
         >
@@ -503,6 +612,7 @@ function formatTestDiagnostic(test: ScriptTest): string {
       </TabsList>
       <TabsPanel
         v-if="visibleDetailTabs.includes('error') && execution.error"
+        key="error"
         value="error"
         class="response-content"
       >
@@ -514,6 +624,7 @@ function formatTestDiagnostic(test: ScriptTest): string {
       </TabsPanel>
       <TabsPanel
         v-if="visibleDetailTabs.includes('request')"
+        key="request"
         value="request"
         class="response-content outgoing-request"
       >
@@ -576,6 +687,7 @@ function formatTestDiagnostic(test: ScriptTest): string {
       </TabsPanel>
       <TabsPanel
         v-if="visibleDetailTabs.includes('headers')"
+        key="headers"
         value="headers"
         class="response-content"
       >
@@ -598,7 +710,215 @@ function formatTestDiagnostic(test: ScriptTest): string {
         </div>
       </TabsPanel>
       <TabsPanel
+        v-if="visibleDetailTabs.includes('connection')"
+        key="connection"
+        value="connection"
+        class="response-content connection-results"
+      >
+        <p
+          v-if="execution.transportMetadataUnavailableReason !== undefined"
+          class="response-detail-notice"
+        >
+          {{
+            t(
+              "response.connection.unavailable." +
+                execution.transportMetadataUnavailableReason,
+            )
+          }}
+        </p>
+        <section v-if="execution.timings !== undefined">
+          <h3>{{ t("response.connection.timings") }}</h3>
+          <dl class="connection-metadata">
+            <div v-if="execution.timings.dnsMs !== undefined">
+              <dt>{{ t("response.connection.dns") }}</dt>
+              <dd>{{ formatDuration(execution.timings.dnsMs) }}</dd>
+            </div>
+            <div v-if="execution.timings.connectMs !== undefined">
+              <dt>{{ t("response.connection.connect") }}</dt>
+              <dd>{{ formatDuration(execution.timings.connectMs) }}</dd>
+            </div>
+            <div v-if="execution.timings.tlsMs !== undefined">
+              <dt>{{ t("response.connection.tlsHandshake") }}</dt>
+              <dd>{{ formatDuration(execution.timings.tlsMs) }}</dd>
+            </div>
+            <div v-if="execution.timings.firstByteMs !== undefined">
+              <dt>{{ t("response.connection.firstByte") }}</dt>
+              <dd>{{ formatDuration(execution.timings.firstByteMs) }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("response.connection.total") }}</dt>
+              <dd>{{ formatDuration(execution.timings.totalMs) }}</dd>
+            </div>
+          </dl>
+        </section>
+        <section v-if="execution.transportMetadata !== undefined">
+          <h3>{{ t("response.connection.connection") }}</h3>
+          <dl class="connection-metadata">
+            <div
+              v-if="execution.transportMetadata.remoteEndpoint !== undefined"
+            >
+              <dt>{{ t("response.connection.remoteEndpoint") }}</dt>
+              <dd>
+                <code>{{
+                  formatEndpoint(execution.transportMetadata.remoteEndpoint)
+                }}</code>
+              </dd>
+            </div>
+            <div
+              v-if="execution.transportMetadata.connectionReused !== undefined"
+            >
+              <dt>{{ t("response.connection.reused") }}</dt>
+              <dd>
+                {{
+                  execution.transportMetadata.connectionReused
+                    ? t("response.connection.yes")
+                    : t("response.connection.no")
+                }}
+              </dd>
+            </div>
+          </dl>
+        </section>
+        <section v-if="execution.transportMetadata?.tls !== undefined">
+          <h3>{{ t("response.connection.tls") }}</h3>
+          <dl class="connection-metadata">
+            <div>
+              <dt>{{ t("response.connection.verificationMode") }}</dt>
+              <dd>
+                {{
+                  t(
+                    "response.connection.verification." +
+                      execution.transportMetadata.tls.verificationMode,
+                  )
+                }}
+              </dd>
+            </div>
+            <div>
+              <dt>{{ t("response.connection.authorization") }}</dt>
+              <dd>
+                {{ tlsAuthorizationLabel(execution.transportMetadata.tls) }}
+              </dd>
+            </div>
+            <div v-if="execution.transportMetadata.tls.protocol !== undefined">
+              <dt>{{ t("response.connection.protocol") }}</dt>
+              <dd>{{ execution.transportMetadata.tls.protocol }}</dd>
+            </div>
+            <div v-if="execution.transportMetadata.tls.cipher !== undefined">
+              <dt>{{ t("response.connection.cipher") }}</dt>
+              <dd>
+                <code>{{
+                  tlsCipherLabel(execution.transportMetadata.tls.cipher)
+                }}</code>
+              </dd>
+            </div>
+            <div
+              v-if="execution.transportMetadata.tls.alpnProtocol !== undefined"
+            >
+              <dt>{{ t("response.connection.alpn") }}</dt>
+              <dd>
+                {{
+                  optionalTlsValue(execution.transportMetadata.tls.alpnProtocol)
+                }}
+              </dd>
+            </div>
+            <div
+              v-if="execution.transportMetadata.tls.serverName !== undefined"
+            >
+              <dt>{{ t("response.connection.serverName") }}</dt>
+              <dd>
+                {{
+                  optionalTlsValue(execution.transportMetadata.tls.serverName)
+                }}
+              </dd>
+            </div>
+          </dl>
+        </section>
+        <section
+          v-if="
+            (execution.transportMetadata?.tls?.peerCertificateChain?.length ??
+              0) > 0
+          "
+          class="certificate-chain"
+        >
+          <h3>{{ t("response.connection.certificates") }}</h3>
+          <p
+            v-if="
+              execution.transportMetadata?.tls
+                ?.peerCertificateChainCaptureComplete === false
+            "
+            class="response-detail-notice"
+          >
+            {{
+              t("response.connection.certificatesIncomplete", {
+                count:
+                  execution.transportMetadata.tls.omittedPeerCertificateCount ??
+                  0,
+              })
+            }}
+          </p>
+          <article
+            v-for="certificate in execution.transportMetadata?.tls
+              ?.peerCertificateChain ?? []"
+            :key="certificate.sha256Fingerprint"
+            class="certificate-card"
+          >
+            <div class="certificate-card-heading">
+              <strong>{{ certificateLabel(certificate) }}</strong>
+              <IconButton
+                v-if="downloadTransportCertificate != null"
+                size="compact"
+                :label="t('response.connection.downloadCertificate')"
+                :title="t('response.connection.downloadCertificate')"
+                @click="downloadCertificate(certificate.sha256Fingerprint)"
+              >
+                <Download :size="16" aria-hidden="true" />
+              </IconButton>
+            </div>
+            <dl class="connection-metadata certificate-metadata">
+              <div v-if="certificate.subject !== undefined">
+                <dt>{{ t("response.connection.subject") }}</dt>
+                <dd>{{ certificate.subject }}</dd>
+              </div>
+              <div v-if="certificate.issuer !== undefined">
+                <dt>{{ t("response.connection.issuer") }}</dt>
+                <dd>{{ certificate.issuer }}</dd>
+              </div>
+              <div v-if="certificate.validFrom !== undefined">
+                <dt>{{ t("response.connection.validFrom") }}</dt>
+                <dd>{{ formatExchangeDateTime(certificate.validFrom) }}</dd>
+              </div>
+              <div v-if="certificate.validTo !== undefined">
+                <dt>{{ t("response.connection.validTo") }}</dt>
+                <dd>{{ formatExchangeDateTime(certificate.validTo) }}</dd>
+              </div>
+              <div v-if="certificate.serialNumber !== undefined">
+                <dt>{{ t("response.connection.serialNumber") }}</dt>
+                <dd>
+                  <code>{{ certificate.serialNumber }}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>{{ t("response.connection.fingerprint") }}</dt>
+                <dd>
+                  <code>{{ certificate.sha256Fingerprint }}</code>
+                </dd>
+              </div>
+              <div
+                v-if="certificate.subjectAlternativeNames?.length"
+                class="certificate-wide-field"
+              >
+                <dt>{{ t("response.connection.subjectAlternativeNames") }}</dt>
+                <dd>{{ certificate.subjectAlternativeNames.join(", ") }}</dd>
+              </div>
+            </dl>
+          </article>
+        </section>
+        <div v-if="hasNoConnectionData" class="response-detail-empty">
+          {{ t("response.connection.noData") }}
+        </div>
+      </TabsPanel>
+      <TabsPanel
         v-if="visibleDetailTabs.includes('raw')"
+        key="raw"
         value="raw"
         class="response-content"
       >
@@ -653,6 +973,7 @@ function formatTestDiagnostic(test: ScriptTest): string {
       </TabsPanel>
       <TabsPanel
         v-if="content?.viewer !== undefined && viewerContext !== null"
+        :key="`viewer:${content.viewer.id}`"
         :value="`viewer:${content.viewer.id}`"
         class="response-content response-body-view"
       >
@@ -664,6 +985,7 @@ function formatTestDiagnostic(test: ScriptTest): string {
       </TabsPanel>
       <TabsPanel
         v-if="visibleDetailTabs.includes('scripts')"
+        key="scripts"
         value="scripts"
         class="response-content script-results"
       >

@@ -281,10 +281,14 @@ The initializer always owns these AIO-specific values:
 
 This prevents an administrator file from exposing the internal proxy or
 replacing its runtime-owned identity. Other supported backend storage,
-session, origin, proxy cache, resource-limit, and outbound target-policy
-settings merge over the packaged defaults. Private and unique-local targets are
-denied by default. Set `targetPolicy.privateNetworkAccess` to `allow` for LAN or
-sibling-container targets; loopback and link-local targets remain denied.
+session, origin, proxy cache, resource-limit, outbound target-policy, and
+transport-observation settings merge over the packaged defaults. Private and
+unique-local targets are denied by default. Set
+`targetPolicy.privateNetworkAccess` to `allow` for LAN or sibling-container
+targets; loopback and link-local targets remain denied. Detailed connection and
+TLS observations are enabled by default and can be disabled with
+`transportObservations.enabled: false` in `proxy.yaml`; first-byte and total
+timings remain available.
 
 ## Persistent Data And Backup
 

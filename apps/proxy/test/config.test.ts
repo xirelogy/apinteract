@@ -36,6 +36,7 @@ describe("proxy configuration", () => {
     expect(configuration.cache.retentionMs).toBe(
       DEFAULT_RESPONSE_CACHE_RETENTION_MS,
     );
+    expect(configuration.transportObservations).toEqual({ enabled: true });
   });
 
   it("accepts documented target policy, quotas, and retention", async () => {
@@ -55,6 +56,7 @@ describe("proxy configuration", () => {
         allowCidrs: ["10.20.0.0/16", "fd12:3456::/48"],
         denyCidrs: ["10.20.5.0/24"],
       },
+      transportObservations: { enabled: false },
       principals: [{ id: "backend", bearerToken: "secret" }],
     });
 
@@ -64,6 +66,7 @@ describe("proxy configuration", () => {
     });
     expect(configuration.limits.maxConcurrentExecutionsPerPrincipal).toBe(3);
     expect(configuration.targetPolicy.denyCidrs).toEqual(["10.20.5.0/24"]);
+    expect(configuration.transportObservations).toEqual({ enabled: false });
   });
 
   it("rejects unknown settings, malformed CIDRs, and duplicate identities", async () => {
@@ -90,6 +93,13 @@ describe("proxy configuration", () => {
         ],
       }),
     ).rejects.toThrow("unique principal ids");
+    await expect(
+      load({
+        configVersion: 1,
+        transportObservations: { enabled: "yes" },
+        principals: [{ id: "backend", bearerToken: "secret" }],
+      }),
+    ).rejects.toThrow("config.transportObservations.enabled must be a boolean");
   });
 });
 

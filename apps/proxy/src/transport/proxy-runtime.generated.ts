@@ -15,7 +15,7 @@ export const proxyRuntimeContract = {
         },
         apiVersion: {
           type: "string",
-          const: "0.1.1",
+          const: "0.1.2",
         },
         componentVersion: {
           type: "string",
@@ -37,7 +37,7 @@ export const proxyRuntimeContract = {
       properties: {
         apiVersion: {
           type: "string",
-          const: "0.1.1",
+          const: "0.1.2",
         },
         responseFrameVersions: {
           type: "array",
@@ -123,6 +123,7 @@ export const proxyRuntimeContract = {
       type: "object",
       additionalProperties: false,
       required: [
+        "collectionEnabled",
         "remoteEndpoint",
         "localEndpoint",
         "connectionReuse",
@@ -130,6 +131,11 @@ export const proxyRuntimeContract = {
         "peerCertificateChain",
       ],
       properties: {
+        collectionEnabled: {
+          type: "boolean",
+          description:
+            "Whether transport observation collection is enabled by proxy configuration. Basic first-byte and total timings remain available when false.",
+        },
         remoteEndpoint: {
           type: "boolean",
         },
@@ -544,7 +550,13 @@ export const proxyRuntimeContract = {
     ResponseComplete: {
       type: "object",
       additionalProperties: false,
-      required: ["bodyBytes", "bodySha256", "timings", "completedAt"],
+      required: [
+        "bodyBytes",
+        "bodySha256",
+        "timings",
+        "transportMetadataCollected",
+        "completedAt",
+      ],
       properties: {
         bodyBytes: {
           type: "integer",
@@ -558,6 +570,15 @@ export const proxyRuntimeContract = {
         },
         timings: {
           $ref: "#/components/schemas/ExecutionTimings",
+        },
+        transportMetadataCollected: {
+          type: "boolean",
+          description:
+            "Whether optional transport observation collection was enabled and attempted for this execution.",
+        },
+        transportMetadataUnavailableReason: {
+          type: "string",
+          enum: ["disabled", "unsupported"],
         },
         completedAt: {
           type: "string",
@@ -709,6 +730,17 @@ export const proxyRuntimeContract = {
           description:
             "Peer certificate chain in leaf-first order as exposed by the transport runtime. A self-signed peer normally produces one entry.",
         },
+        peerCertificateChainCaptureComplete: {
+          type: "boolean",
+          description:
+            "Whether APInteract retained every peer certificate exposed by the transport runtime. This does not assert that the peer supplied a complete or trusted certification path.",
+        },
+        omittedPeerCertificateCount: {
+          type: "integer",
+          minimum: 0,
+          description:
+            "Number of runtime-exposed peer certificates omitted because the fixed count or aggregate DER limit was reached.",
+        },
       },
       description:
         "TLS observations collected during connection establishment. On a failed handshake, only values observed before failure are present.",
@@ -770,7 +802,15 @@ export const proxyRuntimeContract = {
     ExecutionStreamError: {
       type: "object",
       additionalProperties: false,
-      required: ["category", "code", "message", "phase", "retryable"],
+      required: [
+        "category",
+        "code",
+        "message",
+        "phase",
+        "retryable",
+        "timings",
+        "transportMetadataCollected",
+      ],
       properties: {
         category: {
           type: "string",
@@ -809,6 +849,20 @@ export const proxyRuntimeContract = {
           $ref: "#/components/schemas/TransportObservation",
           description:
             "Transport observations available before failure. When a response head was already emitted, the backend retains the observations from that frame and this field may be omitted.",
+        },
+        timings: {
+          $ref: "#/components/schemas/ExecutionTimings",
+          description:
+            "Execution timings measured before terminal failure. Total duration is always present.",
+        },
+        transportMetadataCollected: {
+          type: "boolean",
+          description:
+            "Whether optional transport observation collection was enabled and attempted for this execution.",
+        },
+        transportMetadataUnavailableReason: {
+          type: "string",
+          enum: ["disabled", "unsupported"],
         },
       },
       description:

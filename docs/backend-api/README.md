@@ -11,8 +11,8 @@ bounded WebSocket message schemas used by the web frontend.
 ## Transport Roles
 
 - HTTP provides first-user setup, authentication, session refresh, health
-  reporting, and exact
-  response-body transfer.
+  reporting, exact response-body transfer, and execution-scoped certificate
+  download.
 - WebSocket provides authenticated commands, replies, and execution events.
 - The backend sends a native WebSocket ping every 25 seconds and expects a
   pong, keeping idle connections alive through common ingress timeouts and
@@ -24,4 +24,4 @@ HTTP errors use RFC 9457 problem details. Machine-readable error codes remain
 stable within a compatible API version, while clients also display the safe
 human-readable fallback message.
 
-The API version is `0.1.0`. API version changes require maintainer approval.
+The API version is `0.1.1`. API version changes require maintainer approval.

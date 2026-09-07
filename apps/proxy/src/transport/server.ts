@@ -113,6 +113,7 @@ export function createProxyServer(
     retentionMs: configuration.cache.retentionMs,
     limits: configuration.limits,
     targetPolicy: new TargetPolicy(configuration.targetPolicy),
+    transportObservationsEnabled: configuration.transportObservations.enabled,
     reportCleanupError: (cause) =>
       server.log.error({ err: cause }, "Proxy execution cleanup failed"),
   });
@@ -166,7 +167,7 @@ export function createProxyServer(
   /** Reports unauthenticated proxy process readiness and API version. */
   server.get("/health", () => ({
     status: "ready",
-    apiVersion: "0.1.1",
+    apiVersion: "0.1.2",
     componentVersion: PROXY_APPLICATION_VERSION,
   }));
 
@@ -190,7 +191,7 @@ export function createProxyServer(
 
   /** Reports authenticated protocol features and effective principal limits. */
   server.get("/capabilities", () => ({
-    apiVersion: "0.1.1",
+    apiVersion: "0.1.2",
     responseFrameVersions: [1],
     outboundHttpVersions: ["HTTP/1.1"],
     features: {
@@ -199,11 +200,12 @@ export function createProxyServer(
       redirectModes: ["manual"],
       tlsVerificationModes: ["strict", "insecure"],
       transportMetadata: {
-        remoteEndpoint: false,
-        localEndpoint: false,
-        connectionReuse: false,
-        tlsSummary: false,
-        peerCertificateChain: false,
+        collectionEnabled: configuration.transportObservations.enabled,
+        remoteEndpoint: configuration.transportObservations.enabled,
+        localEndpoint: configuration.transportObservations.enabled,
+        connectionReuse: configuration.transportObservations.enabled,
+        tlsSummary: configuration.transportObservations.enabled,
+        peerCertificateChain: configuration.transportObservations.enabled,
       },
       automaticContentDecompression: false,
       cookieJar: false,

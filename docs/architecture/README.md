@@ -86,7 +86,8 @@ An API request follows this flow:
 7. The proxy performs the target HTTP request and streams response metadata and
    bytes back to the backend.
 8. The backend runs the post-response script, persists appropriate history, and
-   sends response events to the frontend.
+   persists the response and execution transport metadata, then sends response
+   events to the frontend.
 9. The backend releases the terminal proxy execution after persisting or
    discarding its result.
 
@@ -98,6 +99,10 @@ backend validates and materializes every script-produced request before
 contacting the proxy.
 
 Target HTTP statuses, including `4xx` and `5xx`, are valid target responses.
+Transport metadata is retained for successful and failed executions. Exact TLS
+certificate DER is content-addressed by SHA-256 and shared internally, while
+authorization and certificate download remain scoped through the referencing
+execution and its workspace.
 Proxy, network, and malformed HTTP response failures are separate execution
 errors.
 

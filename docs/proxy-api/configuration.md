@@ -29,6 +29,9 @@ targetPolicy:
   allowCidrs: []
   denyCidrs: []
 
+transportObservations:
+  enabled: true
+
 principals:
   - id: backend_primary
     bearerToken: "replace-with-a-high-entropy-token"
@@ -47,9 +50,27 @@ that runtime file. The AIO initializer always owns the loopback listener and
 generated local principal; administrator input cannot expose the proxy or
 replace that identity.
 
-Administrators can set `cache`, `limits`, and `targetPolicy`. The generated AIO
-credential and effective component files remain under `/run/apinteract` with
-owner-only permissions. Cache frames remain under `/cache` and are disposable.
+Administrators can set `cache`, `limits`, `targetPolicy`, and
+`transportObservations`. The generated AIO credential and effective component
+files remain under `/run/apinteract` with owner-only permissions. Cache frames
+remain under `/cache` and are disposable.
+
+## Transport Observation Collection
+
+Detailed execution transport observations are enabled by default. They include
+socket endpoints, connection reuse, DNS and connection phase timings, TLS
+negotiation and verification results, and a bounded peer certificate chain.
+Disable them when deployment policy requires less network metadata:
+
+```yaml
+transportObservations:
+  enabled: false
+```
+
+The disabled mode suppresses endpoint, TLS, certificate, DNS, connection, and
+TLS-handshake details. First-byte and total execution timings are still
+reported. The capability response and each terminal execution result state
+whether detailed collection was enabled.
 
 ## Outbound Target Policy
 

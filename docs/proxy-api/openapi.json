@@ -4,7 +4,7 @@
     "title": "APInteract Proxy API",
     "summary": "Public contract for the APInteract proxy component.",
     "description": "This specification is the canonical source of truth for the APInteract proxy component API used by the backend.",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "license": {
       "name": "MIT",
       "identifier": "MIT"
@@ -723,7 +723,7 @@
           },
           "apiVersion": {
             "type": "string",
-            "const": "0.1.1"
+            "const": "0.1.2"
           },
           "componentVersion": {
             "type": "string",
@@ -745,7 +745,7 @@
         "properties": {
           "apiVersion": {
             "type": "string",
-            "const": "0.1.1"
+            "const": "0.1.2"
           },
           "responseFrameVersions": {
             "type": "array",
@@ -831,6 +831,7 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "collectionEnabled",
           "remoteEndpoint",
           "localEndpoint",
           "connectionReuse",
@@ -838,6 +839,10 @@
           "peerCertificateChain"
         ],
         "properties": {
+          "collectionEnabled": {
+            "type": "boolean",
+            "description": "Whether transport observation collection is enabled by proxy configuration. Basic first-byte and total timings remain available when false."
+          },
           "remoteEndpoint": {
             "type": "boolean"
           },
@@ -1233,7 +1238,13 @@
       "ResponseComplete": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["bodyBytes", "bodySha256", "timings", "completedAt"],
+        "required": [
+          "bodyBytes",
+          "bodySha256",
+          "timings",
+          "transportMetadataCollected",
+          "completedAt"
+        ],
         "properties": {
           "bodyBytes": {
             "type": "integer",
@@ -1246,6 +1257,14 @@
           },
           "timings": {
             "$ref": "#/components/schemas/ExecutionTimings"
+          },
+          "transportMetadataCollected": {
+            "type": "boolean",
+            "description": "Whether optional transport observation collection was enabled and attempted for this execution."
+          },
+          "transportMetadataUnavailableReason": {
+            "type": "string",
+            "enum": ["disabled", "unsupported"]
           },
           "completedAt": {
             "type": "string",
@@ -1388,6 +1407,15 @@
               "$ref": "#/components/schemas/TlsPeerCertificate"
             },
             "description": "Peer certificate chain in leaf-first order as exposed by the transport runtime. A self-signed peer normally produces one entry."
+          },
+          "peerCertificateChainCaptureComplete": {
+            "type": "boolean",
+            "description": "Whether APInteract retained every peer certificate exposed by the transport runtime. This does not assert that the peer supplied a complete or trusted certification path."
+          },
+          "omittedPeerCertificateCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of runtime-exposed peer certificates omitted because the fixed count or aggregate DER limit was reached."
           }
         },
         "description": "TLS observations collected during connection establishment. On a failed handshake, only values observed before failure are present."
@@ -1446,7 +1474,15 @@
       "ExecutionStreamError": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["category", "code", "message", "phase", "retryable"],
+        "required": [
+          "category",
+          "code",
+          "message",
+          "phase",
+          "retryable",
+          "timings",
+          "transportMetadataCollected"
+        ],
         "properties": {
           "category": {
             "type": "string",
@@ -1481,6 +1517,18 @@
           "transport": {
             "$ref": "#/components/schemas/TransportObservation",
             "description": "Transport observations available before failure. When a response head was already emitted, the backend retains the observations from that frame and this field may be omitted."
+          },
+          "timings": {
+            "$ref": "#/components/schemas/ExecutionTimings",
+            "description": "Execution timings measured before terminal failure. Total duration is always present."
+          },
+          "transportMetadataCollected": {
+            "type": "boolean",
+            "description": "Whether optional transport observation collection was enabled and attempted for this execution."
+          },
+          "transportMetadataUnavailableReason": {
+            "type": "string",
+            "enum": ["disabled", "unsupported"]
           }
         },
         "description": "Terminal execution failure. Valid target HTTP status responses, including 4xx and 5xx, are not failures."

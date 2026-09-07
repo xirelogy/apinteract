@@ -2362,6 +2362,19 @@ export class ApplicationController {
     return this.#run(() => this.session.downloadExecutionBody(executionId));
   }
 
+  /** Downloads one execution-scoped certificate while reporting shared failures. */
+  async downloadExecutionTransportCertificate(
+    executionId: string,
+    sha256Fingerprint: string,
+  ): Promise<Blob> {
+    return this.#run(() =>
+      this.session.downloadExecutionTransportCertificate(
+        executionId,
+        sha256Fingerprint,
+      ),
+    );
+  }
+
   /** Runs one workspace-tree operation with shared busy and error state. */
   async #run<Result>(operation: () => Promise<Result>): Promise<Result> {
     const store = useApplicationStore();

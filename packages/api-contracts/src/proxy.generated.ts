@@ -168,13 +168,13 @@ export interface components {
       /** @enum {string} */
       status: "ready" | "not_ready";
       /** @constant */
-      apiVersion: "0.1.1";
+      apiVersion: "0.1.2";
       /** @description Version of the running proxy implementation. */
       componentVersion: string;
     };
     Capabilities: {
       /** @constant */
-      apiVersion: "0.1.1";
+      apiVersion: "0.1.2";
       responseFrameVersions: 1[];
       outboundHttpVersions: "HTTP/1.1"[];
       features: components["schemas"]["CapabilityFeatures"];
@@ -195,6 +195,8 @@ export interface components {
     };
     /** @description Transport observations available to the authenticated principal. A true value indicates implementation and policy support; an observation may still be absent when a particular connection fails before the value is known. */
     TransportMetadataCapabilities: {
+      /** @description Whether transport observation collection is enabled by proxy configuration. Basic first-byte and total timings remain available when false. */
+      collectionEnabled: boolean;
       remoteEndpoint: boolean;
       localEndpoint: boolean;
       connectionReuse: boolean;
@@ -336,6 +338,10 @@ export interface components {
       /** @description Lowercase SHA-256 digest of the complete raw response body when calculated. */
       bodySha256: string | null;
       timings: components["schemas"]["ExecutionTimings"];
+      /** @description Whether optional transport observation collection was enabled and attempted for this execution. */
+      transportMetadataCollected: boolean;
+      /** @enum {string} */
+      transportMetadataUnavailableReason?: "disabled" | "unsupported";
       /** Format: date-time */
       completedAt: string;
     };
@@ -390,6 +396,10 @@ export interface components {
       cipher?: components["schemas"]["TlsCipher"];
       /** @description Peer certificate chain in leaf-first order as exposed by the transport runtime. A self-signed peer normally produces one entry. */
       peerCertificateChain?: components["schemas"]["TlsPeerCertificate"][];
+      /** @description Whether APInteract retained every peer certificate exposed by the transport runtime. This does not assert that the peer supplied a complete or trusted certification path. */
+      peerCertificateChainCaptureComplete?: boolean;
+      /** @description Number of runtime-exposed peer certificates omitted because the fixed count or aggregate DER limit was reached. */
+      omittedPeerCertificateCount?: number;
     };
     /**
      * @description Normalized primary reason that normal strict certificate or hostname verification did not authorize the peer.
@@ -441,6 +451,12 @@ export interface components {
       retryable: boolean;
       /** @description Transport observations available before failure. When a response head was already emitted, the backend retains the observations from that frame and this field may be omitted. */
       transport?: components["schemas"]["TransportObservation"];
+      /** @description Execution timings measured before terminal failure. Total duration is always present. */
+      timings: components["schemas"]["ExecutionTimings"];
+      /** @description Whether optional transport observation collection was enabled and attempted for this execution. */
+      transportMetadataCollected: boolean;
+      /** @enum {string} */
+      transportMetadataUnavailableReason?: "disabled" | "unsupported";
     };
     /** @description Ordered HTTP header fields. Duplicate names are preserved. */
     HeaderList: components["schemas"]["HeaderField"][];

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { lookup } from "node:dns";
 import {
   createServer,
@@ -6,6 +6,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { createServer as createSecureServer } from "node:https";
 import type { LookupFunction } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -109,6 +110,187 @@ describe("ExecutionService outbound headers", () => {
       "custom-client/1.2.3",
     ]);
     expect(DEFAULT_PROXY_USER_AGENT).toBe(receivedUserAgents[0]);
+  });
+});
+
+describe("ExecutionService transport observations", () => {
+  it("reports endpoints and omits connection phases for a reused socket", async () => {
+    const directory = await temporaryDirectory();
+    const targetServer = await listenTarget((_request, response) => {
+      response.end("ok");
+    });
+    const executions = executionService(directory);
+    const descriptor = createDescriptor(targetUrl(targetServer), []);
+
+    const first = await executeForFrames(
+      executions,
+      "principal",
+      "transport-first",
+      descriptor,
+    );
+    const second = await executeForFrames(
+      executions,
+      "principal",
+      "transport-second",
+      descriptor,
+    );
+
+    expect(first.head).toMatchObject({
+      transport: {
+        connectionReused: false,
+        remoteEndpoint: { address: "127.0.0.1", family: "ipv4" },
+      },
+    });
+    const firstTimings = first.complete?.timings as
+      | Record<string, unknown>
+      | undefined;
+    expect(typeof firstTimings?.dnsMs).toBe("number");
+    expect(typeof firstTimings?.connectMs).toBe("number");
+    expect(typeof firstTimings?.firstByteMs).toBe("number");
+    expect(typeof firstTimings?.totalMs).toBe("number");
+    expect(second.head).toMatchObject({
+      transport: { connectionReused: true },
+    });
+    const secondTimings = second.complete?.timings as
+      | Record<string, unknown>
+      | undefined;
+    expect(Object.keys(secondTimings ?? {}).sort()).toEqual([
+      "firstByteMs",
+      "totalMs",
+    ]);
+    expect(typeof secondTimings?.firstByteMs).toBe("number");
+    expect(typeof secondTimings?.totalMs).toBe("number");
+    await executions.close();
+  });
+
+  it("retains basic timings while detailed collection is disabled", async () => {
+    const directory = await temporaryDirectory();
+    const targetServer = await listenTarget((_request, response) => {
+      response.end("ok");
+    });
+    const executions = executionService(
+      directory,
+      {},
+      60_000,
+      undefined,
+      false,
+    );
+
+    const result = await executeForFrames(
+      executions,
+      "principal",
+      "transport-disabled",
+      createDescriptor(targetUrl(targetServer), []),
+    );
+
+    expect(result.head).not.toHaveProperty("transport");
+    expect(result.complete).toMatchObject({
+      transportMetadataCollected: false,
+      transportMetadataUnavailableReason: "disabled",
+    });
+    const disabledTimings = result.complete?.timings as
+      | Record<string, unknown>
+      | undefined;
+    expect(typeof disabledTimings?.firstByteMs).toBe("number");
+    expect(typeof disabledTimings?.totalMs).toBe("number");
+    expect(disabledTimings).not.toHaveProperty("dnsMs");
+    expect(disabledTimings).not.toHaveProperty("connectMs");
+    expect(disabledTimings).not.toHaveProperty("tlsMs");
+    await executions.close();
+  });
+
+  it("captures a rejected TLS peer without sending HTTP bytes or retrying", async () => {
+    const directory = await temporaryDirectory();
+    const [key, cert] = await Promise.all([
+      readFile(new URL("./fixtures/localhost-key.pem", import.meta.url)),
+      readFile(new URL("./fixtures/localhost-cert.pem", import.meta.url)),
+    ]);
+    let requestCount = 0;
+    const targetServer = createSecureServer(
+      { key, cert },
+      (_request, response) => {
+        requestCount += 1;
+        response.end("ok");
+      },
+    );
+    await new Promise<void>((resolve, reject) => {
+      targetServer.once("error", reject);
+      targetServer.listen(0, "127.0.0.1", resolve);
+    });
+    targetServers.push(targetServer);
+    const address = targetServer.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("TLS target server did not bind to an IP socket");
+    }
+    const url = `https://127.0.0.1:${address.port}/`;
+    const targetPolicy: TargetApprover = {
+      approve: () =>
+        Promise.resolve({
+          lookup: (_hostname, _options, callback) =>
+            callback(null, "127.0.0.1", 4),
+        }),
+    };
+    const executions = executionService(directory, {}, 60_000, targetPolicy);
+    const strict = await executions.create(
+      "principal-strict",
+      "strict-self-signed",
+      createDescriptor(url, []),
+    );
+    const strictError = await readTerminalError(
+      executions,
+      strict.session.executionId,
+      "principal-strict",
+    );
+
+    expect(strictError).toMatchObject({
+      code: "tls_handshake_failed",
+      phase: "tls",
+      transport: {
+        tls: {
+          verificationMode: "strict",
+          authorized: false,
+          authorizationErrorCode: "other_verification_error",
+          peerCertificateChainCaptureComplete: true,
+          omittedPeerCertificateCount: 0,
+        },
+      },
+    });
+    const strictTransport = strictError.transport as
+      | { readonly tls?: Record<string, unknown> }
+      | undefined;
+    const peerChain = strictTransport?.tls?.peerCertificateChain as
+      | Record<string, unknown>[]
+      | undefined;
+    expect(peerChain).toHaveLength(1);
+    expect(typeof peerChain?.[0]?.derBase64).toBe("string");
+    expect(peerChain?.[0]?.sha256Fingerprint).toMatch(/^[0-9a-f]{64}$/u);
+    const strictTimings = strictError.timings as
+      | Record<string, unknown>
+      | undefined;
+    expect(typeof strictTimings?.connectMs).toBe("number");
+    expect(typeof strictTimings?.tlsMs).toBe("number");
+    expect(typeof strictTimings?.totalMs).toBe("number");
+    expect(requestCount).toBe(0);
+
+    const insecureDescriptor = createDescriptor(url, []);
+    insecureDescriptor.request.behavior.tlsVerification = "insecure";
+    const insecure = await executeForFrames(
+      executions,
+      "principal-insecure",
+      "insecure-self-signed",
+      insecureDescriptor,
+    );
+    expect(insecure.head).toMatchObject({
+      transport: {
+        tls: {
+          verificationMode: "insecure",
+          authorized: false,
+          authorizationErrorCode: "other_verification_error",
+        },
+      },
+    });
+    expect(requestCount).toBe(1);
+    await executions.close();
   });
 });
 
@@ -334,9 +516,16 @@ describe("ExecutionService limits and lifecycle", () => {
     expect(
       executions.stream("foreign-principal", session.executionId, -1),
     ).toBeUndefined();
-    await expect(
-      stat(join(directory, `${session.executionId}.frames`)),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect
+      .poll(async () => {
+        try {
+          await stat(join(directory, `${session.executionId}.frames`));
+          return false;
+        } catch (cause) {
+          return (cause as NodeJS.ErrnoException).code === "ENOENT";
+        }
+      })
+      .toBe(true);
 
     const replacement = await executions.create(
       "principal",
@@ -420,15 +609,17 @@ function executionService(
   cachePath: string,
   limitOverrides: Partial<ProxyLimitsConfiguration> = {},
   retentionMs = 60_000,
-  targetPolicy: TargetApprover = {
-    approve: () => Promise.resolve({ lookup }),
-  },
+  targetPolicy: TargetApprover | undefined = undefined,
+  transportObservationsEnabled = true,
 ): ExecutionService {
   return new ExecutionService({
     cachePath,
     retentionMs,
     limits: { ...DEFAULT_PROXY_LIMITS, ...limitOverrides },
-    targetPolicy,
+    targetPolicy: targetPolicy ?? {
+      approve: () => Promise.resolve({ lookup }),
+    },
+    transportObservationsEnabled,
   });
 }
 
@@ -473,4 +664,41 @@ async function readTerminalError(
     }
   }
   throw new Error("Execution did not produce a terminal error frame");
+}
+
+/** Reads response metadata and completion frames for one successful execution. */
+async function executeForFrames(
+  executions: ExecutionService,
+  principalId: string,
+  idempotencyKey: string,
+  descriptor: CreateExecutionRequest,
+): Promise<{
+  readonly head?: Record<string, unknown>;
+  readonly complete?: Record<string, unknown>;
+}> {
+  const { session } = await executions.create(
+    principalId,
+    idempotencyKey,
+    descriptor,
+  );
+  const reader = executions.stream(principalId, session.executionId, -1);
+  if (reader === undefined)
+    throw new Error("Created execution was not available");
+  let head: Record<string, unknown> | undefined;
+  let complete: Record<string, unknown> | undefined;
+  for await (const frame of reader.frames) {
+    const type = frame.readUInt8(0);
+    if (type !== 1 && type !== 4) continue;
+    const payloadLength = Number(frame.readBigUInt64BE(8));
+    const value = JSON.parse(
+      frame.subarray(16, 16 + payloadLength).toString("utf8"),
+    ) as Record<string, unknown>;
+    if (type === 1) head = value;
+    if (type === 4) complete = value;
+  }
+  await executions.release(principalId, session.executionId);
+  return {
+    ...(head === undefined ? {} : { head }),
+    ...(complete === undefined ? {} : { complete }),
+  };
 }

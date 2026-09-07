@@ -501,6 +501,62 @@ export async function registerHttpRoutes(
       }
     },
   );
+
+  /** Downloads one execution-referenced certificate without exposing global storage. */
+  server.get<{
+    Params: { executionId: string; fingerprint: string };
+  }>(
+    "/api/executions/:executionId/transport-certificates/:fingerprint",
+    { preHandler: authenticateAccess(application) },
+    async (request, reply) => {
+      const identity = request.sessionIdentity;
+      if (identity === undefined) return unauthorized(reply);
+      const fingerprint = request.params.fingerprint;
+      if (!/^[0-9a-f]{64}$/u.test(fingerprint)) {
+        return executionCertificateNotFound(reply);
+      }
+      try {
+        const certificate = await application.executions.transportCertificate(
+          identity.user.id,
+          request.params.executionId,
+          fingerprint,
+        );
+        return reply
+          .header(
+            "Content-Disposition",
+            `attachment; filename="${certificate.sha256Fingerprint}.crt"`,
+          )
+          .header("ETag", `"${certificate.sha256Fingerprint}"`)
+          .type("application/x-pem-file")
+          .send(certificatePem(certificate.der));
+      } catch (cause) {
+        if (
+          cause instanceof ResourceNotFoundError ||
+          cause instanceof AccessDeniedError
+        ) {
+          return executionCertificateNotFound(reply);
+        }
+        throw cause;
+      }
+    },
+  );
+}
+
+/** Encodes exact DER bytes as deterministic RFC 7468 certificate text. */
+function certificatePem(der: Buffer): string {
+  const base64 = der.toString("base64");
+  const lines = base64.match(/.{1,64}/gu) ?? [];
+  return `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----\n`;
+}
+
+/** Hides whether a certificate exists globally or belongs to another workspace. */
+function executionCertificateNotFound(reply: FastifyReply) {
+  return sendProblem(reply, {
+    status: 404,
+    code: "execution_certificate_not_found",
+    title: "Execution certificate not found",
+    detail: "The certificate does not exist or is not visible.",
+  });
 }
 
 /** Sends one attempt result while keeping session credentials out of plugins. */

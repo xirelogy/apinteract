@@ -177,6 +177,8 @@ const displayedExecution = computed<ExecutionView | null>(() => {
       : {}),
     createdAt: timestamp,
     completedAt: timestamp,
+    transportMetadataCollected: false,
+    transportMetadataUnavailableReason: "disabled",
     scriptLogs: [],
     scriptTests: [],
   };
@@ -586,6 +588,30 @@ async function downloadExecutionBody(executionId: string): Promise<void> {
 /** Loads exact response bytes for an authenticated in-application preview. */
 async function loadExecutionBody(executionId: string): Promise<Blob> {
   return controller.downloadExecutionBody(executionId);
+}
+
+/** Downloads one exact observed certificate without placing credentials in its URL. */
+async function downloadTransportCertificate(
+  executionId: string,
+  sha256Fingerprint: string,
+): Promise<void> {
+  try {
+    const certificate = await controller.downloadExecutionTransportCertificate(
+      executionId,
+      sha256Fingerprint,
+    );
+    const objectUrl = URL.createObjectURL(certificate);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `${sha256Fingerprint}.crt`;
+    anchor.hidden = true;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  } catch {
+    // The controller has already published a safe global application error.
+  }
 }
 
 /** Saves every editable property for the selected collection. */
@@ -1022,6 +1048,7 @@ function discardActiveResourceTab(): void {
             :recovery-warnings="activeTab?.recoveryWarnings ?? []"
             :upload-attachment="uploadActiveRequestAttachment"
             :load-response-body="loadExecutionBody"
+            :download-transport-certificate="downloadTransportCertificate"
             @change="updateActiveRequestDraft"
             @save="saveRequest"
             @execute="executeRequest"

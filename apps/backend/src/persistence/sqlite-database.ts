@@ -26,6 +26,8 @@ const RESOURCE_DOCUMENTATION_MIGRATION = "0016_resource_documentation";
 const GENERIC_CAPTURE_SOURCE_MIGRATION = "0017_generic_capture_source";
 const CAPTURE_LABEL_MIGRATION = "0018_capture_label";
 const AUTH_PROVIDER_CREDENTIALS_MIGRATION = "0019_auth_provider_credentials";
+const EXECUTION_TRANSPORT_METADATA_MIGRATION =
+  "0020_execution_transport_metadata";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -186,11 +188,47 @@ CREATE TABLE executions (
   body_bytes INTEGER,
   body_sha256 TEXT,
   error_json TEXT,
+  transport_metadata_collected INTEGER NOT NULL DEFAULT 0 CHECK(transport_metadata_collected IN (0, 1)),
+  transport_metadata_unavailable_reason TEXT CHECK(transport_metadata_unavailable_reason IN ('disabled', 'unsupported')),
+  transport_metadata_json TEXT CHECK(transport_metadata_json IS NULL OR json_valid(transport_metadata_json)),
+  transport_timings_json TEXT CHECK(transport_timings_json IS NULL OR json_valid(transport_timings_json)),
   created_at INTEGER NOT NULL,
   completed_at INTEGER
 ) STRICT;
 CREATE INDEX executions_request_created
   ON executions(request_id, created_at DESC, id DESC);
+
+CREATE TABLE transport_certificates (
+  sha256_fingerprint TEXT PRIMARY KEY CHECK(length(sha256_fingerprint) = 64),
+  der_bytes BLOB NOT NULL,
+  subject TEXT,
+  issuer TEXT,
+  valid_from INTEGER,
+  valid_to INTEGER,
+  serial_number TEXT,
+  subject_alternative_names_json TEXT CHECK(subject_alternative_names_json IS NULL OR json_valid(subject_alternative_names_json)),
+  created_at INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE execution_transport_certificates (
+  execution_id BLOB NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
+  sha256_fingerprint TEXT NOT NULL REFERENCES transport_certificates(sha256_fingerprint),
+  chain_position INTEGER NOT NULL CHECK(chain_position BETWEEN 0 AND 15),
+  PRIMARY KEY(execution_id, chain_position),
+  UNIQUE(execution_id, sha256_fingerprint)
+) WITHOUT ROWID, STRICT;
+CREATE INDEX execution_transport_certificates_fingerprint
+  ON execution_transport_certificates(sha256_fingerprint);
+CREATE TRIGGER execution_transport_certificate_gc
+AFTER DELETE ON execution_transport_certificates
+BEGIN
+  DELETE FROM transport_certificates
+  WHERE sha256_fingerprint = OLD.sha256_fingerprint
+    AND NOT EXISTS (
+      SELECT 1 FROM execution_transport_certificates
+      WHERE sha256_fingerprint = OLD.sha256_fingerprint
+    );
+END;
 
 CREATE TABLE blob_references (
   blob_id BLOB NOT NULL REFERENCES blobs(id),
@@ -492,6 +530,24 @@ export class SqliteDatabase {
       !this.#tableExists("authentication_attempts")
     ) {
       this.#migrateAuthProviderCredentials();
+    }
+
+    const executionTransportMetadataApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(EXECUTION_TRANSPORT_METADATA_MIGRATION);
+    if (
+      executionTransportMetadataApplied === undefined ||
+      !this.#columnExists("executions", "transport_metadata_collected") ||
+      !this.#columnExists(
+        "executions",
+        "transport_metadata_unavailable_reason",
+      ) ||
+      !this.#columnExists("executions", "transport_metadata_json") ||
+      !this.#columnExists("executions", "transport_timings_json") ||
+      !this.#tableExists("transport_certificates") ||
+      !this.#tableExists("execution_transport_certificates")
+    ) {
+      this.#migrateExecutionTransportMetadata();
     }
   }
 
@@ -1303,6 +1359,80 @@ export class SqliteDatabase {
       CREATE INDEX IF NOT EXISTS authentication_attempts_expiry
         ON authentication_attempts(status, expires_at);
     `);
+  }
+
+  /** Adds immutable execution observations and deduplicated certificate storage. */
+  #migrateExecutionTransportMetadata(): void {
+    this.#driver.transaction(() => {
+      if (!this.#columnExists("executions", "transport_metadata_collected")) {
+        this.#driver.exec(
+          "ALTER TABLE executions ADD COLUMN transport_metadata_collected INTEGER NOT NULL DEFAULT 0 CHECK(transport_metadata_collected IN (0, 1))",
+        );
+      }
+      if (
+        !this.#columnExists(
+          "executions",
+          "transport_metadata_unavailable_reason",
+        )
+      ) {
+        this.#driver.exec(
+          "ALTER TABLE executions ADD COLUMN transport_metadata_unavailable_reason TEXT CHECK(transport_metadata_unavailable_reason IN ('disabled', 'unsupported'))",
+        );
+      }
+      if (!this.#columnExists("executions", "transport_metadata_json")) {
+        this.#driver.exec(
+          "ALTER TABLE executions ADD COLUMN transport_metadata_json TEXT CHECK(transport_metadata_json IS NULL OR json_valid(transport_metadata_json))",
+        );
+      }
+      if (!this.#columnExists("executions", "transport_timings_json")) {
+        this.#driver.exec(
+          "ALTER TABLE executions ADD COLUMN transport_timings_json TEXT CHECK(transport_timings_json IS NULL OR json_valid(transport_timings_json))",
+        );
+      }
+      this.#driver.exec(`
+        CREATE TABLE IF NOT EXISTS transport_certificates (
+          sha256_fingerprint TEXT PRIMARY KEY CHECK(length(sha256_fingerprint) = 64),
+          der_bytes BLOB NOT NULL,
+          subject TEXT,
+          issuer TEXT,
+          valid_from INTEGER,
+          valid_to INTEGER,
+          serial_number TEXT,
+          subject_alternative_names_json TEXT CHECK(subject_alternative_names_json IS NULL OR json_valid(subject_alternative_names_json)),
+          created_at INTEGER NOT NULL
+        ) STRICT;
+        CREATE TABLE IF NOT EXISTS execution_transport_certificates (
+          execution_id BLOB NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
+          sha256_fingerprint TEXT NOT NULL REFERENCES transport_certificates(sha256_fingerprint),
+          chain_position INTEGER NOT NULL CHECK(chain_position BETWEEN 0 AND 15),
+          PRIMARY KEY(execution_id, chain_position),
+          UNIQUE(execution_id, sha256_fingerprint)
+        ) WITHOUT ROWID, STRICT;
+        CREATE INDEX IF NOT EXISTS execution_transport_certificates_fingerprint
+          ON execution_transport_certificates(sha256_fingerprint);
+        CREATE TRIGGER IF NOT EXISTS execution_transport_certificate_gc
+        AFTER DELETE ON execution_transport_certificates
+        BEGIN
+          DELETE FROM transport_certificates
+          WHERE sha256_fingerprint = OLD.sha256_fingerprint
+            AND NOT EXISTS (
+              SELECT 1 FROM execution_transport_certificates
+              WHERE sha256_fingerprint = OLD.sha256_fingerprint
+            );
+        END;
+        UPDATE executions
+        SET transport_metadata_collected = 0,
+            transport_metadata_unavailable_reason = 'disabled'
+        WHERE transport_metadata_json IS NULL
+          AND transport_timings_json IS NULL;
+      `);
+      const applied = this.#driver
+        .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+        .get(EXECUTION_TRANSPORT_METADATA_MIGRATION);
+      if (applied === undefined) {
+        this.#recordMigration(EXECUTION_TRANSPORT_METADATA_MIGRATION);
+      }
+    })();
   }
 
   /** Records one successfully applied schema migration. */

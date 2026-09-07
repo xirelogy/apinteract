@@ -5,7 +5,7 @@ proxy component's public API. Proxy implementations, backend clients, contract
 tests, generated clients, and published references use it as their
 authoritative contract.
 
-The current `0.1.1` contract defines the backend-to-proxy HTTP execution
+The current `0.1.2` contract defines the backend-to-proxy HTTP execution
 protocol. It separates small control-plane operations from streaming request
 and response data:
 
@@ -62,11 +62,11 @@ certificate and hostname. Insecure mode keeps the connection encrypted but
 allows an untrusted, expired, hostname-mismatched, or self-signed target
 certificate.
 
-The contract can represent local and remote socket endpoints, connection reuse,
-negotiated TLS details, verification outcome, and the peer certificate chain.
-The current Node transport reports these capability flags as false and omits
-the observations. `/capabilities` is authoritative for what a running proxy can
-provide.
+The Node transport reports local and remote socket endpoints, connection reuse,
+negotiated TLS details, strict-verification outcome, phase timings, and the peer
+certificate chain. `/capabilities` remains authoritative because administrators
+can disable detailed collection. First-byte and total timings remain available
+when detailed collection is disabled.
 
 Successful connections carry available observations in the response-head
 frame, before response body frames. DNS, connection, and TLS failures carry
@@ -74,6 +74,10 @@ observations collected before failure in the terminal error frame. Certificate
 entries preserve DER bytes in Base64 because they are bounded metadata rather
 than request or response payloads. The backend can parse those bytes for
 display without replacing the observed certificate representation.
+Strict verification inspects and rejects the same handshake; it never retries
+without verification and never sends HTTP bytes over an unauthorized socket.
+Insecure mode allows the connection but still reports what strict verification
+would have concluded.
 
 ## Response Recovery
 
