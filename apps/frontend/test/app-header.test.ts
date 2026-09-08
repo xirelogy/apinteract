@@ -13,6 +13,7 @@ import type {
   LocalePreference,
   TranslationService,
 } from "../src/app/i18n/translation-types";
+import { useApplicationStore } from "../src/control/state/application-store";
 import AppHeader from "../src/view/presentation/layout/AppHeader.vue";
 
 let showModalDescriptor: PropertyDescriptor | undefined;
@@ -88,6 +89,11 @@ describe("AppHeader", () => {
       ]),
       setPreference: vi.fn(() => Promise.resolve()),
     } satisfies TranslationService;
+    const pinia = createPinia();
+    useApplicationStore(pinia).userPreferences = {
+      redirectPolicy: { follow: true, maxRedirects: 10 },
+      revision: 0,
+    };
     const wrapper = mount(AppHeader, {
       attachTo: document.body,
       props: {
@@ -95,7 +101,7 @@ describe("AppHeader", () => {
         navigatorOpen: false,
       },
       global: {
-        plugins: [i18n, createPinia()],
+        plugins: [i18n, pinia],
         provide: {
           [translationServiceKey as symbol]: translation,
         },
@@ -142,6 +148,8 @@ describe("AppHeader", () => {
         "Display style",
         "Date and time format",
         "Headers that append by default",
+        "Follow redirects",
+        "Maximum redirects",
       ],
     );
     expect(
@@ -188,6 +196,7 @@ describe("AppHeader", () => {
     await appendingHeaders.setValue("Cookie\nX-List");
 
     await optionsDialog.get(".primary-button").trigger("click");
+    await flushPromises();
     expect(optionsDialog.attributes()).not.toHaveProperty("open");
     expect(
       JSON.parse(

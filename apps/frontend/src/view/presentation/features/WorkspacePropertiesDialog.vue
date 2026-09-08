@@ -16,6 +16,8 @@ import type {
   VariablePreview,
   VariableWrite,
   WorkspaceView,
+  RedirectPolicyOverride,
+  ResolvedRedirectPolicy,
 } from "@/model/contracts/backend";
 import type { WorkspacePropertiesDraft } from "@/model/domain/application";
 import {
@@ -32,6 +34,7 @@ import FormField from "@/view/presentation/controls/FormField.vue";
 import HeaderMergeModeToggle from "@/view/presentation/controls/HeaderMergeModeToggle.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import RowReorderHandle from "@/view/presentation/controls/RowReorderHandle.vue";
+import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TemplateTextControl from "@/view/presentation/controls/TemplateTextControl.vue";
 import TextInput from "@/view/presentation/controls/TextInput.vue";
 import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
@@ -56,6 +59,7 @@ const props = defineProps<{
   canDelete: boolean;
   busy: boolean;
   recoveryWarning?: boolean;
+  userRedirectPolicy?: ResolvedRedirectPolicy | undefined;
 }>();
 const emit = defineEmits<{
   close: [];
@@ -69,10 +73,13 @@ const emit = defineEmits<{
     baseUrl: string,
     headers: readonly RequestField[],
     variables: readonly VariableWrite[],
+    redirectPolicy: RedirectPolicyOverride,
   ];
 }>();
 const { t } = useI18n();
-const activeSection = ref<"headers" | "variables" | "documentation">("headers");
+const activeSection = ref<
+  "headers" | "variables" | "execution" | "documentation"
+>("headers");
 const name = ref(props.draft?.name ?? props.workspace.name);
 const description = ref(
   props.draft?.description ?? props.workspace.description,
@@ -90,6 +97,49 @@ const headers = ref<RequestField[]>(
 const expandedHeaderDescriptions = ref<RequestField[]>([]);
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 const variables = ref<readonly VariableWrite[]>(props.draft?.variables ?? []);
+const initialRedirectPolicy =
+  props.draft?.redirectPolicy ?? props.workspace.redirectPolicy ?? {};
+const redirectFollow = ref<"inherit" | "follow" | "manual">(
+  initialRedirectPolicy.follow === undefined
+    ? "inherit"
+    : initialRedirectPolicy.follow
+      ? "follow"
+      : "manual",
+);
+const maximumRedirects = ref(
+  initialRedirectPolicy.maxRedirects === undefined
+    ? ""
+    : String(initialRedirectPolicy.maxRedirects),
+);
+const redirectFollowOptions = computed(() => [
+  {
+    value: "inherit",
+    label: t("redirects.inherit", {
+      source: t("redirects.source.userDefaults"),
+      value:
+        props.userRedirectPolicy?.follow === false
+          ? t("redirects.manual")
+          : t("redirects.follow"),
+    }),
+  },
+  { value: "follow", label: t("redirects.follow") },
+  { value: "manual", label: t("redirects.manual") },
+]);
+const redirectPolicy = computed<RedirectPolicyOverride>(() => ({
+  ...(redirectFollow.value === "inherit"
+    ? {}
+    : { follow: redirectFollow.value === "follow" }),
+  ...(maximumRedirects.value.trim() === ""
+    ? {}
+    : { maxRedirects: Number(maximumRedirects.value) }),
+}));
+const maximumRedirectsValid = computed(
+  () =>
+    maximumRedirects.value.trim() === "" ||
+    (Number.isInteger(Number(maximumRedirects.value)) &&
+      Number(maximumRedirects.value) >= 0 &&
+      Number(maximumRedirects.value) <= 50),
+);
 const headerCount = computed(
   () => meaningfulRequestFields(headers.value).length,
 );
@@ -106,6 +156,7 @@ const previewSignature = computed(() =>
 const canSave = computed(
   () =>
     name.value.trim() !== "" &&
+    maximumRedirectsValid.value &&
     meaningfulRequestFields(headers.value).every(
       (header) =>
         (!header.enabled || header.name.trim() !== "") &&
@@ -113,9 +164,19 @@ const canSave = computed(
     ),
 );
 watch(previewSignature, scheduleVariablePreview, { immediate: true });
-watch([name, description, notes, baseUrl, headers], publishDraft, {
-  deep: true,
-});
+watch(
+  [
+    name,
+    description,
+    notes,
+    baseUrl,
+    headers,
+    redirectFollow,
+    maximumRedirects,
+  ],
+  publishDraft,
+  { deep: true },
+);
 
 onBeforeUnmount(() => {
   if (previewTimer !== undefined) clearTimeout(previewTimer);
@@ -185,6 +246,7 @@ function publishDraft(): void {
     baseUrl: baseUrl.value,
     headers: meaningfulRequestFields(headers.value),
     variables: variables.value,
+    redirectPolicy: redirectPolicy.value,
   });
 }
 
@@ -192,6 +254,14 @@ function publishDraft(): void {
 function updateVariables(nextVariables: readonly VariableWrite[]): void {
   variables.value = nextVariables;
   publishDraft();
+}
+
+/** Applies one validated workspace redirect behavior selection. */
+function selectRedirectFollow(value: string): void {
+  if (value === "inherit" || value === "follow" || value === "manual") {
+    redirectFollow.value = value;
+    publishDraft();
+  }
 }
 
 /** Opens styled confirmation before requesting workspace deletion. */
@@ -217,6 +287,7 @@ function save(): void {
     baseUrl.value.trim(),
     meaningfulRequestFields(headers.value),
     variableEditor.value?.writes() ?? [],
+    redirectPolicy.value,
   );
 }
 </script>
@@ -316,6 +387,9 @@ function save(): void {
             <TabsTrigger class="tab-button" value="variables">
               {{ t("environment.variables") }}
               <span class="tab-count">{{ variableCount }}</span>
+            </TabsTrigger>
+            <TabsTrigger class="tab-button" value="execution">
+              {{ t("redirects.execution") }}
             </TabsTrigger>
             <TabsTrigger class="tab-button" value="documentation">
               {{ t("documentation.title") }}
@@ -469,6 +543,49 @@ function save(): void {
               @count-change="variableCount = $event"
               @change="updateVariables"
             />
+          </TabsPanel>
+          <TabsPanel value="execution" class="collection-properties-section">
+            <section class="redirect-settings">
+              <h3>{{ t("redirects.heading") }}</h3>
+              <FormField
+                v-slot="{ controlId }"
+                :label="t('redirects.behavior')"
+              >
+                <SelectMenu
+                  :input-id="controlId"
+                  :model-value="redirectFollow"
+                  :options="redirectFollowOptions"
+                  :label="t('redirects.behavior')"
+                  :disabled="busy || !canEdit"
+                  @update:model-value="selectRedirectFollow"
+                />
+              </FormField>
+              <FormField
+                v-slot="{ controlId, describedBy, invalid }"
+                :label="t('redirects.maximum')"
+                v-bind="
+                  maximumRedirectsValid
+                    ? {}
+                    : { error: t('redirects.maximumInvalid') }
+                "
+              >
+                <TextInput
+                  :id="controlId"
+                  v-model="maximumRedirects"
+                  inputmode="numeric"
+                  :placeholder="
+                    t('redirects.inheritedMaximum', {
+                      source: t('redirects.source.userDefaults'),
+                      value: userRedirectPolicy?.maxRedirects ?? 10,
+                    })
+                  "
+                  :aria-describedby="describedBy"
+                  :invalid="invalid"
+                  :disabled="busy || !canEdit"
+                  @input="publishDraft"
+                />
+              </FormField>
+            </section>
           </TabsPanel>
           <TabsPanel
             value="documentation"

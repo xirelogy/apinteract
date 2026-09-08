@@ -44,6 +44,12 @@ export interface ProxyHealthDetails {
   readonly protocolVersion: string | null;
 }
 
+/** Per-hop limits resolved by backend orchestration before proxy dispatch. */
+export interface ProxyExecutionOptions {
+  readonly totalTimeoutMs?: number;
+  readonly maxResponseBodyBytes?: number;
+}
+
 /** A terminal execution failure reported by the proxy data plane. */
 export class ProxyExecutionError extends Error {
   readonly detail: StreamError;
@@ -109,7 +115,19 @@ export class ProxyClient {
     body: Buffer,
     sink: ProxyResponseSink,
     bodyPresent = body.byteLength > 0,
+    options: ProxyExecutionOptions = {},
   ): Promise<void> {
+    const totalTimeoutMs = Math.max(
+      1,
+      Math.min(options.totalTimeoutMs ?? 300_000, 300_000),
+    );
+    const executionSignal = AbortSignal.timeout(totalTimeoutMs);
+    /** Caps control calls without allowing them to outlive this hop. */
+    const controlSignal = (): AbortSignal =>
+      AbortSignal.any([
+        executionSignal,
+        AbortSignal.timeout(CONTROL_REQUEST_TIMEOUT_MS),
+      ]);
     const bodyDescriptor: TargetRequest["body"] = !bodyPresent
       ? { mode: "none", length: 0, sha256: null }
       : {
@@ -131,17 +149,17 @@ export class ProxyClient {
           headers,
           body: bodyDescriptor,
           behavior: {
-            connectTimeoutMs: 10_000,
-            responseHeaderTimeoutMs: 30_000,
-            responseIdleTimeoutMs: 30_000,
-            totalTimeoutMs: 300_000,
+            connectTimeoutMs: Math.min(10_000, totalTimeoutMs),
+            responseHeaderTimeoutMs: Math.min(30_000, totalTimeoutMs),
+            responseIdleTimeoutMs: Math.min(30_000, totalTimeoutMs),
+            totalTimeoutMs,
             redirectMode: "manual",
             tlsVerification: "strict",
-            maxResponseBodyBytes: 1_073_741_824,
+            maxResponseBodyBytes: options.maxResponseBodyBytes ?? 1_073_741_824,
           },
         },
       }),
-      signal: AbortSignal.timeout(CONTROL_REQUEST_TIMEOUT_MS),
+      signal: controlSignal(),
     });
     if (!creation.ok) {
       throw new Error(
@@ -163,7 +181,7 @@ export class ProxyClient {
               "Content-Type": "application/octet-stream",
             },
             body: new Uint8Array(body),
-            signal: AbortSignal.timeout(CONTROL_REQUEST_TIMEOUT_MS),
+            signal: controlSignal(),
           },
         );
         if (!upload.ok) {
@@ -176,6 +194,7 @@ export class ProxyClient {
           headers: {
             Authorization: `Bearer ${this.#bearerToken}`,
           },
+          signal: executionSignal,
         },
       );
       if (!response.ok || response.body === null) {

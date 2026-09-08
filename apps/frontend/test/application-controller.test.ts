@@ -76,7 +76,13 @@ describe("ApplicationController workspaces", () => {
         role: "viewer" as const,
       },
     ];
-    const command = vi.fn().mockResolvedValue({ workspaces });
+    const preferences = {
+      redirectPolicy: { follow: true, maxRedirects: 10 },
+      revision: 0,
+    };
+    const command = vi.fn((type: string) =>
+      type === "workspace.list" ? { workspaces } : preferences,
+    );
     const webSocket = {
       command,
       onEvent: vi.fn(),
@@ -92,8 +98,9 @@ describe("ApplicationController workspaces", () => {
     expect(store.workspaces).toEqual(workspaces);
     expect(store.selectedWorkspaceId).toBeNull();
     expect(store.selectedWorkspace).toBeNull();
-    expect(command).toHaveBeenCalledOnce();
+    expect(command).toHaveBeenCalledTimes(2);
     expect(command).toHaveBeenCalledWith("workspace.list", {});
+    expect(command).toHaveBeenCalledWith("user_preferences.get", {});
   });
 
   it("clears workspace-derived state without a backend command", async () => {
@@ -773,6 +780,12 @@ describe("ApplicationController local request recovery", () => {
       ],
     });
     const command = vi.fn((type: string) => {
+      if (type === "user_preferences.get") {
+        return {
+          redirectPolicy: { follow: true, maxRedirects: 10 },
+          revision: 0,
+        };
+      }
       if (type === "workspace.list") {
         return {
           workspaces: [{ workspaceId, name: "Workspace", role: "owner" }],

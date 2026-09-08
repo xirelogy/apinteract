@@ -10,7 +10,12 @@ import {
   type LocalBlobWriter,
   type StoredBlob,
 } from "../blobs/local-blob-store.js";
-import { bytesToId, idToBytes, type EntityId } from "../foundation/id.js";
+import {
+  bytesToId,
+  createEntityId,
+  idToBytes,
+  type EntityId,
+} from "../foundation/id.js";
 import { VariableResolver } from "../environments/variable-resolver.js";
 import type { DatabaseSchema } from "../persistence/schema.js";
 import type { ProxyClient } from "../proxy/proxy-client.js";
@@ -38,6 +43,11 @@ import type {
 } from "../variables/variable-service.js";
 import { DEFAULT_BACKEND_USER_AGENT } from "../version.js";
 import {
+  RedirectExecutionError,
+  redirectDecision,
+  type RedirectResult,
+} from "./redirect-request.js";
+import {
   executionRequestFromScript,
   postResponseScriptView,
   preRequestScriptView,
@@ -58,12 +68,18 @@ type ExecutionTransportMetadata =
   BackendComponents["schemas"]["ExecutionTransportMetadata"];
 type ExecutionTransportTimings =
   BackendComponents["schemas"]["ExecutionTransportTimings"];
+type ExecutionRedirectChainItem =
+  BackendComponents["schemas"]["ExecutionRedirectChainItem"];
 /** Maximum characters retained in the WebSocket-safe outgoing body preview. */
 const OUTGOING_BODY_PREVIEW_CHARACTERS = 262_144;
 /** Maximum raw DER retained for one execution certificate chain. */
 const MAX_TRANSPORT_CERTIFICATE_BYTES = 256 * 1_024;
 /** Maximum certificates retained from one execution TLS peer chain. */
 const MAX_TRANSPORT_CERTIFICATES = 16;
+/** Existing aggregate response-body budget shared by every redirect hop. */
+const MAX_EXECUTION_RESPONSE_BODY_BYTES = 1_073_741_824;
+/** Existing chain-wide outbound deadline starting immediately before hop one. */
+const EXECUTION_OUTBOUND_TIMEOUT_MS = 300_000;
 
 export interface ExecutionEvent {
   readonly type:
@@ -105,11 +121,16 @@ export interface ExecutionView {
   readonly scriptTests: readonly ScriptTestResult[];
   readonly scriptVariableWrites?: readonly ScriptVariableWriteResult[];
   readonly scriptError?: ScriptPhaseError;
+  readonly rootExecutionId?: EntityId;
+  readonly exchangeSequence?: number;
+  readonly effectiveRedirectPolicy?: PreparedExecution["redirectPolicy"];
+  readonly redirect?: RedirectResult;
+  readonly redirectChain?: readonly ExecutionRedirectChainItem[];
 }
 
 /** Secret-safe representation of the materialized request handed to the proxy. */
 export interface OutgoingRequestView {
-  readonly method: string;
+  readonly method: PreparedExecution["request"]["method"];
   readonly url: {
     readonly value: string;
     readonly redacted: boolean;
@@ -303,6 +324,9 @@ export class ExecutionService {
       bodyComplete: false,
       createdAt: new Date(prepared.createdAt).toISOString(),
       transportMetadataCollected: false,
+      rootExecutionId: prepared.rootExecutionId,
+      exchangeSequence: prepared.exchangeSequence,
+      effectiveRedirectPolicy: prepared.redirectPolicy,
       scriptLogs: [],
       scriptTests: [],
     };
@@ -400,10 +424,7 @@ export class ExecutionService {
     userId: EntityId,
     publish: (event: ExecutionEvent) => void,
   ): Promise<void> {
-    const writer = this.#blobs.createWriter();
-    let head: ResponseHead | undefined;
     let working = prepared;
-    let outgoingRequest: OutgoingRequestView | undefined;
     let local: Readonly<Record<string, string>> = {};
     let scripts: ScriptSummary = { logs: [], tests: [] };
     try {
@@ -476,6 +497,7 @@ export class ExecutionService {
               ...composed.persisted,
               targetMode: "absolute",
               queryMode: "structured",
+              redirectPolicy: prepared.redirectPolicy,
               variableProfiles: prepared.variableEvidence,
               secretReferences: composed.secretReferences,
             }),
@@ -484,80 +506,306 @@ export class ExecutionService {
           .where("id", "=", idToBytes(prepared.executionId))
           .execute();
       }
-      outgoingRequest = outgoingRequestView(
+      const deadline = Date.now() + EXECUTION_OUTBOUND_TIMEOUT_MS;
+      let aggregateResponseBytes = 0;
+      let followedRedirects = 0;
+      let scriptRequest =
         working.postScriptRequest ??
-          postResponseScriptView(
-            working.templateRequest,
-            working.request,
-            resolver,
-          ),
-        working.request,
-      );
-      // Sink callbacks are awaited by ProxyClient, so filesystem writes apply
-      // backpressure to the proxy response stream.
-      await this.#proxy.execute(
-        working.executionId,
-        working.request.method,
-        materializeTargetUrl(working.request.targetUrl, working.request.query),
-        working.request.headers
-          .filter((header) => header.enabled)
-          .map(({ name, value }) => ({ name, value })),
-        working.request.bodyBytes === undefined
-          ? Buffer.from(working.request.body, "utf8")
-          : Buffer.from(working.request.bodyBytes),
-        {
-          responseHead: async (value) => {
-            head = value;
-            await this.#database
-              .updateTable("executions")
-              .set({
-                response_status: value.status,
-                response_headers_json: JSON.stringify(value.headers),
-              })
-              .where("id", "=", idToBytes(prepared.executionId))
-              .execute();
-            publish({
-              type: "execution.response_head",
-              executionId: prepared.executionId,
-              payload: { status: value.status, headers: value.headers },
-            });
-          },
-          body: async (bytes) => {
-            await writer.write(bytes);
-            publish({
-              type: "execution.progress",
-              executionId: prepared.executionId,
-              payload: { bodyBytes: writer.byteLength },
-            });
-          },
-          complete: async (value) => {
+        postResponseScriptView(
+          working.templateRequest,
+          working.request,
+          resolver,
+        );
+      while (true) {
+        const writer = this.#blobs.createWriter();
+        let head: ResponseHead | undefined;
+        let complete: ResponseComplete | undefined;
+        const outgoingRequest = outgoingRequestView(
+          scriptRequest,
+          working.request,
+        );
+        const effectiveTargetUrl = materializeTargetUrl(
+          working.request.targetUrl,
+          working.request.query,
+        );
+        try {
+          const remainingTime = deadline - Date.now();
+          if (remainingTime <= 0) {
+            throw new RedirectExecutionError(
+              "execution_timeout",
+              "The redirect chain exceeded its execution-time limit",
+            );
+          }
+          const remainingBodyBytes =
+            MAX_EXECUTION_RESPONSE_BODY_BYTES - aggregateResponseBytes;
+          if (remainingBodyBytes <= 0) {
+            throw new RedirectExecutionError(
+              "response_size_limit",
+              "The redirect chain exhausted its response-body limit",
+            );
+          }
+          // Sink callbacks are awaited by ProxyClient, so filesystem writes
+          // apply backpressure to each independently policy-checked hop.
+          await this.#proxy.execute(
+            working.exchangeSequence === 0
+              ? working.rootExecutionId
+              : `${working.rootExecutionId}:${working.exchangeSequence}`,
+            working.request.method,
+            effectiveTargetUrl,
+            working.request.headers
+              .filter((header) => header.enabled)
+              .map(({ name, value }) => ({ name, value })),
+            working.request.bodyBytes === undefined
+              ? Buffer.from(working.request.body, "utf8")
+              : Buffer.from(working.request.bodyBytes),
+            {
+              responseHead: async (value) => {
+                head = value;
+                await this.#database
+                  .updateTable("executions")
+                  .set({
+                    response_status: value.status,
+                    response_headers_json: JSON.stringify(value.headers),
+                    outgoing_request_json: JSON.stringify(outgoingRequest),
+                  })
+                  .where("id", "=", idToBytes(working.executionId))
+                  .execute();
+                publish({
+                  type: "execution.response_head",
+                  executionId: working.rootExecutionId,
+                  payload: {
+                    exchangeId: working.executionId,
+                    exchangeSequence: working.exchangeSequence,
+                    status: value.status,
+                    headers: value.headers,
+                  },
+                });
+              },
+              body: async (bytes) => {
+                await writer.write(bytes);
+                publish({
+                  type: "execution.progress",
+                  executionId: working.rootExecutionId,
+                  payload: {
+                    exchangeId: working.executionId,
+                    exchangeSequence: working.exchangeSequence,
+                    bodyBytes: writer.byteLength,
+                    aggregateBodyBytes:
+                      aggregateResponseBytes + writer.byteLength,
+                  },
+                });
+              },
+              complete: (value) => {
+                complete = value;
+                return Promise.resolve();
+              },
+            },
+            working.request.bodyPresent,
+            {
+              totalTimeoutMs: remainingTime,
+              maxResponseBodyBytes: remainingBodyBytes,
+            },
+          );
+          if (head === undefined || complete === undefined) {
+            throw new Error("Proxy completed without terminal response data");
+          }
+          let decision = redirectDecision(
+            head.status,
+            head.headers,
+            {
+              ...working.request,
+              targetUrl: effectiveTargetUrl,
+              targetComponents: [effectiveTargetUrl],
+              query: [],
+            },
+            scriptRequest,
+            working.redirectPolicy,
+            followedRedirects,
+          );
+          if (
+            decision.kind === "follow" &&
+            aggregateResponseBytes + complete.bodyBytes >=
+              MAX_EXECUTION_RESPONSE_BODY_BYTES
+          ) {
+            const error = new RedirectExecutionError(
+              "response_size_limit",
+              "The redirect chain exhausted its response-body limit",
+            );
+            decision = {
+              kind: "error",
+              error,
+              redirect: {
+                ...decision.redirect,
+                outcome: "failed",
+                reason: error.code,
+              },
+            };
+          }
+          if (decision.kind !== "follow") {
             await this.#complete(
               working,
               userId,
               writer,
               head,
-              value,
+              complete,
               local,
               scripts,
               outgoingRequest,
               publish,
+              decision.redirect,
+              decision.kind === "error" ? decision.error : null,
             );
-          },
-        },
-        working.request.bodyPresent,
-      );
+            return;
+          }
+
+          const blob = await this.#commitResponse(writer, complete);
+          aggregateResponseBytes += blob.byteLength;
+          const nextExecutionId = createEntityId();
+          const redirect = {
+            ...decision.redirect,
+            destinationExecutionId: nextExecutionId,
+          };
+          await this.#persistTerminal(
+            working,
+            userId,
+            blob,
+            head,
+            true,
+            null,
+            { logs: [], tests: [] },
+            outgoingRequest,
+            [],
+            transportResultFromComplete(head, complete),
+            redirect,
+          );
+          await this.#createRedirectExchange(
+            working,
+            userId,
+            nextExecutionId,
+            decision.request,
+            decision.scriptRequest,
+          );
+          followedRedirects += 1;
+          working = {
+            ...working,
+            executionId: nextExecutionId,
+            exchangeSequence: working.exchangeSequence + 1,
+            templateRequest: decision.request,
+            request: decision.request,
+            postScriptRequest: decision.scriptRequest,
+            materialized: true,
+            createdAt: Date.now(),
+          };
+          scriptRequest = decision.scriptRequest;
+        } catch (cause) {
+          await this.#fail(
+            working,
+            userId,
+            writer,
+            head,
+            cause,
+            scripts,
+            outgoingRequest,
+            publish,
+          );
+          return;
+        }
+      }
     } catch (cause) {
+      const writer = this.#blobs.createWriter();
       await this.#fail(
         working,
         userId,
         writer,
-        head,
+        undefined,
         cause,
         scripts,
-        outgoingRequest,
+        undefined,
         publish,
       );
     }
+  }
+
+  /** Commits and verifies one complete hop body before durable publication. */
+  async #commitResponse(
+    writer: LocalBlobWriter,
+    complete: ResponseComplete,
+  ): Promise<StoredBlob> {
+    const blob = await writer.commit();
+    if (
+      blob.byteLength !== complete.bodyBytes ||
+      (complete.bodySha256 !== null && blob.sha256 !== complete.bodySha256)
+    ) {
+      throw new Error(
+        "Stored response body does not match proxy completion metadata",
+      );
+    }
+    return blob;
+  }
+
+  /** Creates the next independently identified single-hop exchange. */
+  async #createRedirectExchange(
+    source: PreparedExecution,
+    userId: EntityId,
+    executionId: EntityId,
+    request: PreparedExecution["request"],
+    scriptRequest: ScriptRequest,
+  ): Promise<void> {
+    const createdAt = Date.now();
+    const outgoingRequest = outgoingRequestView(scriptRequest, request);
+    await this.#database.transaction().execute(async (transaction) => {
+      await transaction
+        .insertInto("executions")
+        .values({
+          id: idToBytes(executionId),
+          workspace_id: idToBytes(request.workspaceId),
+          request_id:
+            request.requestId === undefined
+              ? null
+              : idToBytes(request.requestId),
+          request_revision_id:
+            source.revisionId === undefined
+              ? null
+              : idToBytes(source.revisionId),
+          created_by: idToBytes(userId),
+          state: "running",
+          snapshot_json: JSON.stringify({
+            method: request.method,
+            targetMode: "absolute",
+            targetUrl: outgoingRequest.url.value,
+            queryMode: "structured",
+            headers: outgoingRequest.headers,
+            body: outgoingRequest.body,
+            redirectPolicy: source.redirectPolicy,
+          }),
+          response_status: null,
+          response_headers_json: null,
+          response_blob_id: null,
+          body_complete: 0,
+          body_bytes: null,
+          body_sha256: null,
+          error_json: null,
+          script_result_json: null,
+          root_execution_id: idToBytes(source.rootExecutionId),
+          exchange_sequence: source.exchangeSequence + 1,
+          redirect_json: null,
+          outgoing_request_json: JSON.stringify(outgoingRequest),
+          created_at: createdAt,
+          completed_at: null,
+        })
+        .execute();
+      await this.#audit.record(transaction, {
+        type: "execution.redirect_followed",
+        actorUserId: userId,
+        workspaceId: request.workspaceId,
+        data: {
+          executionId: source.rootExecutionId,
+          sourceExchangeId: source.executionId,
+          destinationExchangeId: executionId,
+          sequence: source.exchangeSequence + 1,
+        },
+      });
+    });
   }
 
   /** Validates and commits a complete proxy response and its blob metadata. */
@@ -571,21 +819,13 @@ export class ExecutionService {
     scripts: ScriptSummary,
     outgoingRequest: OutgoingRequestView | undefined,
     publish: (event: ExecutionEvent) => void,
+    redirect: RedirectResult | undefined,
+    terminalError: RedirectExecutionError | null,
   ): Promise<void> {
     if (head === undefined) {
       throw new Error("Proxy completed without a response head");
     }
-    const blob = await writer.commit();
-    // Verify the locally persisted bytes before making the response visible as
-    // complete. A mismatch is retained as a failed partial response.
-    if (
-      blob.byteLength !== complete.bodyBytes ||
-      (complete.bodySha256 !== null && blob.sha256 !== complete.bodySha256)
-    ) {
-      throw new Error(
-        "Stored response body does not match proxy completion metadata",
-      );
-    }
+    const blob = await this.#commitResponse(writer, complete);
     if (prepared.request.postResponseScript.trim() !== "") {
       let variableWrites: readonly ScriptVariableWrite[] = [];
       try {
@@ -680,15 +920,19 @@ export class ExecutionService {
           blob,
           head,
           true,
-          null,
+          terminalError === null
+            ? null
+            : { code: terminalError.code, message: terminalError.message },
           scripts,
           outgoingRequest,
           variableWrites,
           transportResultFromComplete(head, complete),
+          redirect,
         );
         publish({
-          type: "execution.completed",
-          executionId: prepared.executionId,
+          type:
+            terminalError === null ? "execution.completed" : "execution.failed",
+          executionId: prepared.rootExecutionId,
           payload: view,
         });
         return;
@@ -706,15 +950,18 @@ export class ExecutionService {
       blob,
       head,
       true,
-      null,
+      terminalError === null
+        ? null
+        : { code: terminalError.code, message: terminalError.message },
       scripts,
       outgoingRequest,
       [],
       transportResultFromComplete(head, complete),
+      redirect,
     );
     publish({
-      type: "execution.completed",
-      executionId: prepared.executionId,
+      type: terminalError === null ? "execution.completed" : "execution.failed",
+      executionId: prepared.rootExecutionId,
       payload: view,
     });
   }
@@ -753,7 +1000,7 @@ export class ExecutionService {
     );
     publish({
       type: "execution.failed",
-      executionId: prepared.executionId,
+      executionId: prepared.rootExecutionId,
       payload: view,
     });
   }
@@ -770,8 +1017,10 @@ export class ExecutionService {
     outgoingRequest: OutgoingRequestView | undefined,
     variableWrites: readonly ScriptVariableWrite[],
     transportResult: ExecutionTransportResult,
+    redirect?: RedirectResult,
   ): Promise<ExecutionView> {
     const completedAt = Date.now();
+    const failed = !bodyComplete || error !== null;
     let executionTransportMetadata: ExecutionTransportMetadata | undefined;
     const committedVariableWrites = variableWrites.map(
       scriptVariableWriteResult,
@@ -824,7 +1073,7 @@ export class ExecutionService {
       await transaction
         .updateTable("executions")
         .set({
-          state: bodyComplete ? "completed" : "failed",
+          state: failed ? "failed" : "completed",
           response_status: head?.status ?? null,
           response_headers_json:
             head === undefined ? null : JSON.stringify(head.headers),
@@ -845,12 +1094,18 @@ export class ExecutionService {
             transportResult.timings === undefined
               ? null
               : JSON.stringify(transportResult.timings),
+          redirect_json:
+            redirect === undefined ? null : JSON.stringify(redirect),
+          outgoing_request_json:
+            outgoingRequest === undefined
+              ? null
+              : JSON.stringify(outgoingRequest),
           completed_at: completedAt,
         })
         .where("id", "=", idToBytes(prepared.executionId))
         .execute();
       await this.#audit.record(transaction, {
-        type: bodyComplete ? "execution.completed" : "execution.failed",
+        type: failed ? "execution.failed" : "execution.completed",
         actorUserId: userId,
         workspaceId: prepared.request.workspaceId,
         data: {
@@ -867,12 +1122,13 @@ export class ExecutionService {
       blob === undefined || head === undefined
         ? undefined
         : safeUtf8Preview(blob.previewBytes);
+    const redirectChain = await this.#redirectChain(prepared.rootExecutionId);
     return {
       executionId: prepared.executionId,
       ...(prepared.request.requestId === undefined
         ? {}
         : { requestId: prepared.request.requestId }),
-      state: bodyComplete ? "completed" : "failed",
+      state: failed ? "failed" : "completed",
       ...(head === undefined
         ? {}
         : { status: head.status, headers: head.headers }),
@@ -905,7 +1161,50 @@ export class ExecutionService {
         ? {}
         : { scriptVariableWrites: committedVariableWrites }),
       ...(scripts.error === undefined ? {} : { scriptError: scripts.error }),
+      rootExecutionId: prepared.rootExecutionId,
+      exchangeSequence: prepared.exchangeSequence,
+      effectiveRedirectPolicy: prepared.redirectPolicy,
+      ...(redirect === undefined ? {} : { redirect }),
+      redirectChain,
     };
+  }
+
+  /** Lists the compact ordered exchanges belonging to one application execution. */
+  async #redirectChain(
+    rootExecutionId: EntityId,
+  ): Promise<readonly ExecutionRedirectChainItem[]> {
+    const rows = await this.#database
+      .selectFrom("executions")
+      .select([
+        "id",
+        "exchange_sequence",
+        "state",
+        "response_status",
+        "outgoing_request_json",
+      ])
+      .where((expression) =>
+        expression.or([
+          expression("id", "=", idToBytes(rootExecutionId)),
+          expression("root_execution_id", "=", idToBytes(rootExecutionId)),
+        ]),
+      )
+      .orderBy("exchange_sequence")
+      .execute();
+    const lastSequence = rows.at(-1)?.exchange_sequence ?? 0;
+    return rows.map((row) => {
+      const outgoing = parseOutgoingRequest(row.outgoing_request_json);
+      return {
+        exchangeId: bytesToId(row.id),
+        sequence: row.exchange_sequence,
+        state: row.state,
+        ...(row.response_status === null
+          ? {}
+          : { status: row.response_status }),
+        method: outgoing?.method ?? "GET",
+        url: outgoing?.url ?? { value: "[unavailable]", redacted: true },
+        final: row.exchange_sequence === lastSequence,
+      };
+    });
   }
 
   /** Stores canonical certificates and returns a compact execution observation. */
@@ -1278,6 +1577,31 @@ function outgoingRequestView(
   };
 }
 
+/** Parses the minimum secret-safe outgoing request needed for chain navigation. */
+function parseOutgoingRequest(
+  value: string | null,
+): OutgoingRequestView | undefined {
+  if (value === null) return undefined;
+  try {
+    const parsed = JSON.parse(value) as Partial<OutgoingRequestView>;
+    if (
+      typeof parsed.method !== "string" ||
+      typeof parsed.url !== "object" ||
+      parsed.url === null ||
+      typeof parsed.url.value !== "string" ||
+      typeof parsed.url.redacted !== "boolean" ||
+      !Array.isArray(parsed.headers) ||
+      typeof parsed.body !== "object" ||
+      parsed.body === null
+    ) {
+      return undefined;
+    }
+    return parsed as OutgoingRequestView;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Adds the product User-Agent unless an enabled request field already supplies one. */
 function withDefaultUserAgent(
   request: PreparedExecution["request"],
@@ -1340,6 +1664,9 @@ function toExecutionError(cause: unknown): {
   }
   if (cause instanceof ScriptExecutionError) {
     return { code: `script_${cause.code}`, message: cause.message };
+  }
+  if (cause instanceof RedirectExecutionError) {
+    return { code: cause.code, message: cause.message };
   }
   return {
     code: "execution_failed",

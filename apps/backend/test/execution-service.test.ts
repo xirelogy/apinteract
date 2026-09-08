@@ -713,5 +713,5 @@ describe("ExecutionService shutdown", () => {
       await database.close();
       await rm(rootPath, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });

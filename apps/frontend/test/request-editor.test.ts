@@ -20,6 +20,74 @@ Object.defineProperty(Range.prototype, "getClientRects", {
 });
 
 describe("RequestEditor", () => {
+  it("edits independently inherited request redirect settings", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: "en-US",
+      messages: { "en-US": enUsMessages },
+    });
+    const wrapper = mount(RequestEditor, {
+      props: {
+        request: null,
+        draft: {
+          name: "Redirect settings",
+          description: "",
+          notes: "",
+          method: "GET",
+          targetMode: "absolute",
+          targetUrl: "https://example.test",
+          query: [],
+          headers: [],
+          requestBody: { kind: "none" },
+          body: "",
+          preRequestScript: "",
+          postResponseScript: "",
+        },
+        execution: null,
+        tabId: "019facab-1eee-765f-bd9f-ac2449151cf9",
+        temporary: true,
+        inheritedHeaders: [],
+        inheritedRedirectPolicy: { follow: false, maxRedirects: 3 },
+        inheritedRedirectPolicySources: {
+          follow: "workspace",
+          maxRedirects: "userDefaults",
+        },
+        busy: false,
+      },
+      global: { plugins: [i18n] },
+    });
+
+    await wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().startsWith("Settings"))
+      ?.trigger("click");
+    const behavior = wrapper
+      .findAllComponents(SelectMenu)
+      .find((select) => select.props("label") === "Redirect behavior")!;
+    expect(
+      (behavior.props("options") as readonly { readonly label: string }[])[0]
+        ?.label,
+    ).toBe("Inherit from workspace (Do not follow)");
+    behavior.vm.$emit("update:modelValue", "follow");
+    await wrapper.vm.$nextTick();
+    const maximum = wrapper.get('input[inputmode="numeric"]');
+    expect(maximum.attributes("placeholder")).toBe(
+      "Inherit from user defaults (3)",
+    );
+    await maximum.setValue("5");
+
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toMatchObject({
+      redirectPolicy: { follow: true, maxRedirects: 5 },
+    });
+    expect(
+      wrapper
+        .findAll('[role="tab"]')
+        .find((tab) => tab.text().startsWith("Settings"))
+        ?.find(".tab-content-indicator")
+        .exists(),
+    ).toBe(true);
+  });
+
   it("marks body and script tabs that contain editable content", () => {
     const i18n = createI18n({
       legacy: false,
@@ -94,6 +162,7 @@ describe("RequestEditor", () => {
           body: "",
           preRequestScript: "",
           postResponseScript: "",
+          redirectPolicy: {},
         },
         execution: null,
         tabId: "recovered-tab",
@@ -171,6 +240,7 @@ describe("RequestEditor", () => {
           body: request.body,
           preRequestScript: "",
           postResponseScript: "",
+          redirectPolicy: {},
         },
         execution: null,
         tabId: "version-tab",
@@ -1200,6 +1270,7 @@ describe("RequestEditor", () => {
           body: "",
           preRequestScript: "",
           postResponseScript: "",
+          redirectPolicy: {},
         },
         execution: null,
         tabId: "019facab-1eee-765f-bd9f-ac2449151be1",
@@ -1230,6 +1301,7 @@ describe("RequestEditor", () => {
           requestBody: { kind: "none" },
           preRequestScript: "",
           postResponseScript: "",
+          redirectPolicy: {},
         },
       ],
     ]);

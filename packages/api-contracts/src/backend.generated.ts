@@ -437,6 +437,8 @@ export interface components {
     WebSocketCommand:
       | components["schemas"]["SessionAuthenticateCommand"]
       | components["schemas"]["SystemPingCommand"]
+      | components["schemas"]["UserPreferencesGetCommand"]
+      | components["schemas"]["UserPreferencesUpdateCommand"]
       | components["schemas"]["PluginListCommand"]
       | components["schemas"]["WorkspaceListCommand"]
       | components["schemas"]["WorkspaceCreateCommand"]
@@ -478,7 +480,8 @@ export interface components {
       | components["schemas"]["RequestDeleteCommand"]
       | components["schemas"]["ExecutionStartCommand"]
       | components["schemas"]["ExecutionStartRevisionCommand"]
-      | components["schemas"]["ExecutionStartTemporaryCommand"];
+      | components["schemas"]["ExecutionStartTemporaryCommand"]
+      | components["schemas"]["ExecutionExchangeGetCommand"];
     CommandEnvelope: {
       /** @constant */
       protocolVersion: 1;
@@ -534,6 +537,31 @@ export interface components {
        */
       type: "WorkspaceListCommand";
     };
+    UserPreferencesGetCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "user_preferences.get";
+      payload?: Record<string, never>;
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "UserPreferencesGetCommand";
+    };
+    UserPreferencesUpdateCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "user_preferences.update";
+      payload?: {
+        expectedRevision: number;
+        redirectPolicy: components["schemas"]["ResolvedRedirectPolicy"];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "UserPreferencesUpdateCommand";
+    };
     WorkspaceCreateCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
       type?: "workspace.create";
@@ -572,6 +600,7 @@ export interface components {
         /** @description Absolute HTTP URL template used as the root of composed request targets; blank disables composition until configured. */
         baseUrl: string;
         headers: components["schemas"]["RequestField"][];
+        redirectPolicy?: components["schemas"]["RedirectPolicyOverride"];
         description?: string;
         notes?: string;
       };
@@ -1133,6 +1162,7 @@ export interface components {
         requestBody?: components["schemas"]["RequestBodyDefinition"];
         preRequestScript?: string;
         postResponseScript?: string;
+        redirectPolicy?: components["schemas"]["RedirectPolicyOverride"];
         variables?: components["schemas"]["VariableWrite"][];
         description?: string;
         notes?: string;
@@ -1278,6 +1308,7 @@ export interface components {
         requestBody?: components["schemas"]["RequestBodyDefinition"];
         preRequestScript?: string;
         postResponseScript?: string;
+        redirectPolicy?: components["schemas"]["RedirectPolicyOverride"];
         variableProfile?: components["schemas"]["RequestVariableProfileUpdate"];
         description?: string;
         notes?: string;
@@ -1347,6 +1378,20 @@ export interface components {
        */
       type: "ExecutionStartTemporaryCommand";
     };
+    /** @description Loads one authorized exchange within an application redirect chain. */
+    ExecutionExchangeGetCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "execution.exchange.get";
+      payload?: {
+        executionId: components["schemas"]["ExecutionId"];
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "ExecutionExchangeGetCommand";
+    };
     WebSocketReply: {
       /** @constant */
       protocolVersion: 1;
@@ -1360,6 +1405,7 @@ export interface components {
       error?: components["schemas"]["WebSocketError"];
     };
     WebSocketReplyPayload:
+      | components["schemas"]["UserPreferencesView"]
       | components["schemas"]["WorkspaceView"]
       | components["schemas"]["EnvironmentListView"]
       | components["schemas"]["EnvironmentView"]
@@ -1391,6 +1437,18 @@ export interface components {
       correlationId: components["schemas"]["CorrelationId"];
       payload: unknown;
     };
+    RedirectPolicyOverride: {
+      follow?: boolean;
+      maxRedirects?: number;
+    };
+    ResolvedRedirectPolicy: {
+      follow: boolean;
+      maxRedirects: number;
+    };
+    UserPreferencesView: {
+      redirectPolicy: components["schemas"]["ResolvedRedirectPolicy"];
+      revision: number;
+    };
     WorkspaceSummary: {
       workspaceId: components["schemas"]["WorkspaceId"];
       name: string;
@@ -1406,6 +1464,7 @@ export interface components {
       notes: components["schemas"]["ResourceNotes"];
       baseUrl: string;
       headers: components["schemas"]["RequestField"][];
+      redirectPolicy: components["schemas"]["RedirectPolicyOverride"];
       revision: number;
     };
     TreeNode: {
@@ -1679,6 +1738,7 @@ export interface components {
       requestBody?: components["schemas"]["RequestBodyDefinition"];
       preRequestScript: string;
       postResponseScript: string;
+      redirectPolicy: components["schemas"]["RedirectPolicyOverride"];
       capturedExchange?: components["schemas"]["CapturedExchangeView"];
       draftRevision: number;
     };
@@ -1748,6 +1808,30 @@ export interface components {
       scriptVariableWrites?: components["schemas"]["ScriptVariableWriteResult"][];
       scriptError?: components["schemas"]["ScriptPhaseError"];
       outgoingRequest?: components["schemas"]["OutgoingRequestView"];
+      rootExecutionId?: components["schemas"]["ExecutionId"];
+      exchangeSequence?: number;
+      effectiveRedirectPolicy?: components["schemas"]["ResolvedRedirectPolicy"];
+      redirect?: components["schemas"]["ExecutionRedirectResult"];
+      redirectChain?: components["schemas"]["ExecutionRedirectChainItem"][];
+    };
+    ExecutionRedirectResult: {
+      location: string;
+      resolvedLocation?: components["schemas"]["InspectableRequestValue"];
+      /** @enum {string} */
+      outcome: "followed" | "not_followed" | "failed";
+      reason?: components["schemas"]["ProblemCode"];
+      destinationExecutionId?: components["schemas"]["ExecutionId"];
+      removedHeaderNames: string[];
+    };
+    ExecutionRedirectChainItem: {
+      exchangeId: components["schemas"]["ExecutionId"];
+      sequence: number;
+      /** @enum {string} */
+      state: "created" | "running" | "completed" | "failed";
+      status?: number;
+      method: components["schemas"]["HttpMethod"];
+      url: components["schemas"]["InspectableRequestValue"];
+      final: boolean;
     };
     ExecutionTransportTimings: {
       dnsMs?: number;
@@ -1860,6 +1944,7 @@ export interface components {
       requestBody?: components["schemas"]["RequestBodyDefinition"];
       preRequestScript?: string;
       postResponseScript?: string;
+      redirectPolicy?: components["schemas"]["RedirectPolicyOverride"];
     };
     ScriptLogEntry: {
       /** @description One-based production order across script logs and tests for this execution. */

@@ -600,6 +600,7 @@ function normalizeRequestDraft(draft: RequestDraftInput): RequestDraftInput {
     ...draft,
     description: compatible.description ?? "",
     notes: compatible.notes ?? "",
+    redirectPolicy: compatible.redirectPolicy ?? {},
   };
 }
 
@@ -610,11 +611,13 @@ function normalizeWorkspacePropertiesDraft(
   const compatible = draft as WorkspacePropertiesDraft & {
     readonly description?: string;
     readonly notes?: string;
+    readonly redirectPolicy?: WorkspacePropertiesDraft["redirectPolicy"];
   };
   return {
     ...draft,
     description: compatible.description ?? "",
     notes: compatible.notes ?? "",
+    redirectPolicy: compatible.redirectPolicy ?? {},
   };
 }
 
@@ -792,7 +795,9 @@ function isWorkspacePropertiesDraft(
     (value.notes === undefined || typeof value.notes === "string") &&
     typeof value.baseUrl === "string" &&
     isFieldArray(value.headers) &&
-    isVariableWriteArray(value.variables)
+    isVariableWriteArray(value.variables) &&
+    (value.redirectPolicy === undefined ||
+      isRedirectPolicyOverride(value.redirectPolicy))
   );
 }
 
@@ -855,7 +860,23 @@ function isRequestDraft(value: unknown): value is RequestDraftInput {
     (value.requestBody === undefined || isRequestBody(value.requestBody)) &&
     typeof value.body === "string" &&
     typeof value.preRequestScript === "string" &&
-    typeof value.postResponseScript === "string"
+    typeof value.postResponseScript === "string" &&
+    (value.redirectPolicy === undefined ||
+      isRedirectPolicyOverride(value.redirectPolicy))
+  );
+}
+
+/** Validates independently inheritable redirect settings from local storage. */
+function isRedirectPolicyOverride(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  return (
+    keys.every((key) => key === "follow" || key === "maxRedirects") &&
+    (value.follow === undefined || typeof value.follow === "boolean") &&
+    (value.maxRedirects === undefined ||
+      (Number.isInteger(value.maxRedirects) &&
+        Number(value.maxRedirects) >= 0 &&
+        Number(value.maxRedirects) <= 50))
   );
 }
 

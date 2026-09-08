@@ -1152,6 +1152,12 @@
             "$ref": "#/components/schemas/SystemPingCommand"
           },
           {
+            "$ref": "#/components/schemas/UserPreferencesGetCommand"
+          },
+          {
+            "$ref": "#/components/schemas/UserPreferencesUpdateCommand"
+          },
+          {
             "$ref": "#/components/schemas/PluginListCommand"
           },
           {
@@ -1276,6 +1282,9 @@
           },
           {
             "$ref": "#/components/schemas/ExecutionStartTemporaryCommand"
+          },
+          {
+            "$ref": "#/components/schemas/ExecutionExchangeGetCommand"
           }
         ],
         "discriminator": {
@@ -1375,6 +1384,40 @@
               "payload": {
                 "type": "object",
                 "additionalProperties": false
+              }
+            }
+          }
+        ]
+      },
+      "UserPreferencesGetCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "user_preferences.get" },
+              "payload": { "type": "object", "additionalProperties": false }
+            }
+          }
+        ]
+      },
+      "UserPreferencesUpdateCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "user_preferences.update" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["expectedRevision", "redirectPolicy"],
+                "properties": {
+                  "expectedRevision": { "type": "integer", "minimum": 0 },
+                  "redirectPolicy": {
+                    "$ref": "#/components/schemas/ResolvedRedirectPolicy"
+                  }
+                }
               }
             }
           }
@@ -1485,6 +1528,9 @@
                     "items": {
                       "$ref": "#/components/schemas/RequestField"
                     }
+                  },
+                  "redirectPolicy": {
+                    "$ref": "#/components/schemas/RedirectPolicyOverride"
                   },
                   "description": {
                     "type": "string",
@@ -2881,6 +2927,9 @@
                     "type": "string",
                     "maxLength": 65536
                   },
+                  "redirectPolicy": {
+                    "$ref": "#/components/schemas/RedirectPolicyOverride"
+                  },
                   "variables": {
                     "type": "array",
                     "items": { "$ref": "#/components/schemas/VariableWrite" }
@@ -3167,6 +3216,9 @@
                     "type": "string",
                     "maxLength": 65536
                   },
+                  "redirectPolicy": {
+                    "$ref": "#/components/schemas/RedirectPolicyOverride"
+                  },
                   "variableProfile": {
                     "$ref": "#/components/schemas/RequestVariableProfileUpdate"
                   },
@@ -3300,6 +3352,26 @@
           }
         ]
       },
+      "ExecutionExchangeGetCommand": {
+        "description": "Loads one authorized exchange within an application redirect chain.",
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "execution.exchange.get" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["executionId"],
+                "properties": {
+                  "executionId": { "$ref": "#/components/schemas/ExecutionId" }
+                }
+              }
+            }
+          }
+        ]
+      },
       "WebSocketReply": {
         "type": "object",
         "additionalProperties": false,
@@ -3339,6 +3411,7 @@
       },
       "WebSocketReplyPayload": {
         "anyOf": [
+          { "$ref": "#/components/schemas/UserPreferencesView" },
           { "$ref": "#/components/schemas/WorkspaceView" },
           { "$ref": "#/components/schemas/EnvironmentListView" },
           { "$ref": "#/components/schemas/EnvironmentView" },
@@ -3409,6 +3482,42 @@
           "payload": {}
         }
       },
+      "RedirectPolicyOverride": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "follow": { "type": "boolean" },
+          "maxRedirects": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50
+          }
+        }
+      },
+      "ResolvedRedirectPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["follow", "maxRedirects"],
+        "properties": {
+          "follow": { "type": "boolean" },
+          "maxRedirects": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50
+          }
+        }
+      },
+      "UserPreferencesView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["redirectPolicy", "revision"],
+        "properties": {
+          "redirectPolicy": {
+            "$ref": "#/components/schemas/ResolvedRedirectPolicy"
+          },
+          "revision": { "type": "integer", "minimum": 0 }
+        }
+      },
       "WorkspaceSummary": {
         "type": "object",
         "additionalProperties": false,
@@ -3437,6 +3546,7 @@
           "notes",
           "baseUrl",
           "headers",
+          "redirectPolicy",
           "revision"
         ],
         "properties": {
@@ -3461,6 +3571,9 @@
             "items": {
               "$ref": "#/components/schemas/RequestField"
             }
+          },
+          "redirectPolicy": {
+            "$ref": "#/components/schemas/RedirectPolicyOverride"
           },
           "revision": {
             "type": "integer",
@@ -4114,6 +4227,7 @@
           "body",
           "preRequestScript",
           "postResponseScript",
+          "redirectPolicy",
           "draftRevision"
         ],
         "properties": {
@@ -4192,6 +4306,9 @@
           "postResponseScript": {
             "type": "string",
             "maxLength": 65536
+          },
+          "redirectPolicy": {
+            "$ref": "#/components/schemas/RedirectPolicyOverride"
           },
           "capturedExchange": {
             "$ref": "#/components/schemas/CapturedExchangeView"
@@ -4415,7 +4532,77 @@
           },
           "outgoingRequest": {
             "$ref": "#/components/schemas/OutgoingRequestView"
+          },
+          "rootExecutionId": {
+            "$ref": "#/components/schemas/ExecutionId"
+          },
+          "exchangeSequence": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50
+          },
+          "effectiveRedirectPolicy": {
+            "$ref": "#/components/schemas/ResolvedRedirectPolicy"
+          },
+          "redirect": {
+            "$ref": "#/components/schemas/ExecutionRedirectResult"
+          },
+          "redirectChain": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 51,
+            "items": {
+              "$ref": "#/components/schemas/ExecutionRedirectChainItem"
+            }
           }
+        }
+      },
+      "ExecutionRedirectResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["location", "outcome", "removedHeaderNames"],
+        "properties": {
+          "location": { "type": "string", "maxLength": 8192 },
+          "resolvedLocation": {
+            "$ref": "#/components/schemas/InspectableRequestValue"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": ["followed", "not_followed", "failed"]
+          },
+          "reason": { "$ref": "#/components/schemas/ProblemCode" },
+          "destinationExecutionId": {
+            "$ref": "#/components/schemas/ExecutionId"
+          },
+          "removedHeaderNames": {
+            "type": "array",
+            "maxItems": 200,
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "ExecutionRedirectChainItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exchangeId",
+          "sequence",
+          "state",
+          "method",
+          "url",
+          "final"
+        ],
+        "properties": {
+          "exchangeId": { "$ref": "#/components/schemas/ExecutionId" },
+          "sequence": { "type": "integer", "minimum": 0, "maximum": 50 },
+          "state": {
+            "type": "string",
+            "enum": ["created", "running", "completed", "failed"]
+          },
+          "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+          "method": { "$ref": "#/components/schemas/HttpMethod" },
+          "url": { "$ref": "#/components/schemas/InspectableRequestValue" },
+          "final": { "type": "boolean" }
         }
       },
       "ExecutionTransportTimings": {
@@ -4672,6 +4859,9 @@
           "postResponseScript": {
             "type": "string",
             "maxLength": 65536
+          },
+          "redirectPolicy": {
+            "$ref": "#/components/schemas/RedirectPolicyOverride"
           }
         }
       },

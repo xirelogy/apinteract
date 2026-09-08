@@ -109,3 +109,45 @@ moving, or changing a collection later affects the current request but does
 not change the target structure stored by an earlier version. Variables in
 that stored structure are still resolved from the environment and variable
 profiles selected when the version is executed.
+
+## Configure HTTP redirects
+
+APInteract follows redirects by default, with a limit of 10 transitions. You
+can change both values at three levels:
+
+1. **Options > Defaults > HTTP redirections** sets your per-user default.
+2. **Workspace properties > Execution** optionally overrides either value for
+   every request in the workspace.
+3. A request's **Settings** tab optionally overrides either value for that
+   versioned request.
+
+The follow toggle and maximum count inherit independently in request,
+workspace, user, then packaged-default order. The effective values are saved
+with every execution, so later preference changes do not reinterpret history.
+Values from 0 through 50 are accepted; 50 is a fixed safety ceiling.
+
+APInteract follows only `301`, `302`, `303`, `307`, and `308`. Redirected
+methods and bodies use these rules:
+
+| Status    | Original method | Redirected method and body                |
+| --------- | --------------- | ----------------------------------------- |
+| 301 / 302 | GET or HEAD     | Preserve method; preserve body            |
+| 301 / 302 | POST            | Change to GET; remove body                |
+| 301 / 302 | Other           | Preserve method and body                  |
+| 303       | HEAD            | Preserve HEAD; preserve body              |
+| 303       | Other           | Change to GET; remove body                |
+| 307 / 308 | Any             | Preserve method and replay the exact body |
+
+Every destination is sent as a new single-hop proxy execution and passes the
+normal DNS, SSRF, CIDR, TLS, timeout, and response-size checks again. HTTPS to
+HTTP downgrades and destination URLs containing credentials are always
+blocked. Missing `Location` fields leave an ordinary 3xx response; malformed,
+ambiguous, or unsupported destinations retain the source response with a
+structured redirect failure.
+
+Same-origin redirects retain normal end-to-end headers. Cross-origin redirects
+remove authorization, proxy authorization, explicit cookies,
+authentication-generated fields, and every secret-derived header. Framing and
+hop-by-hop headers are regenerated for every destination, and a method rewrite
+that removes the body also removes its representation headers. The source
+response records removed header names without recording their values.

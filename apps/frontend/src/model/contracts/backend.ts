@@ -6,7 +6,16 @@ export type WebBootstrapStatus = components["schemas"]["WebBootstrapStatus"];
 export type WebBootstrapRequest = components["schemas"]["WebBootstrapRequest"];
 export type CurrentSession = components["schemas"]["CurrentSession"];
 export type WorkspaceSummary = components["schemas"]["WorkspaceSummary"];
-export type WorkspaceView = components["schemas"]["WorkspaceView"];
+export type RedirectPolicyOverride =
+  components["schemas"]["RedirectPolicyOverride"];
+export type ResolvedRedirectPolicy =
+  components["schemas"]["ResolvedRedirectPolicy"];
+type GeneratedWorkspaceView = components["schemas"]["WorkspaceView"];
+export type WorkspaceView = Omit<GeneratedWorkspaceView, "redirectPolicy"> & {
+  /** Optional while restoring data produced before redirect preferences existed. */
+  readonly redirectPolicy?: RedirectPolicyOverride;
+};
+export type UserPreferencesView = components["schemas"]["UserPreferencesView"];
 export type TreeNode = components["schemas"]["TreeNode"];
 export type CollectionView = components["schemas"]["CollectionView"];
 export type CollectionDeleteResult =
@@ -36,14 +45,25 @@ export type ImportedRequest = components["schemas"]["ImportedRequest"];
 export type ImportApplyResult = components["schemas"]["ImportApplyResult"];
 export type CapturedExchangeView =
   components["schemas"]["CapturedExchangeView"];
-export type RequestView = components["schemas"]["RequestView"];
+type GeneratedRequestView = components["schemas"]["RequestView"];
+export type RequestView = Omit<GeneratedRequestView, "redirectPolicy"> & {
+  /** Optional while restoring data produced before redirect preferences existed. */
+  readonly redirectPolicy?: RedirectPolicyOverride;
+};
 export type RequestBodyDefinition =
   components["schemas"]["RequestBodyDefinition"];
 export type RequestAttachment = components["schemas"]["RequestAttachment"];
 export type MultipartFileField = components["schemas"]["MultipartFileField"];
 export type RequestRevisionSummary =
   components["schemas"]["RequestRevisionSummary"];
-export type RequestRevisionView = components["schemas"]["RequestRevisionView"];
+type GeneratedRequestRevisionView =
+  components["schemas"]["RequestRevisionView"];
+export type RequestRevisionView = Omit<
+  GeneratedRequestRevisionView,
+  "request"
+> & {
+  readonly request: RequestView;
+};
 export type HttpMethod = components["schemas"]["HttpMethod"];
 export type RequestField = components["schemas"]["RequestField"];
 export type ExecutionView = components["schemas"]["ExecutionView"];

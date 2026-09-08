@@ -11,6 +11,7 @@ import type {
   VariablePreview,
   WorkspaceSummary,
   WorkspaceView,
+  UserPreferencesView,
 } from "@/model/contracts/backend";
 import type {
   ApplicationError,
@@ -23,6 +24,7 @@ import type {
 export const useApplicationStore = defineStore("application", {
   state: () => ({
     session: null as CurrentSession | null,
+    userPreferences: null as UserPreferencesView | null,
     connection: "disconnected" as ConnectionState,
     workspaces: [] as WorkspaceSummary[],
     selectedWorkspaceId: null as string | null,

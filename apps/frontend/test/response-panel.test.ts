@@ -18,6 +18,120 @@ import { installApplicationTestPlugins } from "./plugin-fixtures";
 installApplicationTestPlugins();
 
 describe("ResponsePanel body transfer", () => {
+  it("navigates complete redirect exchanges independently from history", async () => {
+    const sourceId = "019fa8be-a510-76b9-b73b-69f4c7af7811";
+    const destinationId = "019fa8be-a510-76b9-b73b-69f4c7af7812";
+    const redirectChain: NonNullable<ExecutionView["redirectChain"]> = [
+      {
+        exchangeId: sourceId,
+        sequence: 0,
+        state: "completed",
+        status: 302,
+        method: "POST",
+        url: { value: "https://example.test/start", redacted: false },
+        final: false,
+      },
+      {
+        exchangeId: destinationId,
+        sequence: 1,
+        state: "completed",
+        status: 200,
+        method: "GET",
+        url: { value: "https://example.test/final", redacted: false },
+        final: true,
+      },
+    ];
+    const source: ExecutionView = {
+      executionId: sourceId,
+      rootExecutionId: sourceId,
+      exchangeSequence: 0,
+      state: "completed",
+      status: 302,
+      headers: [{ name: "Location", value: "/final" }],
+      bodyComplete: true,
+      bodyBytes: 0,
+      createdAt: "2026-07-28T00:00:00.000Z",
+      completedAt: "2026-07-28T00:00:01.000Z",
+      transportMetadataCollected: false,
+      scriptLogs: [],
+      scriptTests: [],
+      redirect: {
+        location: "/final",
+        resolvedLocation: {
+          value: "https://example.test/final",
+          redacted: false,
+        },
+        outcome: "followed",
+        destinationExecutionId: destinationId,
+        removedHeaderNames: ["Content-Type"],
+      },
+      redirectChain,
+    };
+    const wrapper = mount(ResponsePanel, {
+      props: { execution: source },
+      global: {
+        plugins: [
+          createI18n({
+            legacy: false,
+            locale: "en-US",
+            messages: { "en-US": enUsMessages },
+          }),
+        ],
+      },
+    });
+
+    expect(wrapper.get(".redirect-chain-select").text()).toContain("1 / 2");
+    expect(
+      wrapper
+        .get(".response-redirect-summary")
+        .find(".redirect-chain-navigation")
+        .exists(),
+    ).toBe(true);
+    expect(
+      wrapper.find(".response-metadata .redirect-chain-navigation").exists(),
+    ).toBe(false);
+    expect(wrapper.get(".response-panel").classes()).toContain(
+      "has-redirect-summary",
+    );
+    expect(wrapper.get(".response-redirect-summary").text()).toContain(
+      "https://example.test/final",
+    );
+    expect(wrapper.get(".response-redirect-summary").text()).not.toContain(
+      "View destination response",
+    );
+    expect(
+      wrapper
+        .get(".response-redirect-summary .lucide-arrow-right")
+        .attributes("aria-hidden"),
+    ).toBe("true");
+    await wrapper
+      .get('button[aria-label="View destination response"]')
+      .trigger("click");
+    await wrapper.get('button[aria-label="Next response"]').trigger("click");
+    expect(wrapper.emitted("selectExecutionExchange")).toEqual([
+      [destinationId],
+      [destinationId],
+    ]);
+
+    const destination: ExecutionView = { ...source };
+    delete destination.redirect;
+    destination.executionId = destinationId;
+    destination.exchangeSequence = 1;
+    destination.status = 200;
+    destination.headers = [];
+    await wrapper.setProps({ execution: destination });
+    expect(wrapper.get(".redirect-chain-select").text()).toContain("2 / 2");
+    expect(
+      wrapper.find('button[aria-label="View source response"]').exists(),
+    ).toBe(false);
+    await wrapper
+      .get('button[aria-label="Previous response"]')
+      .trigger("click");
+    expect(wrapper.emitted("selectExecutionExchange")?.at(-1)).toEqual([
+      sourceId,
+    ]);
+  });
+
   it("offers compact unified history and emits the selected exchange", async () => {
     const execution: ExecutionView = {
       executionId: "019fa8be-a510-76b9-b73b-69f4c7af7801",

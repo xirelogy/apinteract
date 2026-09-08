@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, watch } from "vue";
-import { Download, LoaderCircle } from "@lucide/vue";
+import {
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  LoaderCircle,
+} from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import {
@@ -45,6 +51,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   download: [executionId: string];
   selectExchange: [exchangeId: string];
+  selectExecutionExchange: [executionId: string];
 }>();
 const i18n = useI18n();
 const { locale, t } = i18n;
@@ -95,7 +102,18 @@ const scriptTestMessageCodes = new Set([
   "assertion_value_does_not_match",
   "test_threw_non_error",
 ]);
-const executionFailureCodes = new Set(["execution_failed"]);
+const executionFailureCodes = new Set([
+  "execution_failed",
+  "execution_timeout",
+  "redirect_body_not_replayable",
+  "redirect_credentials_not_allowed",
+  "redirect_disabled",
+  "redirect_insecure_downgrade",
+  "redirect_invalid_location",
+  "redirect_limit_exceeded",
+  "redirect_unsupported_scheme",
+  "response_size_limit",
+]);
 type ScriptResultCard =
   | {
       readonly type: "log";
@@ -318,6 +336,64 @@ const exchangeOptions = computed<readonly SelectMenuOption[]>(() =>
   })),
 );
 
+/** Returns the ordered redirect exchanges attached to the selected execution. */
+const redirectChain = computed(() => props.execution?.redirectChain ?? []);
+
+/** Locates the displayed exchange inside its redirect chain. */
+const redirectChainIndex = computed(() =>
+  redirectChain.value.findIndex(
+    (item) => item.exchangeId === props.execution?.executionId,
+  ),
+);
+
+/** Formats redirect exchanges for the complete-chain selection menu. */
+const redirectChainOptions = computed<readonly SelectMenuOption[]>(() =>
+  redirectChain.value.map((item, index) => ({
+    value: item.exchangeId,
+    label: [
+      `${index + 1} / ${redirectChain.value.length}`,
+      item.status ?? t("response.redirect.noStatus"),
+      item.method,
+      item.url.value,
+      ...(item.final ? [t("response.redirect.final")] : []),
+    ].join(" · "),
+  })),
+);
+
+/** Selects the previous or next exchange without wrapping the redirect chain. */
+function selectAdjacentRedirectExchange(offset: -1 | 1): void {
+  const item = redirectChain.value[redirectChainIndex.value + offset];
+  if (item !== undefined) emit("selectExecutionExchange", item.exchangeId);
+}
+
+/** Selects a linked redirect exchange when the relationship has a target. */
+function selectLinkedRedirectExchange(executionId: string | undefined): void {
+  if (executionId !== undefined) emit("selectExecutionExchange", executionId);
+}
+
+/** Returns the redirect source immediately before the displayed exchange. */
+const redirectSource = computed(() =>
+  redirectChainIndex.value > 0
+    ? redirectChain.value[redirectChainIndex.value - 1]
+    : undefined,
+);
+
+/** Displays a resolved redirect target while retaining malformed raw evidence. */
+const displayedRedirectLocation = computed(
+  () =>
+    props.execution?.redirect?.resolvedLocation?.value ??
+    props.execution?.redirect?.location ??
+    "",
+);
+
+/** Indicates when redirect context occupies its own layout row. */
+const showsRedirectSummary = computed(
+  () =>
+    props.execution !== null &&
+    (props.execution.redirect !== undefined ||
+      redirectSource.value !== undefined),
+);
+
 /** Formats one exchange instant as an exact locale-aware local date and time. */
 function formatExchangeDateTime(occurredAt: string): string {
   return formatDateTime(
@@ -485,7 +561,11 @@ function formatTestDiagnostic(test: ScriptTest): string {
 </script>
 
 <template>
-  <section class="response-panel" aria-labelledby="response-heading">
+  <section
+    class="response-panel"
+    :class="{ 'has-redirect-summary': showsRedirectSummary }"
+    aria-labelledby="response-heading"
+  >
     <div class="response-heading-row">
       <h2 id="response-heading">{{ t("response.heading") }}</h2>
       <SelectMenu
@@ -531,6 +611,62 @@ function formatTestDiagnostic(test: ScriptTest): string {
         >
           <Download :size="17" aria-hidden="true" />
         </IconButton>
+      </div>
+    </div>
+    <div
+      v-if="execution !== null && showsRedirectSummary"
+      class="response-redirect-summary"
+    >
+      <div v-if="redirectChain.length > 1" class="redirect-chain-navigation">
+        <IconButton
+          size="compact"
+          :label="t('response.redirect.previous')"
+          :title="t('response.redirect.previous')"
+          :disabled="redirectChainIndex <= 0"
+          @click="selectAdjacentRedirectExchange(-1)"
+        >
+          <ChevronLeft :size="16" aria-hidden="true" />
+        </IconButton>
+        <SelectMenu
+          class="redirect-chain-select"
+          :model-value="execution.executionId"
+          :options="redirectChainOptions"
+          :label="t('response.redirect.chain')"
+          density="compact"
+          @update:model-value="emit('selectExecutionExchange', $event)"
+        >
+          <template #selected>
+            {{ redirectChainIndex + 1 }} / {{ redirectChain.length }}
+          </template>
+        </SelectMenu>
+        <IconButton
+          size="compact"
+          :label="t('response.redirect.next')"
+          :title="t('response.redirect.next')"
+          :disabled="redirectChainIndex >= redirectChain.length - 1"
+          @click="selectAdjacentRedirectExchange(1)"
+        >
+          <ChevronRight :size="16" aria-hidden="true" />
+        </IconButton>
+      </div>
+      <div v-if="execution.redirect" class="response-redirect-details">
+        <IconButton
+          v-if="execution.redirect.destinationExecutionId"
+          size="compact"
+          :label="t('response.redirect.destination')"
+          :title="t('response.redirect.destination')"
+          @click="
+            selectLinkedRedirectExchange(
+              execution.redirect?.destinationExecutionId,
+            )
+          "
+        >
+          <ArrowRight :size="16" aria-hidden="true" />
+        </IconButton>
+        <code>{{ displayedRedirectLocation }}</code>
+        <span v-if="execution.redirect.reason" class="response-redirect-reason">
+          {{ localizeExecutionCode(execution.redirect.reason) }}
+        </span>
       </div>
     </div>
     <div v-if="execution === null" class="response-empty">

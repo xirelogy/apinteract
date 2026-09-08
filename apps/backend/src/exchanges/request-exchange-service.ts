@@ -15,6 +15,11 @@ import type {
 } from "../executions/script-execution-adapter.js";
 import type { WorkspaceService } from "../workspaces/workspace-service.js";
 import { ResourceNotFoundError } from "../workspaces/workspace-service.js";
+import type { RedirectResult } from "../executions/redirect-request.js";
+import {
+  DEFAULT_REDIRECT_POLICY,
+  validateResolvedRedirectPolicy,
+} from "../executions/redirect-policy.js";
 
 const EXCHANGE_LIMIT = 200;
 const BODY_PREVIEW_LIMIT_BYTES = 256 * 1024;
@@ -83,6 +88,7 @@ export class RequestExchangeService {
           "created_at",
         ])
         .where("request_id", "=", idToBytes(requestId))
+        .where("root_execution_id", "is", null)
         .orderBy("created_at", "desc")
         .limit(EXCHANGE_LIMIT)
         .execute(),
@@ -105,9 +111,43 @@ export class RequestExchangeService {
         .limit(EXCHANGE_LIMIT)
         .execute(),
     ]);
+    const redirectRows =
+      executionRows.length === 0
+        ? []
+        : await this.#database
+            .selectFrom("executions")
+            .select([
+              "root_execution_id",
+              "exchange_sequence",
+              "state",
+              "response_status",
+              "body_complete",
+              "body_bytes",
+            ])
+            .where(
+              "root_execution_id",
+              "in",
+              executionRows.map((row) => row.id),
+            )
+            .orderBy("exchange_sequence")
+            .execute();
+    const terminalByRoot = new Map(
+      redirectRows.flatMap((row) =>
+        row.root_execution_id === null
+          ? []
+          : [
+              [
+                Buffer.from(row.root_execution_id).toString("hex"),
+                row,
+              ] as const,
+            ],
+      ),
+    );
     return [
-      ...executionRows.map(
-        (row): RequestExchangeSummary => ({
+      ...executionRows.map((row): RequestExchangeSummary => {
+        const terminal =
+          terminalByRoot.get(Buffer.from(row.id).toString("hex")) ?? row;
+        return {
           exchangeId: bytesToId(row.id),
           requestId,
           requestRevisionId:
@@ -116,17 +156,17 @@ export class RequestExchangeService {
               : bytesToId(row.request_revision_id),
           kind: "execution",
           source: "apinteract",
-          state: row.state,
-          ...(row.response_status === null
+          state: terminal.state,
+          ...(terminal.response_status === null
             ? {}
-            : { status: row.response_status }),
+            : { status: terminal.response_status }),
           bodyAvailability: executionBodyAvailability(
-            row.body_complete,
-            row.body_bytes,
+            terminal.body_complete,
+            terminal.body_bytes,
           ),
           occurredAt: new Date(row.created_at).toISOString(),
-        }),
-      ),
+        };
+      }),
       ...captureRows.map(
         (row): RequestExchangeSummary => ({
           exchangeId: bytesToId(row.id),
@@ -163,6 +203,27 @@ export class RequestExchangeService {
     return kind === "capture"
       ? this.#capture(requestId, exchangeId)
       : this.#execution(requestId, exchangeId);
+  }
+
+  /** Loads one execution exchange after authorizing its owning workspace. */
+  async getExecution(
+    userId: EntityId,
+    executionId: EntityId,
+  ): Promise<ExecutionView> {
+    const row = await this.#database
+      .selectFrom("executions")
+      .select("workspace_id")
+      .where("id", "=", idToBytes(executionId))
+      .executeTakeFirst();
+    if (row === undefined) {
+      throw new ResourceNotFoundError("Execution exchange not found");
+    }
+    await this.#workspaces.requireCanRead(
+      this.#database,
+      userId,
+      bytesToId(row.workspace_id),
+    );
+    return (await this.#execution(null, executionId, true)).execution;
   }
 
   /** Verifies request ownership through its live workspace membership. */
@@ -242,14 +303,22 @@ export class RequestExchangeService {
 
   /** Reconstructs one persisted APInteract execution for historical display. */
   async #execution(
-    requestId: EntityId,
+    requestId: EntityId | null,
     exchangeId: EntityId,
+    exact = false,
   ): Promise<RequestExchangeView> {
-    const row = await this.#database
+    const detailId = exact
+      ? exchangeId
+      : await this.#terminalExchangeId(exchangeId);
+    let query = this.#database
       .selectFrom("executions as execution")
       .leftJoin("blobs as blob", "blob.id", "execution.response_blob_id")
       .select([
         "execution.id",
+        "execution.request_id",
+        "execution.root_execution_id",
+        "execution.exchange_sequence",
+        "execution.snapshot_json",
         "execution.request_revision_id",
         "execution.state",
         "execution.response_status",
@@ -264,14 +333,18 @@ export class RequestExchangeService {
         "execution.transport_metadata_unavailable_reason",
         "execution.transport_metadata_json",
         "execution.transport_timings_json",
+        "execution.redirect_json",
+        "execution.outgoing_request_json",
         "execution.created_at",
         "execution.completed_at",
         "blob.storage_key",
         "blob.byte_length",
       ])
-      .where("execution.id", "=", idToBytes(exchangeId))
-      .where("execution.request_id", "=", idToBytes(requestId))
-      .executeTakeFirst();
+      .where("execution.id", "=", idToBytes(detailId));
+    if (requestId !== null) {
+      query = query.where("execution.request_id", "=", idToBytes(requestId));
+    }
+    const row = await query.executeTakeFirst();
     if (row === undefined) {
       throw new ResourceNotFoundError("Request exchange not found");
     }
@@ -281,10 +354,14 @@ export class RequestExchangeService {
       row.byte_length,
     );
     const scripts = parseScriptSummary(row.script_result_json);
+    const outgoingRequest = parseOutgoingRequest(row.outgoing_request_json);
+    const redirect = parseRedirectResult(row.redirect_json);
     const occurredAt = new Date(row.created_at).toISOString();
     const summary: RequestExchangeSummary = {
       exchangeId,
-      requestId,
+      requestId:
+        requestId ??
+        (row.request_id === null ? detailId : bytesToId(row.request_id)),
       requestRevisionId:
         row.request_revision_id === null
           ? null
@@ -302,8 +379,10 @@ export class RequestExchangeService {
     return {
       summary,
       execution: {
-        executionId: exchangeId,
-        requestId,
+        executionId: detailId,
+        ...(row.request_id === null
+          ? {}
+          : { requestId: bytesToId(row.request_id) }),
         state: row.state,
         ...(row.response_status === null
           ? {}
@@ -332,8 +411,70 @@ export class RequestExchangeService {
           ? {}
           : { scriptVariableWrites: scripts.variableWrites }),
         ...(scripts.error === undefined ? {} : { scriptError: scripts.error }),
+        ...(outgoingRequest === undefined ? {} : { outgoingRequest }),
+        rootExecutionId:
+          row.root_execution_id === null
+            ? detailId
+            : bytesToId(row.root_execution_id),
+        exchangeSequence: row.exchange_sequence,
+        effectiveRedirectPolicy: parseEffectiveRedirectPolicy(
+          row.snapshot_json,
+        ),
+        ...(redirect === undefined ? {} : { redirect }),
+        redirectChain: await this.#redirectChain(
+          row.root_execution_id === null
+            ? detailId
+            : bytesToId(row.root_execution_id),
+        ),
       },
     };
+  }
+
+  /** Resolves a root history entry to the terminal exchange selected by default. */
+  async #terminalExchangeId(rootExecutionId: EntityId): Promise<EntityId> {
+    const child = await this.#database
+      .selectFrom("executions")
+      .select("id")
+      .where("root_execution_id", "=", idToBytes(rootExecutionId))
+      .orderBy("exchange_sequence", "desc")
+      .executeTakeFirst();
+    return child === undefined ? rootExecutionId : bytesToId(child.id);
+  }
+
+  /** Builds compact secret-safe navigation for every exchange in a redirect chain. */
+  async #redirectChain(rootExecutionId: EntityId) {
+    const rows = await this.#database
+      .selectFrom("executions")
+      .select([
+        "id",
+        "exchange_sequence",
+        "state",
+        "response_status",
+        "outgoing_request_json",
+      ])
+      .where((expression) =>
+        expression.or([
+          expression("id", "=", idToBytes(rootExecutionId)),
+          expression("root_execution_id", "=", idToBytes(rootExecutionId)),
+        ]),
+      )
+      .orderBy("exchange_sequence")
+      .execute();
+    const finalSequence = rows.at(-1)?.exchange_sequence ?? 0;
+    return rows.map((row) => {
+      const outgoing = parseOutgoingRequest(row.outgoing_request_json);
+      return {
+        exchangeId: bytesToId(row.id),
+        sequence: row.exchange_sequence,
+        state: row.state,
+        ...(row.response_status === null
+          ? {}
+          : { status: row.response_status }),
+        method: outgoing?.method ?? "GET",
+        url: outgoing?.url ?? { value: "[unavailable]", redacted: true },
+        final: row.exchange_sequence === finalSequence,
+      };
+    });
   }
 
   /** Reads a complete bounded textual execution body for historical preview. */
@@ -393,6 +534,53 @@ function parseHeaders(
   } catch {
     return [];
   }
+}
+
+/** Parses a persisted secret-safe outgoing request for historical inspection. */
+function parseOutgoingRequest(
+  value: string | null,
+): ExecutionView["outgoingRequest"] {
+  const parsed = parseJsonRecord(value);
+  if (
+    parsed === undefined ||
+    typeof parsed.method !== "string" ||
+    !Array.isArray(parsed.headers) ||
+    typeof parsed.url !== "object" ||
+    parsed.url === null ||
+    typeof parsed.body !== "object" ||
+    parsed.body === null
+  ) {
+    return undefined;
+  }
+  return parsed as unknown as NonNullable<ExecutionView["outgoingRequest"]>;
+}
+
+/** Restores the immutable resolved redirect policy from an execution snapshot. */
+function parseEffectiveRedirectPolicy(
+  snapshotJson: string,
+): NonNullable<ExecutionView["effectiveRedirectPolicy"]> {
+  try {
+    const snapshot = JSON.parse(snapshotJson) as { redirectPolicy?: unknown };
+    return validateResolvedRedirectPolicy(
+      snapshot.redirectPolicy as typeof DEFAULT_REDIRECT_POLICY,
+    );
+  } catch {
+    return DEFAULT_REDIRECT_POLICY;
+  }
+}
+
+/** Parses one source redirect relationship without trusting damaged history. */
+function parseRedirectResult(value: string | null): RedirectResult | undefined {
+  const parsed = parseJsonRecord(value);
+  if (
+    parsed === undefined ||
+    typeof parsed.location !== "string" ||
+    !["followed", "not_followed", "failed"].includes(String(parsed.outcome)) ||
+    !Array.isArray(parsed.removedHeaderNames)
+  ) {
+    return undefined;
+  }
+  return parsed as unknown as RedirectResult;
 }
 
 /** Parses persisted script output while falling back to an empty safe result. */

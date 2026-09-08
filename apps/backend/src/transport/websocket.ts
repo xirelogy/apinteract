@@ -18,6 +18,11 @@ import {
   type EnvironmentVariableWrite,
 } from "../environments/environment-service.js";
 import { VariableResolutionError } from "../environments/variable-resolver.js";
+import {
+  UserPreferencesConflictError,
+  type RedirectPolicyOverride,
+  type ResolvedRedirectPolicy,
+} from "../executions/redirect-policy.js";
 import { createEntityId } from "../foundation/id.js";
 import {
   ImportSourceError,
@@ -213,6 +218,14 @@ async function dispatch(
       return { type: "system.pong", occurredAt: new Date().toISOString() };
     case "plugin.list":
       return { plugins: application.plugins.backendPlugins() };
+    case "user_preferences.get":
+      return application.userPreferences.get(userId);
+    case "user_preferences.update":
+      return application.userPreferences.update(
+        userId,
+        requireInteger(command.payload.expectedRevision, "expectedRevision"),
+        requireResolvedRedirectPolicy(command.payload.redirectPolicy),
+      );
     case "workspace.list":
       return { workspaces: await application.workspaces.list(userId) };
     case "workspace.create":
@@ -237,6 +250,7 @@ async function dispatch(
         requireOptionalString(command.payload.baseUrl, "baseUrl"),
         requireResourceDescription(command.payload.description),
         requireResourceNotes(command.payload.notes),
+        requireRedirectPolicyOverride(command.payload.redirectPolicy),
       );
     case "workspace.delete":
       return application.workspaces.delete(
@@ -485,6 +499,9 @@ async function dispatch(
               : requireEnvironmentVariables(command.payload.variables),
           description: requireResourceDescription(command.payload.description),
           notes: requireResourceNotes(command.payload.notes),
+          redirectPolicy: requireRedirectPolicyOverride(
+            command.payload.redirectPolicy,
+          ),
         },
       );
     case "request.get":
@@ -566,6 +583,7 @@ async function dispatch(
         optionalRequestBody(command.payload.requestBody),
         requireResourceDescription(command.payload.description),
         requireResourceNotes(command.payload.notes),
+        requireRedirectPolicyOverride(command.payload.redirectPolicy),
       );
     case "request.delete":
       return application.requests.delete(
@@ -602,6 +620,11 @@ async function dispatch(
         optionalTemporaryRequestVariableProfile(
           command.payload.temporaryVariables,
         ),
+      );
+    case "execution.exchange.get":
+      return application.requestExchanges.getExecution(
+        userId,
+        requireString(command.payload.executionId, "executionId"),
       );
     default:
       throw new CommandError(
@@ -645,6 +668,9 @@ function mapCommandError(cause: unknown): CommandError {
   }
   if (cause instanceof WorkspaceConflictError) {
     return new CommandError("workspace_conflict", cause.message);
+  }
+  if (cause instanceof UserPreferencesConflictError) {
+    return new CommandError("user_preferences_conflict", cause.message);
   }
   if (cause instanceof EnvironmentConflictError) {
     return new CommandError("environment_conflict", cause.message);
@@ -1351,6 +1377,52 @@ function optionalScript(value: unknown, name: string): string {
   return value === undefined ? "" : requireScript(value, name);
 }
 
+/** Validates independently inheritable redirect fields at the command boundary. */
+function requireRedirectPolicyOverride(value: unknown): RedirectPolicyOverride {
+  if (value === undefined) return {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new CommandError(
+      "validation_failed",
+      "redirectPolicy must be an object.",
+    );
+  }
+  const policy = value as Record<string, unknown>;
+  if (
+    Object.keys(policy).some(
+      (key) => key !== "follow" && key !== "maxRedirects",
+    ) ||
+    (policy.follow !== undefined && typeof policy.follow !== "boolean") ||
+    (policy.maxRedirects !== undefined &&
+      (typeof policy.maxRedirects !== "number" ||
+        !Number.isInteger(policy.maxRedirects) ||
+        policy.maxRedirects < 0 ||
+        policy.maxRedirects > 50))
+  ) {
+    throw new CommandError(
+      "validation_failed",
+      "redirectPolicy contains invalid values.",
+    );
+  }
+  return {
+    ...(policy.follow === undefined ? {} : { follow: policy.follow }),
+    ...(policy.maxRedirects === undefined
+      ? {}
+      : { maxRedirects: policy.maxRedirects }),
+  };
+}
+
+/** Requires complete per-user redirect defaults. */
+function requireResolvedRedirectPolicy(value: unknown): ResolvedRedirectPolicy {
+  const policy = requireRedirectPolicyOverride(value);
+  if (policy.follow === undefined || policy.maxRedirects === undefined) {
+    throw new CommandError(
+      "validation_failed",
+      "redirectPolicy must provide follow and maxRedirects.",
+    );
+  }
+  return { follow: policy.follow, maxRedirects: policy.maxRedirects };
+}
+
 /** Validates a complete executable request snapshot from a command payload. */
 function requireExecutionInput(value: unknown): RequestExecutionInput {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -1374,6 +1446,7 @@ function requireExecutionInput(value: unknown): RequestExecutionInput {
       request.postResponseScript,
       "postResponseScript",
     ),
+    redirectPolicy: requireRedirectPolicyOverride(request.redirectPolicy),
   };
 }
 

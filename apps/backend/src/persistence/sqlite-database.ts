@@ -28,6 +28,7 @@ const CAPTURE_LABEL_MIGRATION = "0018_capture_label";
 const AUTH_PROVIDER_CREDENTIALS_MIGRATION = "0019_auth_provider_credentials";
 const EXECUTION_TRANSPORT_METADATA_MIGRATION =
   "0020_execution_transport_metadata";
+const HTTP_REDIRECTS_MIGRATION = "0021_http_redirects";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -48,6 +49,12 @@ CREATE TABLE users (
   is_instance_admin INTEGER NOT NULL CHECK(is_instance_admin IN (0, 1)),
   created_at INTEGER NOT NULL,
   deleted_at INTEGER
+) STRICT;
+
+CREATE TABLE user_preferences (
+  user_id BLOB PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+  redirect_policy_json TEXT NOT NULL DEFAULT '{"follow":true,"maxRedirects":10}' CHECK(json_valid(redirect_policy_json))
 ) STRICT;
 
 CREATE TABLE login_credentials (
@@ -112,6 +119,7 @@ CREATE INDEX refresh_tokens_session ON refresh_tokens(session_id);
 CREATE TABLE workspaces (
   id BLOB PRIMARY KEY CHECK(length(id) = 16),
   name TEXT NOT NULL,
+  redirect_policy_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(redirect_policy_json)),
   created_by BLOB NOT NULL REFERENCES users(id),
   created_at INTEGER NOT NULL
 ) STRICT;
@@ -146,6 +154,7 @@ CREATE TABLE request_drafts (
   target_mode TEXT NOT NULL CHECK(target_mode = 'absolute'),
   target_url TEXT NOT NULL,
   query_mode TEXT NOT NULL CHECK(query_mode = 'structured'),
+  redirect_policy_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(redirect_policy_json)),
   updated_by BLOB NOT NULL REFERENCES users(id),
   updated_at INTEGER NOT NULL
 ) STRICT;
@@ -192,6 +201,10 @@ CREATE TABLE executions (
   transport_metadata_unavailable_reason TEXT CHECK(transport_metadata_unavailable_reason IN ('disabled', 'unsupported')),
   transport_metadata_json TEXT CHECK(transport_metadata_json IS NULL OR json_valid(transport_metadata_json)),
   transport_timings_json TEXT CHECK(transport_timings_json IS NULL OR json_valid(transport_timings_json)),
+  root_execution_id BLOB REFERENCES executions(id) ON DELETE CASCADE,
+  exchange_sequence INTEGER NOT NULL DEFAULT 0 CHECK(exchange_sequence BETWEEN 0 AND 50),
+  redirect_json TEXT CHECK(redirect_json IS NULL OR json_valid(redirect_json)),
+  outgoing_request_json TEXT CHECK(outgoing_request_json IS NULL OR json_valid(outgoing_request_json)),
   created_at INTEGER NOT NULL,
   completed_at INTEGER
 ) STRICT;
@@ -549,6 +562,22 @@ export class SqliteDatabase {
     ) {
       this.#migrateExecutionTransportMetadata();
     }
+
+    const httpRedirectsApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(HTTP_REDIRECTS_MIGRATION);
+    if (
+      httpRedirectsApplied === undefined ||
+      !this.#tableExists("user_preferences") ||
+      !this.#columnExists("workspaces", "redirect_policy_json") ||
+      !this.#columnExists("request_drafts", "redirect_policy_json") ||
+      !this.#columnExists("executions", "root_execution_id") ||
+      !this.#columnExists("executions", "exchange_sequence") ||
+      !this.#columnExists("executions", "redirect_json") ||
+      !this.#columnExists("executions", "outgoing_request_json")
+    ) {
+      this.#migrateHttpRedirects();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -596,6 +625,8 @@ export class SqliteDatabase {
         GENERIC_CAPTURE_SOURCE_MIGRATION,
         CAPTURE_LABEL_MIGRATION,
         AUTH_PROVIDER_CREDENTIALS_MIGRATION,
+        EXECUTION_TRANSPORT_METADATA_MIGRATION,
+        HTTP_REDIRECTS_MIGRATION,
       ].some((identifier) => !identifiers.has(identifier)) ||
       !this.#columnExists("request_drafts", "body_json") ||
       !this.#tableExists("request_attachments") ||
@@ -609,7 +640,14 @@ export class SqliteDatabase {
       !this.#columnExists("login_credentials", "provider_instance_id") ||
       !this.#tableExists("provider_credential_material") ||
       !this.#tableExists("provider_credential_lookup_keys") ||
-      !this.#tableExists("authentication_attempts")
+      !this.#tableExists("authentication_attempts") ||
+      !this.#tableExists("user_preferences") ||
+      !this.#columnExists("workspaces", "redirect_policy_json") ||
+      !this.#columnExists("request_drafts", "redirect_policy_json") ||
+      !this.#columnExists("executions", "root_execution_id") ||
+      !this.#columnExists("executions", "exchange_sequence") ||
+      !this.#columnExists("executions", "redirect_json") ||
+      !this.#columnExists("executions", "outgoing_request_json")
     );
   }
 
@@ -1432,6 +1470,59 @@ export class SqliteDatabase {
       if (applied === undefined) {
         this.#recordMigration(EXECUTION_TRANSPORT_METADATA_MIGRATION);
       }
+    })();
+  }
+
+  /** Adds inherited redirect settings and ordered single-hop execution rows. */
+  #migrateHttpRedirects(): void {
+    this.#driver.transaction(() => {
+      this.#driver.exec(`
+        CREATE TABLE IF NOT EXISTS user_preferences (
+          user_id BLOB PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+          redirect_policy_json TEXT NOT NULL DEFAULT '{"follow":true,"maxRedirects":10}' CHECK(json_valid(redirect_policy_json))
+        ) STRICT;
+      `);
+      if (!this.#columnExists("workspaces", "redirect_policy_json")) {
+        this.#driver.exec(
+          "ALTER TABLE workspaces ADD COLUMN redirect_policy_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(redirect_policy_json))",
+        );
+      }
+      if (!this.#columnExists("request_drafts", "redirect_policy_json")) {
+        this.#driver.exec(
+          "ALTER TABLE request_drafts ADD COLUMN redirect_policy_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(redirect_policy_json))",
+        );
+      }
+      if (!this.#columnExists("executions", "root_execution_id")) {
+        this.#driver.exec(
+          "ALTER TABLE executions ADD COLUMN root_execution_id BLOB REFERENCES executions(id) ON DELETE CASCADE",
+        );
+      }
+      if (!this.#columnExists("executions", "exchange_sequence")) {
+        this.#driver.exec(
+          "ALTER TABLE executions ADD COLUMN exchange_sequence INTEGER NOT NULL DEFAULT 0 CHECK(exchange_sequence BETWEEN 0 AND 50)",
+        );
+      }
+      if (!this.#columnExists("executions", "redirect_json")) {
+        this.#driver.exec(
+          "ALTER TABLE executions ADD COLUMN redirect_json TEXT CHECK(redirect_json IS NULL OR json_valid(redirect_json))",
+        );
+      }
+      if (!this.#columnExists("executions", "outgoing_request_json")) {
+        this.#driver.exec(
+          "ALTER TABLE executions ADD COLUMN outgoing_request_json TEXT CHECK(outgoing_request_json IS NULL OR json_valid(outgoing_request_json))",
+        );
+      }
+      this.#driver.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS execution_redirect_chain_sequence
+          ON executions(root_execution_id, exchange_sequence)
+          WHERE root_execution_id IS NOT NULL;
+      `);
+      const applied = this.#driver
+        .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+        .get(HTTP_REDIRECTS_MIGRATION);
+      if (applied === undefined)
+        this.#recordMigration(HTTP_REDIRECTS_MIGRATION);
     })();
   }
 

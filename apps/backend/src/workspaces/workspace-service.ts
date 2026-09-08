@@ -2,6 +2,11 @@ import type { Kysely, Transaction } from "kysely";
 
 import type { AuditService } from "../audit/audit-service.js";
 import {
+  parseRedirectPolicyOverride,
+  validateRedirectPolicyOverride,
+  type RedirectPolicyOverride,
+} from "../executions/redirect-policy.js";
+import {
   validateFieldDescription,
   validateResourceDescription,
   validateResourceNotes,
@@ -38,6 +43,7 @@ export interface WorkspaceView extends WorkspaceSummary {
   readonly notes: string;
   readonly baseUrl: string;
   readonly headers: readonly WorkspaceHeader[];
+  readonly redirectPolicy: RedirectPolicyOverride;
   readonly revision: number;
 }
 
@@ -118,6 +124,7 @@ export class WorkspaceService {
         "workspace.revision",
         "workspace.headers_json",
         "workspace.base_url_template",
+        "workspace.redirect_policy_json",
         "membership.role",
       ])
       .where("workspace.id", "=", idToBytes(workspaceId))
@@ -135,6 +142,7 @@ export class WorkspaceService {
       notes: row.notes_markdown,
       baseUrl: row.base_url_template,
       headers: parseWorkspaceHeaders(row.headers_json),
+      redirectPolicy: parseRedirectPolicyOverride(row.redirect_policy_json),
       revision: row.revision,
     };
   }
@@ -149,12 +157,15 @@ export class WorkspaceService {
     baseUrl = "",
     description = "",
     notes = "",
+    redirectPolicy: RedirectPolicyOverride = {},
   ): Promise<WorkspaceView> {
     const normalizedName = normalizeName(name);
     const normalizedHeaders = validateWorkspaceHeaders(headers);
     const normalizedBaseUrl = validateBaseUrlTemplate(baseUrl);
     const normalizedDescription = validateResourceDescription(description);
     const normalizedNotes = validateResourceNotes(notes);
+    const normalizedRedirectPolicy =
+      validateRedirectPolicyOverride(redirectPolicy);
     return this.#database.transaction().execute(async (transaction) => {
       await this.requireCanEdit(transaction, userId, workspaceId);
       const row = await transaction
@@ -166,6 +177,7 @@ export class WorkspaceService {
           "revision",
           "headers_json",
           "base_url_template",
+          "redirect_policy_json",
         ])
         .where("id", "=", idToBytes(workspaceId))
         .where("deleted_at", "is", null)
@@ -177,6 +189,7 @@ export class WorkspaceService {
         throw new WorkspaceConflictError("The workspace properties changed");
       }
       const headersJson = JSON.stringify(normalizedHeaders);
+      const redirectPolicyJson = JSON.stringify(normalizedRedirectPolicy);
       const membership = await transaction
         .selectFrom("workspace_memberships")
         .select("role")
@@ -188,7 +201,8 @@ export class WorkspaceService {
         row.description_text === normalizedDescription &&
         row.notes_markdown === normalizedNotes &&
         row.headers_json === headersJson &&
-        row.base_url_template === normalizedBaseUrl
+        row.base_url_template === normalizedBaseUrl &&
+        row.redirect_policy_json === redirectPolicyJson
       ) {
         return {
           workspaceId,
@@ -198,6 +212,7 @@ export class WorkspaceService {
           notes: normalizedNotes,
           baseUrl: normalizedBaseUrl,
           headers: normalizedHeaders,
+          redirectPolicy: normalizedRedirectPolicy,
           revision: row.revision,
         };
       }
@@ -210,6 +225,7 @@ export class WorkspaceService {
           notes_markdown: normalizedNotes,
           headers_json: headersJson,
           base_url_template: normalizedBaseUrl,
+          redirect_policy_json: redirectPolicyJson,
           revision,
         })
         .where("id", "=", idToBytes(workspaceId))
@@ -230,6 +246,8 @@ export class WorkspaceService {
           notesChanged: row.notes_markdown !== normalizedNotes,
           headersChanged: row.headers_json !== headersJson,
           baseUrlChanged: row.base_url_template !== normalizedBaseUrl,
+          redirectPolicyChanged:
+            row.redirect_policy_json !== redirectPolicyJson,
         },
       });
       return {
@@ -240,6 +258,7 @@ export class WorkspaceService {
         notes: normalizedNotes,
         baseUrl: normalizedBaseUrl,
         headers: normalizedHeaders,
+        redirectPolicy: normalizedRedirectPolicy,
         revision,
       };
     });

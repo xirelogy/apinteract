@@ -40,6 +40,9 @@ import type {
   VariableWrite,
   WorkspaceSummary,
   WorkspaceView,
+  RedirectPolicyOverride,
+  ResolvedRedirectPolicy,
+  UserPreferencesView,
 } from "@/model/contracts/backend";
 import { useApplicationStore } from "@/control/state/application-store";
 import type { SessionController } from "@/control/session/session-controller";
@@ -147,11 +150,19 @@ export class ApplicationController {
   /** Loads visible workspaces without choosing a default selection. */
   async initializeWorkspace(): Promise<void> {
     await this.#run(async () => {
-      const result = await this.#webSocket.command<{
-        workspaces: WorkspaceSummary[];
-      }>("workspace.list", {});
+      const [result, preferences] = await Promise.all([
+        this.#webSocket.command<{ workspaces: WorkspaceSummary[] }>(
+          "workspace.list",
+          {},
+        ),
+        this.#webSocket.command<UserPreferencesView>(
+          "user_preferences.get",
+          {},
+        ),
+      ]);
       const store = useApplicationStore();
       store.workspaces = result.workspaces;
+      store.userPreferences = preferences;
       const userId = store.session?.user.userId;
       if (userId !== undefined) {
         await this.#restoreLocalRequestSession(userId, result.workspaces);
@@ -161,6 +172,37 @@ export class ApplicationController {
     if (userId !== undefined) {
       this.#startLocalSessionPersistence(userId);
     }
+  }
+
+  /** Loads the current user's server-backed execution defaults. */
+  async loadUserPreferences(): Promise<UserPreferencesView> {
+    return this.#run(async () => {
+      const preferences = await this.#webSocket.command<UserPreferencesView>(
+        "user_preferences.get",
+        {},
+      );
+      useApplicationStore().userPreferences = preferences;
+      return preferences;
+    });
+  }
+
+  /** Saves complete user redirect defaults with optimistic concurrency. */
+  async updateUserRedirectPolicy(
+    redirectPolicy: ResolvedRedirectPolicy,
+  ): Promise<UserPreferencesView> {
+    return this.#run(async () => {
+      const current = useApplicationStore().userPreferences;
+      if (current === null) throw new Error("User preferences are unavailable");
+      const preferences = await this.#webSocket.command<UserPreferencesView>(
+        "user_preferences.update",
+        {
+          expectedRevision: current.revision,
+          redirectPolicy,
+        },
+      );
+      useApplicationStore().userPreferences = preferences;
+      return preferences;
+    });
   }
 
   /** Loads enabled backend metadata and merges it with local frontend plugins. */
@@ -753,6 +795,7 @@ export class ApplicationController {
       tab.draft.notes,
       tab.draft.baseUrl,
       tab.draft.headers,
+      tab.draft.redirectPolicy,
       tab.variableProfile.revision,
       tab.draft.variables,
     );
@@ -780,6 +823,7 @@ export class ApplicationController {
     notes: string,
     baseUrl: string,
     headers: readonly RequestField[],
+    redirectPolicy: RedirectPolicyOverride,
     expectedVariableRevision: number,
     variables: readonly VariableWrite[],
   ): Promise<{ workspace: WorkspaceView; profile: VariableProfileView }> {
@@ -794,6 +838,7 @@ export class ApplicationController {
           notes,
           baseUrl,
           headers,
+          redirectPolicy,
         },
       );
       const store = useApplicationStore();
@@ -2248,6 +2293,30 @@ export class ApplicationController {
     });
   }
 
+  /** Selects one complete response package within a redirect chain. */
+  async selectExecutionExchange(
+    tabId: string,
+    executionId: string,
+  ): Promise<void> {
+    await this.#runTab(tabId, async () => {
+      const execution = await this.#webSocket.command<ExecutionView>(
+        "execution.exchange.get",
+        { executionId },
+      );
+      this.#updateTab(tabId, (current) => ({
+        ...current,
+        ...(current.selectedExchange === null
+          ? { execution }
+          : {
+              selectedExchange: {
+                ...current.selectedExchange,
+                execution,
+              },
+            }),
+      }));
+    });
+  }
+
   /** Loads immutable history for one saved request tab. */
   async loadRequestRevisions(tabId: string): Promise<void> {
     const tab = requireTab(tabId);
@@ -2727,7 +2796,9 @@ export class ApplicationController {
     }
     const store = useApplicationStore();
     const tab = store.requestTabs.find(
-      (candidate) => candidate.execution?.executionId === envelope.executionId,
+      (candidate) =>
+        candidate.execution?.executionId === envelope.executionId ||
+        candidate.execution?.rootExecutionId === envelope.executionId,
     );
     if (tab === undefined) {
       return;
@@ -2774,10 +2845,13 @@ function withLiveExecution(
   select = true,
 ): RequestTab {
   const existing = tab.exchangeSummaries.find(
-    (summary) => summary.exchangeId === execution.executionId,
+    (summary) =>
+      summary.exchangeId ===
+      (execution.rootExecutionId ?? execution.executionId),
   );
+  const rootExecutionId = execution.rootExecutionId ?? execution.executionId;
   const summary: RequestExchangeSummary = {
-    exchangeId: execution.executionId,
+    exchangeId: rootExecutionId,
     requestId: tab.request!.requestId,
     requestRevisionId: existing?.requestRevisionId ?? null,
     kind: "execution",
@@ -2798,12 +2872,12 @@ function withLiveExecution(
     exchangeSummaries: [
       summary,
       ...tab.exchangeSummaries.filter(
-        (candidate) => candidate.exchangeId !== execution.executionId,
+        (candidate) => candidate.exchangeId !== rootExecutionId,
       ),
     ],
-    selectedExchangeId: select ? execution.executionId : tab.selectedExchangeId,
+    selectedExchangeId: select ? rootExecutionId : tab.selectedExchangeId,
     selectedExchange:
-      select || tab.selectedExchangeId === execution.executionId
+      select || tab.selectedExchangeId === rootExecutionId
         ? { summary, execution }
         : tab.selectedExchange,
   };
@@ -2970,6 +3044,7 @@ function emptyDraft(
     body: "",
     preRequestScript: "",
     postResponseScript: "",
+    redirectPolicy: {},
   };
 }
 
@@ -2993,6 +3068,7 @@ function requestToDraft(request: RequestView): RequestDraftInput {
     body: requestBody.kind === "text" ? request.body : "",
     preRequestScript: request.preRequestScript,
     postResponseScript: request.postResponseScript,
+    redirectPolicy: request.redirectPolicy ?? {},
   };
 }
 
@@ -3070,6 +3146,7 @@ function workspacePropertiesDraft(
     notes: workspace.notes,
     baseUrl: workspace.baseUrl,
     headers: workspace.headers.map((header) => ({ ...header })),
+    redirectPolicy: { ...(workspace.redirectPolicy ?? {}) },
     variables: variableViewsToWrites(profile.variables),
   };
 }
@@ -3081,6 +3158,7 @@ function cloneWorkspacePropertiesDraft(
   return {
     ...draft,
     headers: draft.headers.map((header) => ({ ...header })),
+    redirectPolicy: { ...draft.redirectPolicy },
     variables: cloneVariableWrites(draft.variables),
   };
 }
@@ -3235,6 +3313,7 @@ function executableDraft(draft: RequestDraftInput) {
     body: requestBody.kind === "text" ? requestBody.text : "",
     preRequestScript: draft.preRequestScript,
     postResponseScript: draft.postResponseScript,
+    redirectPolicy: draft.redirectPolicy ?? {},
   };
 }
 

@@ -62,3 +62,19 @@ For other binary or non-previewable responses, Raw shows the declared media
 type, stored byte count, and SHA-256 digest when available. This metadata and
 the exact download action remain available without converting binary bytes to
 misleading text.
+
+## Redirect response chains
+
+An automatically followed redirect retains every hop as a complete response
+package. The redirect information row initially shows the final response and
+provides previous and next controls around a compact **N / M** selector. Open
+the selector to choose any hop by its sequence, status, method, and effective
+URL.
+
+Each selected hop uses the ordinary Request, Raw, formatted preview, Headers,
+Connection, and Scripts presentation; redirects do not replace those tabs or
+use a reduced response shape. A followed source shows a right-arrow action and
+its resolved destination URL; previous and next controls navigate both ways
+through the chain. A redirect that cannot be followed displays its structured
+reason on the source response. Response history continues to treat the complete
+chain as one application execution and labels it with the terminal result.

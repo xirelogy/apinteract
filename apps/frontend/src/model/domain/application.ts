@@ -18,6 +18,7 @@ import type {
   VariableWrite,
   WorkspaceView,
   WorkspaceSummary,
+  RedirectPolicyOverride,
 } from "../contracts/backend";
 
 export type ConnectionState =
@@ -66,6 +67,8 @@ export interface RequestDraftInput {
   readonly body: string;
   readonly preRequestScript: string;
   readonly postResponseScript: string;
+  /** Request-level overrides; older locally persisted drafts may omit them. */
+  readonly redirectPolicy?: RedirectPolicyOverride;
 }
 
 export type RequestRecoveryWarning = "stale" | "secrets-omitted";
@@ -100,6 +103,7 @@ export interface WorkspacePropertiesDraft {
   readonly baseUrl: string;
   readonly headers: readonly RequestField[];
   readonly variables: readonly VariableWrite[];
+  readonly redirectPolicy: RedirectPolicyOverride;
 }
 
 export interface CollectionPropertiesDraft {

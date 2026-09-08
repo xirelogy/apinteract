@@ -44,6 +44,8 @@ import type {
   VariableProfileView,
   VariablePreview,
   VariableWrite,
+  RedirectPolicyOverride,
+  ResolvedRedirectPolicy,
 } from "@/model/contracts/backend";
 import type {
   RequestDraftInput,
@@ -59,6 +61,7 @@ import {
 import { collectTemplateVariableNames } from "@/model/domain/template-variables";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
 import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
+import FormField from "@/view/presentation/controls/FormField.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import InfoPopover from "@/view/presentation/controls/InfoPopover.vue";
 import HeaderMergeModeToggle from "@/view/presentation/controls/HeaderMergeModeToggle.vue";
@@ -105,6 +108,11 @@ const props = withDefaults(
     downloadTransportCertificate?:
       | ((executionId: string, sha256Fingerprint: string) => void)
       | null;
+    inheritedRedirectPolicy?: ResolvedRedirectPolicy;
+    inheritedRedirectPolicySources?: {
+      readonly follow: "userDefaults" | "workspace";
+      readonly maxRedirects: "userDefaults" | "workspace";
+    };
   }>(),
   {
     inheritedTarget: "",
@@ -122,6 +130,11 @@ const props = withDefaults(
     uploadAttachment: null,
     loadResponseBody: null,
     downloadTransportCertificate: null,
+    inheritedRedirectPolicy: () => ({ follow: true, maxRedirects: 10 }),
+    inheritedRedirectPolicySources: () => ({
+      follow: "userDefaults",
+      maxRedirects: "userDefaults",
+    }),
   },
 );
 const i18n = useI18n();
@@ -136,6 +149,7 @@ const emit = defineEmits<{
   change: [draft: RequestDraftInput];
   download: [executionId: string];
   selectExchange: [exchangeId: string];
+  selectExecutionExchange: [executionId: string];
   preview: [names: readonly string[]];
   loadVariables: [];
   changeVariables: [variables: readonly VariableWrite[]];
@@ -172,6 +186,7 @@ const bodyTypeOptions = computed(() =>
 const requestTabs = [
   "query",
   "headers",
+  "settings",
   "body",
   "preRequest",
   "postResponse",
@@ -197,6 +212,8 @@ const expandedInheritedDescriptions = ref<RequestField[]>([]);
 const bodyTypeControlId = useId();
 const preRequestScript = ref("");
 const postResponseScript = ref("");
+const redirectFollow = ref<"inherit" | "follow" | "manual">("inherit");
+const maximumRedirects = ref("");
 const activeTab = ref<(typeof requestTabs)[number]>("query");
 const versionName = ref("");
 const requestVariableCount = ref<number | null>(null);
@@ -230,6 +247,15 @@ watch(
     bodyDefinition.value = cloneRequestBody(requestBody);
     preRequestScript.value = source?.preRequestScript ?? "";
     postResponseScript.value = source?.postResponseScript ?? "";
+    const policy = source?.redirectPolicy ?? {};
+    redirectFollow.value =
+      policy.follow === undefined
+        ? "inherit"
+        : policy.follow
+          ? "follow"
+          : "manual";
+    maximumRedirects.value =
+      policy.maxRedirects === undefined ? "" : String(policy.maxRedirects);
   },
   { immediate: true },
 );
@@ -288,6 +314,36 @@ const bodyHasContent = computed(() => {
 const generatedContentType = computed(() => {
   return bodyPreset.value.effectiveContentType(bodyDefinition.value);
 });
+const redirectFollowOptions = computed(() => [
+  {
+    value: "inherit",
+    label: t("redirects.inherit", {
+      source: t(
+        `redirects.source.${props.inheritedRedirectPolicySources.follow}`,
+      ),
+      value: props.inheritedRedirectPolicy.follow
+        ? t("redirects.follow")
+        : t("redirects.manual"),
+    }),
+  },
+  { value: "follow", label: t("redirects.follow") },
+  { value: "manual", label: t("redirects.manual") },
+]);
+const redirectPolicy = computed<RedirectPolicyOverride>(() => ({
+  ...(redirectFollow.value === "inherit"
+    ? {}
+    : { follow: redirectFollow.value === "follow" }),
+  ...(maximumRedirects.value.trim() === ""
+    ? {}
+    : { maxRedirects: Number(maximumRedirects.value) }),
+}));
+const maximumRedirectsValid = computed(
+  () =>
+    maximumRedirects.value.trim() === "" ||
+    (Number.isInteger(Number(maximumRedirects.value)) &&
+      Number(maximumRedirects.value) >= 0 &&
+      Number(maximumRedirects.value) <= 50),
+);
 const overriddenInheritedHeaderNames = computed(() => {
   const names = new Set<string>();
   for (const header of meaningfulRequestFields(headers.value)) {
@@ -393,6 +449,7 @@ const canSave = computed(
   () =>
     props.viewingRevision === null &&
     validTarget.value &&
+    maximumRedirectsValid.value &&
     documentedFieldsHaveNames([
       ...meaningfulRequestFields(query.value),
       ...meaningfulRequestFields(headers.value),
@@ -652,6 +709,7 @@ function currentDraft(): RequestDraftInput {
     body: body.kind === "text" ? body.text : "",
     preRequestScript: preRequestScript.value,
     postResponseScript: postResponseScript.value,
+    redirectPolicy: redirectPolicy.value,
   };
 }
 
@@ -674,6 +732,14 @@ function selectTargetMode(value: string): void {
   }
 }
 
+/** Applies one validated request-level redirect behavior override. */
+function selectRedirectFollow(value: string): void {
+  if (value === "inherit" || value === "follow" || value === "manual") {
+    redirectFollow.value = value;
+    emitChange();
+  }
+}
+
 /** Activates one executable content plugin and lets it initialize wire state. */
 function selectBodyKind(value: string): void {
   const preset = requestBodyPresets.get(value);
@@ -692,6 +758,7 @@ function requestTabLabel(tab: (typeof requestTabs)[number]): string {
   if (tab === "headers") {
     return t("request.headers");
   }
+  if (tab === "settings") return t("redirects.settings");
   if (tab === "body") {
     return t("request.body");
   }
@@ -711,6 +778,11 @@ function requestTabLabel(tab: (typeof requestTabs)[number]): string {
 
 /** Reports whether a request tab owns a meaningful body or script draft. */
 function requestTabHasContent(tab: (typeof requestTabs)[number]): boolean {
+  if (tab === "settings") {
+    return (
+      redirectFollow.value !== "inherit" || maximumRedirects.value.trim() !== ""
+    );
+  }
   if (tab === "body") return bodyHasContent.value;
   if (tab === "preRequest") return preRequestScript.value.trim() !== "";
   if (tab === "postResponse") return postResponseScript.value.trim() !== "";
@@ -887,7 +959,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
               variant="primary"
               :aria-label="t('request.send')"
               :title="t('request.send')"
-              :disabled="busy || !validTarget"
+              :disabled="busy || !validTarget || !maximumRedirectsValid"
               @click="
                 viewingRevision === null
                   ? emit('execute', currentDraft())
@@ -1332,6 +1404,57 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
           </TabsPanel>
 
           <TabsPanel
+            v-if="activeTab === 'settings'"
+            value="settings"
+            class="request-settings-panel"
+          >
+            <section class="redirect-settings">
+              <h3>{{ t("redirects.heading") }}</h3>
+              <FormField
+                v-slot="{ controlId }"
+                :label="t('redirects.behavior')"
+              >
+                <SelectMenu
+                  :input-id="controlId"
+                  :model-value="redirectFollow"
+                  :options="redirectFollowOptions"
+                  :label="t('redirects.behavior')"
+                  density="compact"
+                  :disabled="editorDisabled"
+                  @update:model-value="selectRedirectFollow"
+                />
+              </FormField>
+              <FormField
+                v-slot="{ controlId, describedBy, invalid }"
+                :label="t('redirects.maximum')"
+                v-bind="
+                  maximumRedirectsValid
+                    ? {}
+                    : { error: t('redirects.maximumInvalid') }
+                "
+              >
+                <TextInput
+                  :id="controlId"
+                  v-model="maximumRedirects"
+                  inputmode="numeric"
+                  :placeholder="
+                    t('redirects.inheritedMaximum', {
+                      source: t(
+                        `redirects.source.${inheritedRedirectPolicySources.maxRedirects}`,
+                      ),
+                      value: inheritedRedirectPolicy.maxRedirects,
+                    })
+                  "
+                  :aria-describedby="describedBy"
+                  :invalid="invalid"
+                  :disabled="editorDisabled"
+                  @input="emitChange"
+                />
+              </FormField>
+            </section>
+          </TabsPanel>
+
+          <TabsPanel
             v-if="activeTab === 'body'"
             value="body"
             class="request-body-editor"
@@ -1562,6 +1685,7 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
         :download-transport-certificate="downloadTransportCertificate"
         @download="emit('download', $event)"
         @select-exchange="emit('selectExchange', $event)"
+        @select-execution-exchange="emit('selectExecutionExchange', $event)"
       />
     </template>
   </main>

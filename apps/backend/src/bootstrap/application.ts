@@ -7,6 +7,7 @@ import { CredentialRepository } from "../authentication/credential-repository.js
 import { FirstUserBootstrapService } from "../authentication/first-user-bootstrap-service.js";
 import { LocalBlobStore } from "../blobs/local-blob-store.js";
 import { ExecutionService } from "../executions/execution-service.js";
+import { UserPreferencesService } from "../executions/redirect-policy.js";
 import { EnvironmentService } from "../environments/environment-service.js";
 import { RequestExchangeService } from "../exchanges/request-exchange-service.js";
 import { IdentityService } from "../identity/identity-service.js";
@@ -38,6 +39,7 @@ export interface Application {
   readonly authProviders: AuthProviderRegistry;
   readonly sessions: SessionService;
   readonly workspaces: WorkspaceService;
+  readonly userPreferences: UserPreferencesService;
   readonly environments: EnvironmentService;
   readonly variables: VariableService;
   readonly requestAttachments: RequestAttachmentService;
@@ -78,6 +80,7 @@ export async function createApplication(
   });
   await sessions.initialize(configuration.server.publicOrigin);
   const workspaces = new WorkspaceService(database.db, audit);
+  const userPreferences = new UserPreferencesService(database.db, audit);
   const environments = new EnvironmentService(database.db, workspaces, audit);
   const variables = new VariableService(
     database.db,
@@ -204,6 +207,7 @@ export async function createApplication(
     authProviders,
     sessions,
     workspaces,
+    userPreferences,
     environments,
     variables,
     requestAttachments,

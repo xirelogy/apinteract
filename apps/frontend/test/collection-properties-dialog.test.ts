@@ -585,6 +585,7 @@ describe("WorkspacePropertiesDialog", () => {
           },
         ],
         [{ name: "team", kind: "value", value: "platform" }],
+        {},
       ],
     ]);
     wrapper.unmount();

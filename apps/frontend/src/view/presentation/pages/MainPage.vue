@@ -11,6 +11,7 @@ import type {
   RequestAttachment,
   RequestField,
   RequestView,
+  RedirectPolicyOverride,
   VariableWrite,
 } from "@/model/contracts/backend";
 import {
@@ -70,6 +71,7 @@ const {
   session,
   workspaces,
   selectedWorkspaceId,
+  selectedWorkspace,
   environments,
   selectedEnvironmentId,
   variablePreviews,
@@ -85,7 +87,28 @@ const {
   activeWorkbenchTabId,
   busy,
   error,
+  userPreferences,
 } = storeToRefs(store);
+const inheritedRedirectPolicy = computed(() => ({
+  follow:
+    selectedWorkspace.value?.redirectPolicy?.follow ??
+    userPreferences.value?.redirectPolicy.follow ??
+    true,
+  maxRedirects:
+    selectedWorkspace.value?.redirectPolicy?.maxRedirects ??
+    userPreferences.value?.redirectPolicy.maxRedirects ??
+    10,
+}));
+const inheritedRedirectPolicySources = computed(() => ({
+  follow:
+    selectedWorkspace.value?.redirectPolicy?.follow === undefined
+      ? ("userDefaults" as const)
+      : ("workspace" as const),
+  maxRedirects:
+    selectedWorkspace.value?.redirectPolicy?.maxRedirects === undefined
+      ? ("userDefaults" as const)
+      : ("workspace" as const),
+}));
 const activeTab = computed(
   () =>
     requestTabs.value.find(
@@ -454,6 +477,13 @@ function selectActiveExchange(exchangeId: string): void {
   }
 }
 
+/** Displays one complete exchange from the active redirect chain. */
+function selectActiveExecutionExchange(executionId: string): void {
+  if (activeTab.value !== null) {
+    void controller.selectExecutionExchange(activeTab.value.tabId, executionId);
+  }
+}
+
 /** Names one immutable revision belonging to the active request tab. */
 function nameActiveRevision(revisionId: string, name: string | null): void {
   if (activeTab.value !== null) {
@@ -653,6 +683,7 @@ async function saveWorkspaceProperties(
   baseUrl: string,
   headers: readonly RequestField[],
   variables: readonly VariableWrite[],
+  redirectPolicy: RedirectPolicyOverride,
 ): Promise<void> {
   controller.updateWorkspacePropertiesDraft(tabId, {
     name,
@@ -661,6 +692,7 @@ async function saveWorkspaceProperties(
     baseUrl,
     headers,
     variables,
+    redirectPolicy,
   });
   await controller.saveWorkspacePropertiesTab(tabId);
 }
@@ -673,6 +705,7 @@ function saveActiveWorkspaceProperties(
   baseUrl: string,
   headers: readonly RequestField[],
   variables: readonly VariableWrite[],
+  redirectPolicy: RedirectPolicyOverride,
 ): void {
   const tab = activeResourceTab.value;
   if (tab?.kind === "workspace") {
@@ -684,6 +717,7 @@ function saveActiveWorkspaceProperties(
       baseUrl,
       headers,
       variables,
+      redirectPolicy,
     );
   }
 }
@@ -979,6 +1013,7 @@ function discardActiveResourceTab(): void {
             :can-delete="canDeleteWorkspace"
             :busy="busy"
             :recovery-warning="activeResourceTab.omittedSecretValues ?? false"
+            :user-redirect-policy="userPreferences?.redirectPolicy"
             @change="
               controller.updateWorkspacePropertiesDraft(
                 activeResourceTab.tabId,
@@ -1058,6 +1093,8 @@ function discardActiveResourceTab(): void {
             :upload-attachment="uploadActiveRequestAttachment"
             :load-response-body="loadExecutionBody"
             :download-transport-certificate="downloadTransportCertificate"
+            :inherited-redirect-policy="inheritedRedirectPolicy"
+            :inherited-redirect-policy-sources="inheritedRedirectPolicySources"
             @change="updateActiveRequestDraft"
             @save="saveRequest"
             @execute="executeRequest"
@@ -1072,6 +1109,7 @@ function discardActiveResourceTab(): void {
             @restore-revision="restoreActiveRevision"
             @execute-revision="executeActiveRevision"
             @select-exchange="selectActiveExchange"
+            @select-execution-exchange="selectActiveExecutionExchange"
             @download="downloadExecutionBody"
           />
         </template>

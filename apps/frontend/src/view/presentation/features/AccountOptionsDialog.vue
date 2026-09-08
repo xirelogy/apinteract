@@ -18,10 +18,12 @@ import {
   useDateTimeFormatPreference,
 } from "@/app/preferences/date-time-format";
 import ButtonControl from "@/view/presentation/controls/ButtonControl.vue";
+import CheckboxControl from "@/view/presentation/controls/CheckboxControl.vue";
 import FormField from "@/view/presentation/controls/FormField.vue";
 import IconButton from "@/view/presentation/controls/IconButton.vue";
 import SelectMenu from "@/view/presentation/controls/SelectMenu.vue";
 import TextArea from "@/view/presentation/controls/TextArea.vue";
+import TextInput from "@/view/presentation/controls/TextInput.vue";
 import DialogControl from "@/view/presentation/controls/dialog/DialogControl.vue";
 import TabsList from "@/view/presentation/controls/tabs/TabsList.vue";
 import TabsPanel from "@/view/presentation/controls/tabs/TabsPanel.vue";
@@ -50,6 +52,8 @@ const activeSection = ref<"general" | "defaults" | "plugins" | "versions">(
 const displayStyle = ref<DisplayStyle>("system");
 const dateTimeFormat = ref<DateTimeFormat>("locale");
 const appendingHeaders = ref("");
+const followRedirects = ref(true);
+const maximumRedirects = ref("10");
 const dateTimeExample = new Date();
 const displayStyleOptions = computed(() => [
   { value: "system", label: t("header.displayStyle.system") },
@@ -84,6 +88,18 @@ const appendingHeadersError = computed(() =>
     ? undefined
     : t("header.appendingHeadersInvalid"),
 );
+const maximumRedirectsError = computed(() => {
+  const value = Number(maximumRedirects.value);
+  return Number.isInteger(value) && value >= 0 && value <= 50
+    ? undefined
+    : t("header.redirects.maximumInvalid");
+});
+const saveDisabled = computed(
+  () =>
+    appendingHeadersError.value !== undefined ||
+    maximumRedirectsError.value !== undefined ||
+    store.userPreferences === null,
+);
 const pluginsEmpty = computed(
   () => store.plugins.length === 0 && store.pluginListState !== "loading",
 );
@@ -100,6 +116,17 @@ watch(
       dateTimeFormat.value = dateTimeFormatPreference.dateTimeFormat.value;
       appendingHeaders.value =
         headerPreferences.appendingHeaderNames.value.join("\n");
+      const preferences = store.userPreferences;
+      if (preferences !== null) {
+        followRedirects.value = preferences.redirectPolicy.follow;
+        maximumRedirects.value = String(
+          preferences.redirectPolicy.maxRedirects,
+        );
+      }
+      void controller?.loadUserPreferences().then((loaded) => {
+        followRedirects.value = loaded.redirectPolicy.follow;
+        maximumRedirects.value = String(loaded.redirectPolicy.maxRedirects);
+      });
       void controller?.loadPlugins();
       void controller?.loadVersions();
     }
@@ -113,11 +140,20 @@ function close(): void {
 }
 
 /** Persists the header defaults shared by every editor before closing. */
-function save(): void {
-  if (appendingHeadersError.value !== undefined) return;
+async function save(): Promise<void> {
+  if (
+    appendingHeadersError.value !== undefined ||
+    maximumRedirectsError.value !== undefined
+  ) {
+    return;
+  }
   displayStylePreference.setDisplayStyle(displayStyle.value);
   dateTimeFormatPreference.setDateTimeFormat(dateTimeFormat.value);
   headerPreferences.setAppendingHeaderNames(parsedAppendingHeaders.value.names);
+  await controller?.updateUserRedirectPolicy({
+    follow: followRedirects.value,
+    maxRedirects: Number(maximumRedirects.value),
+  });
   close();
 }
 
@@ -248,6 +284,30 @@ function selectDateTimeFormat(value: string): void {
                 spellcheck="false"
               />
             </FormField>
+            <section class="account-options-group">
+              <h3>{{ t("header.redirects.heading") }}</h3>
+              <CheckboxControl
+                v-model="followRedirects"
+                :label="t('header.redirects.follow')"
+              />
+              <FormField
+                v-slot="{ controlId, describedBy, invalid }"
+                :label="t('header.redirects.maximum')"
+                v-bind="
+                  maximumRedirectsError === undefined
+                    ? {}
+                    : { error: maximumRedirectsError }
+                "
+              >
+                <TextInput
+                  :id="controlId"
+                  v-model="maximumRedirects"
+                  inputmode="numeric"
+                  :aria-describedby="describedBy"
+                  :invalid="invalid"
+                />
+              </FormField>
+            </section>
           </TabsPanel>
           <TabsPanel
             value="plugins"
@@ -315,7 +375,7 @@ function selectDateTimeFormat(value: string): void {
         <footer class="resource-dialog-actions">
           <ButtonControl
             variant="primary"
-            :disabled="appendingHeadersError !== undefined"
+            :disabled="saveDisabled"
             @click="save"
           >
             {{ t("common.actions.save") }}

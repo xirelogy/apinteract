@@ -17,6 +17,13 @@ export interface UserTable {
   deleted_at: number | null;
 }
 
+/** Stores server-backed execution defaults owned by one application user. */
+export interface UserPreferenceTable {
+  user_id: BinaryId;
+  revision: number;
+  redirect_policy_json: string;
+}
+
 export interface LoginCredentialTable {
   id: BinaryId;
   user_id: BinaryId;
@@ -79,6 +86,7 @@ export interface WorkspaceTable {
   revision: number;
   headers_json: string;
   base_url_template: Generated<string>;
+  redirect_policy_json: Generated<string>;
   created_by: BinaryId;
   created_at: number;
   deleted_by: BinaryId | null;
@@ -186,6 +194,7 @@ export interface RequestDraftTable {
   body_json: Generated<string>;
   pre_request_script: string;
   post_response_script: string;
+  redirect_policy_json: Generated<string>;
   updated_by: BinaryId;
   updated_at: number;
 }
@@ -235,6 +244,11 @@ export interface ExecutionTable {
   >;
   transport_metadata_json: Generated<string | null>;
   transport_timings_json: Generated<string | null>;
+  /** Null identifies the root exchange; descendants point to that root. */
+  root_execution_id: Generated<BinaryId | null>;
+  exchange_sequence: Generated<number>;
+  redirect_json: Generated<string | null>;
+  outgoing_request_json: Generated<string | null>;
   created_at: number;
   completed_at: number | null;
 }
@@ -345,6 +359,7 @@ export interface MigrationTable {
 export interface DatabaseSchema {
   instance_metadata: InstanceMetadataTable;
   users: UserTable;
+  user_preferences: UserPreferenceTable;
   login_credentials: LoginCredentialTable;
   provider_credential_material: ProviderCredentialMaterialTable;
   provider_credential_lookup_keys: ProviderCredentialLookupKeyTable;

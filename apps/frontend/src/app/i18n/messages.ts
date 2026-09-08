@@ -125,6 +125,12 @@ export const enUsMessages = {
     appendingHeaders: "Headers that append by default",
     appendingHeadersInvalid:
       "Enter valid HTTP header names separated by commas or lines.",
+    redirects: {
+      heading: "HTTP redirections",
+      follow: "Follow redirects",
+      maximum: "Maximum redirects",
+      maximumInvalid: "Enter a whole number from 0 to 50.",
+    },
   },
   workspace: {
     baseUrl: "Base URL",
@@ -471,6 +477,22 @@ export const enUsMessages = {
       title: "Discard changes?",
     },
   },
+  redirects: {
+    behavior: "Redirect behavior",
+    execution: "Execution",
+    follow: "Follow redirects",
+    heading: "HTTP redirections",
+    inherit: "Inherit from {source} ({value})",
+    inheritedMaximum: "Inherit from {source} ({value})",
+    manual: "Do not follow",
+    maximum: "Maximum redirects",
+    maximumInvalid: "Enter a whole number from 0 to 50, or leave blank.",
+    settings: "Settings",
+    source: {
+      userDefaults: "user defaults",
+      workspace: "workspace",
+    },
+  },
   scripting: {
     scripts: "Scripts",
     preRequest: "Pre-request script",
@@ -626,6 +648,19 @@ export const enUsMessages = {
     },
     failure: {
       execution_failed: "Request execution failed",
+      execution_timeout: "The redirect chain exceeded its execution timeout",
+      redirect_body_not_replayable:
+        "The request body cannot be replayed for this redirect",
+      redirect_credentials_not_allowed:
+        "The redirect destination contains embedded credentials",
+      redirect_disabled: "Automatic redirect following is disabled",
+      redirect_insecure_downgrade:
+        "Automatic HTTPS-to-HTTP redirects are blocked",
+      redirect_invalid_location: "The redirect Location is invalid",
+      redirect_limit_exceeded: "The maximum redirect count was reached",
+      redirect_unsupported_scheme:
+        "The redirect destination does not use HTTP or HTTPS",
+      response_size_limit: "The response-body limit was reached",
       unknown: "Request execution failed",
     },
     headers: "Headers",
@@ -647,6 +682,17 @@ export const enUsMessages = {
     request: "Request",
     requestBody: "Body",
     requestHeaders: "Headers",
+    redirect: {
+      chain: "Redirect responses",
+      destination: "View destination response",
+      final: "Final",
+      location: "Location",
+      next: "Next response",
+      noStatus: "No status",
+      previous: "Previous response",
+      responsePosition: "Response {current} of {total}",
+      source: "View source response",
+    },
     secretRedactionNote:
       "Values derived from secret variables are shown as [secret].",
     sha256: "SHA-256",
@@ -673,6 +719,8 @@ export const enUsMessages = {
       "That move is not allowed. A collection cannot contain itself or one of its ancestors.",
     tree_order_conflict:
       "The tree order changed elsewhere. Try moving the item again.",
+    user_preferences_conflict:
+      "Your options changed elsewhere. Reopen Options and try again.",
     variable_resolution_failed:
       "The request contains a variable that could not be resolved.",
   },
