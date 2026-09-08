@@ -57,7 +57,7 @@ function handleRequest(request, response) {
     sendFixtureResponse(
       response,
       "text/html; charset=utf-8",
-      '<main><h1>Fixture preview</h1><script>window.parent.fixtureScriptRan=true</script><img src="http://127.0.0.1:8090/preview-probe"></main>',
+      '<main><h1>Fixture preview</h1><p id="script-status">Inline script did not run</p><script>document.getElementById("script-status").textContent="Inline script ran";try{window.parent.fixtureScriptRan=true}catch{}</script><img src="http://127.0.0.1:8090/preview-probe"></main>',
     );
     return;
   }

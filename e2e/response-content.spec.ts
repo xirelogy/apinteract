@@ -116,7 +116,7 @@ test("displays structured, isolated, image, and binary responses", async ({
     .getByRole("tab", { name: "Preview", exact: true })
     .click();
   const html = page.getByTitle("Isolated HTML response preview");
-  await expect(html).toHaveAttribute("sandbox", "");
+  await expect(html).toHaveAttribute("sandbox", "allow-scripts");
   await expect(html).toHaveAttribute("srcdoc", /default-src 'none'/u);
   await expect(html).not.toHaveAttribute("srcdoc", /preview-probe/u);
   const htmlHost = page.locator(
@@ -133,6 +133,11 @@ test("displays structured, isolated, image, and binary responses", async ({
     page
       .frameLocator('iframe[title="Isolated HTML response preview"]')
       .getByRole("heading", { name: "Fixture preview" }),
+  ).toBeVisible();
+  await expect(
+    page
+      .frameLocator('iframe[title="Isolated HTML response preview"]')
+      .getByText("Inline script ran", { exact: true }),
   ).toBeVisible();
   expect(previewRequests).toHaveLength(0);
   expect(

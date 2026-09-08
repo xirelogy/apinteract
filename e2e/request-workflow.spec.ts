@@ -376,19 +376,9 @@ test("creates, restores, and sends the first workspace request", async ({
   await expect(page.locator(".body-preview")).toContainText(`"method":"POST"`);
 
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  const saveDialog = page.getByRole("dialog", { name: "Save request" });
-  await expect(saveDialog.getByLabel("Saved request name")).toHaveValue(
-    requestName,
+  await expect(page.getByRole("dialog", { name: "Save request" })).toHaveCount(
+    0,
   );
-  const destinationTree = saveDialog.getByRole("tree", {
-    name: "Destination collection",
-  });
-  const destinationCollection = destinationTree.getByRole("treeitem", {
-    name: leafCollectionName,
-    exact: true,
-  });
-  await expect(destinationCollection.locator("..")).toHaveClass(/is-selected/u);
-  await saveDialog.getByRole("button", { name: "Save" }).click();
   const requestNode = workspaceTree.getByRole("treeitem", {
     name: `POST ${requestName}`,
     exact: true,
