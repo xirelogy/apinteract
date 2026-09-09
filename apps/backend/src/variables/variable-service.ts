@@ -87,6 +87,8 @@ export interface EffectiveVariableProfile {
   readonly evidence: readonly VariableProfileEvidence[];
   /** Pins the selected root environment used for this execution, if any. */
   readonly selectedEnvironmentId: EntityId | null;
+  /** Pins the environment jar partition, or the workspace default when null. */
+  readonly cookieJarEnvironmentId: EntityId | null;
 }
 
 /** Pins every durable variable destination available to one execution. */
@@ -892,6 +894,10 @@ export class VariableService {
       sources,
       evidence,
       selectedEnvironmentId: environment?.environmentId ?? null,
+      cookieJarEnvironmentId:
+        environment?.cookieJarSource === "environment"
+          ? environment.environmentId
+          : null,
     };
   }
 
@@ -931,6 +937,7 @@ export class VariableService {
       sources,
       evidence: inherited.evidence,
       selectedEnvironmentId: inherited.selectedEnvironmentId,
+      cookieJarEnvironmentId: inherited.cookieJarEnvironmentId,
     };
   }
 

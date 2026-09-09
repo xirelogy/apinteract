@@ -30,6 +30,7 @@ import { VariableResolver } from "./variable-resolver.js";
 
 export type EnvironmentVariableWrite = VariableWrite;
 export type EnvironmentVariableView = VariableView;
+export type EnvironmentCookieJarSource = "environment" | "workspace";
 
 export interface EnvironmentView {
   readonly environmentId: EntityId;
@@ -37,6 +38,7 @@ export interface EnvironmentView {
   readonly name: string;
   readonly description: string;
   readonly notes: string;
+  readonly cookieJarSource: EnvironmentCookieJarSource;
   readonly revision: number;
   readonly includedEnvironments: readonly EnvironmentSummary[];
   readonly variables: readonly EnvironmentVariableView[];
@@ -71,6 +73,7 @@ export interface SelectedEnvironmentProfile {
   readonly environmentId: EntityId;
   readonly name: string;
   readonly revision: number;
+  readonly cookieJarSource: EnvironmentCookieJarSource;
   readonly variables: readonly ResolvedEnvironmentVariable[];
   readonly sources: ReadonlyMap<string, SelectedEnvironmentProfileMetadata>;
   readonly evidence: readonly SelectedEnvironmentProfileMetadata[];
@@ -81,6 +84,7 @@ export interface SelectedRedactedEnvironmentProfile {
   readonly environmentId: EntityId;
   readonly name: string;
   readonly revision: number;
+  readonly cookieJarSource: EnvironmentCookieJarSource;
   readonly variables: readonly EnvironmentVariableView[];
   readonly sources: ReadonlyMap<string, SelectedEnvironmentProfileMetadata>;
   readonly evidence: readonly SelectedEnvironmentProfileMetadata[];
@@ -91,6 +95,7 @@ export interface SelectedEnvironmentProfileMetadata {
   readonly environmentId: EntityId;
   readonly name: string;
   readonly revision: number;
+  readonly cookieJarSource: EnvironmentCookieJarSource;
 }
 
 /** Identifies the effective persisted scope supplying a previewed variable. */
@@ -203,6 +208,7 @@ export class EnvironmentService {
     includedEnvironmentIds: readonly EntityId[] = [],
     description = "",
     notes = "",
+    cookieJarSource: EnvironmentCookieJarSource = "environment",
   ): Promise<EnvironmentView> {
     const normalizedDescription = validateResourceDescription(description);
     const normalizedNotes = validateResourceNotes(notes);
@@ -220,6 +226,7 @@ export class EnvironmentService {
           name_key: environmentNameKey(displayName),
           description_text: normalizedDescription,
           notes_markdown: normalizedNotes,
+          cookie_jar_source: cookieJarSource,
           revision: 0,
           created_by: idToBytes(userId),
           created_at: now,
@@ -246,7 +253,12 @@ export class EnvironmentService {
         type: "environment.created",
         actorUserId: userId,
         workspaceId,
-        data: { environmentId, name: displayName, includedEnvironmentIds },
+        data: {
+          environmentId,
+          name: displayName,
+          includedEnvironmentIds,
+          cookieJarSource,
+        },
       });
       await this.#recordSecretMutations(
         transaction,
@@ -283,6 +295,7 @@ export class EnvironmentService {
     includedEnvironmentIds?: readonly EntityId[],
     description = "",
     notes = "",
+    cookieJarSource?: EnvironmentCookieJarSource,
   ): Promise<EnvironmentView> {
     const normalizedDescription = validateResourceDescription(description);
     const normalizedNotes = validateResourceNotes(notes);
@@ -325,6 +338,9 @@ export class EnvironmentService {
           name_key: environmentNameKey(displayName),
           description_text: normalizedDescription,
           notes_markdown: normalizedNotes,
+          ...(cookieJarSource === undefined
+            ? {}
+            : { cookie_jar_source: cookieJarSource }),
           revision: expectedRevision + 1,
           updated_by: idToBytes(userId),
           updated_at: Date.now(),
@@ -341,6 +357,7 @@ export class EnvironmentService {
           ...(includedEnvironmentIds === undefined
             ? {}
             : { includedEnvironmentIds }),
+          ...(cookieJarSource === undefined ? {} : { cookieJarSource }),
         },
       });
       await this.#recordSecretMutations(
@@ -634,7 +651,12 @@ export class EnvironmentService {
         "environment.id",
         "selection.selected_environment_id",
       )
-      .select(["environment.id", "environment.name", "environment.revision"])
+      .select([
+        "environment.id",
+        "environment.name",
+        "environment.revision",
+        "environment.cookie_jar_source",
+      ])
       .where("selection.session_id", "=", idToBytes(sessionId))
       .where("selection.workspace_id", "=", idToBytes(workspaceId))
       .where("environment.workspace_id", "=", idToBytes(workspaceId))
@@ -646,6 +668,7 @@ export class EnvironmentService {
       environmentId: bytesToId(selected.id),
       name: selected.name,
       revision: selected.revision,
+      cookieJarSource: selected.cookie_jar_source,
     };
   }
 
@@ -731,7 +754,7 @@ export class EnvironmentService {
     const [environmentRows, edgeRows] = await Promise.all([
       database
         .selectFrom("environments")
-        .select(["id", "name", "revision"])
+        .select(["id", "name", "revision", "cookie_jar_source"])
         .where("workspace_id", "=", idToBytes(workspaceId))
         .execute(),
       database
@@ -747,7 +770,12 @@ export class EnvironmentService {
         const id = bytesToId(row.id);
         return [
           id,
-          { environmentId: id, name: row.name, revision: row.revision },
+          {
+            environmentId: id,
+            name: row.name,
+            revision: row.revision,
+            cookieJarSource: row.cookie_jar_source,
+          },
         ];
       }),
     );
@@ -880,6 +908,7 @@ export class EnvironmentService {
       name: environment.name,
       description: environment.description_text,
       notes: environment.notes_markdown,
+      cookieJarSource: environment.cookie_jar_source,
       revision: environment.revision,
       includedEnvironments: await this.#directIncludes(database, environmentId),
       variables: await this.#variables.redactedVariables(

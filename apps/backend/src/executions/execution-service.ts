@@ -11,6 +11,12 @@ import {
   type StoredBlob,
 } from "../blobs/local-blob-store.js";
 import {
+  CookieJarLeaseLostError,
+  CookieJarLockTimeoutError,
+  type CookieJarLease,
+  type CookieJarService,
+} from "../cookies/cookie-jar-service.js";
+import {
   bytesToId,
   createEntityId,
   idToBytes,
@@ -124,6 +130,7 @@ export interface ExecutionView {
   readonly rootExecutionId?: EntityId;
   readonly exchangeSequence?: number;
   readonly effectiveRedirectPolicy?: PreparedExecution["redirectPolicy"];
+  readonly effectiveCookiePolicy?: PreparedExecution["cookiePolicy"];
   readonly redirect?: RedirectResult;
   readonly redirectChain?: readonly ExecutionRedirectChainItem[];
 }
@@ -173,6 +180,7 @@ interface ExecutionTransportResult {
 export interface ExecutionVariableWriteOptions {
   readonly variables?: VariableService;
   readonly policy?: ScriptVariableWritePolicy;
+  readonly cookies?: CookieJarService;
 }
 
 /**
@@ -191,6 +199,7 @@ export class ExecutionService {
   readonly #audit: AuditService;
   readonly #scripts: ScriptService;
   readonly #variables: VariableService | undefined;
+  readonly #cookies: CookieJarService | undefined;
   readonly #variableWritePolicy: ScriptVariableWritePolicy;
   readonly #starting = new Set<Promise<ExecutionView>>();
   readonly #active = new Set<Promise<void>>();
@@ -214,6 +223,7 @@ export class ExecutionService {
     this.#audit = audit;
     this.#scripts = scripts;
     this.#variables = variableWrites.variables;
+    this.#cookies = variableWrites.cookies;
     this.#variableWritePolicy =
       variableWrites.policy ?? DEFAULT_SCRIPT_VARIABLE_WRITE_POLICY;
   }
@@ -327,6 +337,7 @@ export class ExecutionService {
       rootExecutionId: prepared.rootExecutionId,
       exchangeSequence: prepared.exchangeSequence,
       effectiveRedirectPolicy: prepared.redirectPolicy,
+      effectiveCookiePolicy: prepared.cookiePolicy,
       scriptLogs: [],
       scriptTests: [],
     };
@@ -427,7 +438,21 @@ export class ExecutionService {
     let working = prepared;
     let local: Readonly<Record<string, string>> = {};
     let scripts: ScriptSummary = { logs: [], tests: [] };
+    let cookieLease: CookieJarLease | undefined;
+    const deadline = prepared.createdAt + EXECUTION_OUTBOUND_TIMEOUT_MS;
+    const cookieIdentity = {
+      workspaceId: prepared.request.workspaceId,
+      environmentId: prepared.cookieJarEnvironmentId,
+    };
     try {
+      if (prepared.cookiePolicy.enabled && this.#cookies !== undefined) {
+        cookieLease = await this.#cookies.acquire(
+          cookieIdentity,
+          prepared.rootExecutionId,
+          deadline,
+          prepared.cookieConcurrencyMode,
+        );
+      }
       const resolver = new VariableResolver(prepared.variables);
       if (prepared.request.preRequestScript.trim() !== "") {
         try {
@@ -498,6 +523,8 @@ export class ExecutionService {
               targetMode: "absolute",
               queryMode: "structured",
               redirectPolicy: prepared.redirectPolicy,
+              cookiePolicy: prepared.cookiePolicy,
+              cookieConcurrencyMode: prepared.cookieConcurrencyMode,
               variableProfiles: prepared.variableEvidence,
               secretReferences: composed.secretReferences,
             }),
@@ -506,7 +533,6 @@ export class ExecutionService {
           .where("id", "=", idToBytes(prepared.executionId))
           .execute();
       }
-      const deadline = Date.now() + EXECUTION_OUTBOUND_TIMEOUT_MS;
       let aggregateResponseBytes = 0;
       let followedRedirects = 0;
       let scriptRequest =
@@ -517,17 +543,30 @@ export class ExecutionService {
           resolver,
         );
       while (true) {
-        const writer = this.#blobs.createWriter();
-        let head: ResponseHead | undefined;
-        let complete: ResponseComplete | undefined;
-        const outgoingRequest = outgoingRequestView(
-          scriptRequest,
-          working.request,
-        );
         const effectiveTargetUrl = materializeTargetUrl(
           working.request.targetUrl,
           working.request.query,
         );
+        const managedCookieHeader =
+          cookieLease === undefined || hasEnabledCookieHeader(working.request)
+            ? undefined
+            : await this.#cookies?.cookieHeader(
+                cookieLease.jarId,
+                effectiveTargetUrl,
+                cookieLease,
+              );
+        const hopRequest = withManagedCookieHeader(
+          working.request,
+          managedCookieHeader,
+        );
+        const outgoingRequest = outgoingRequestView(
+          scriptRequest,
+          hopRequest,
+          managedCookieHeader,
+        );
+        const writer = this.#blobs.createWriter();
+        let head: ResponseHead | undefined;
+        let complete: ResponseComplete | undefined;
         try {
           const remainingTime = deadline - Date.now();
           if (remainingTime <= 0) {
@@ -550,9 +589,9 @@ export class ExecutionService {
             working.exchangeSequence === 0
               ? working.rootExecutionId
               : `${working.rootExecutionId}:${working.exchangeSequence}`,
-            working.request.method,
+            hopRequest.method,
             effectiveTargetUrl,
-            working.request.headers
+            hopRequest.headers
               .filter((header) => header.enabled)
               .map(({ name, value }) => ({ name, value })),
             working.request.bodyBytes === undefined
@@ -561,6 +600,21 @@ export class ExecutionService {
             {
               responseHead: async (value) => {
                 head = value;
+                if (cookieLease !== undefined && this.#cookies !== undefined) {
+                  await this.#cookies.applyResponse(
+                    userId,
+                    working.executionId,
+                    cookieIdentity,
+                    cookieLease.jarId,
+                    effectiveTargetUrl,
+                    value.headers
+                      .filter(
+                        (header) => header.name.toLowerCase() === "set-cookie",
+                      )
+                      .map((header) => header.value),
+                    cookieLease,
+                  );
+                }
                 await this.#database
                   .updateTable("executions")
                   .set({
@@ -723,6 +777,8 @@ export class ExecutionService {
         undefined,
         publish,
       );
+    } finally {
+      await cookieLease?.release();
     }
   }
 
@@ -777,6 +833,8 @@ export class ExecutionService {
             headers: outgoingRequest.headers,
             body: outgoingRequest.body,
             redirectPolicy: source.redirectPolicy,
+            cookiePolicy: source.cookiePolicy,
+            cookieConcurrencyMode: source.cookieConcurrencyMode,
           }),
           response_status: null,
           response_headers_json: null,
@@ -1164,6 +1222,7 @@ export class ExecutionService {
       rootExecutionId: prepared.rootExecutionId,
       exchangeSequence: prepared.exchangeSequence,
       effectiveRedirectPolicy: prepared.redirectPolicy,
+      effectiveCookiePolicy: prepared.cookiePolicy,
       ...(redirect === undefined ? {} : { redirect }),
       redirectChain,
     };
@@ -1520,6 +1579,7 @@ function scriptVariableWriteResult(
 function outgoingRequestView(
   request: ScriptRequest,
   materialized: PreparedExecution["request"],
+  managedCookieHeader?: string,
 ): OutgoingRequestView {
   const bodyBytes =
     materialized.bodyBytes === undefined
@@ -1562,6 +1622,16 @@ function outgoingRequestView(
           },
         ];
       }),
+      ...(managedCookieHeader === undefined || managedCookieHeader === ""
+        ? []
+        : [
+            {
+              name: "Cookie",
+              value: managedCookieHeader,
+              redacted: false,
+              derived: true,
+            },
+          ]),
     ],
     body: {
       value: bodyRedacted
@@ -1574,6 +1644,27 @@ function outgoingRequestView(
       truncated:
         !bodyRedacted && bodyValue.length > OUTGOING_BODY_PREVIEW_CHARACTERS,
     },
+  };
+}
+
+/** Reports whether explicit request content suppresses managed injection. */
+function hasEnabledCookieHeader(
+  request: PreparedExecution["request"],
+): boolean {
+  return request.headers.some(
+    (header) => header.enabled && header.name.toLowerCase() === "cookie",
+  );
+}
+
+/** Appends one derived Cookie field without mutating redirect source headers. */
+function withManagedCookieHeader(
+  request: PreparedExecution["request"],
+  value: string | undefined,
+): PreparedExecution["request"] {
+  if (value === undefined || value === "") return request;
+  return {
+    ...request,
+    headers: [...request.headers, { name: "Cookie", value, enabled: true }],
   };
 }
 
@@ -1659,6 +1750,12 @@ function toExecutionError(cause: unknown): {
   readonly code: string;
   readonly message: string;
 } {
+  if (cause instanceof CookieJarLockTimeoutError) {
+    return { code: "cookie_jar_lock_timeout", message: cause.message };
+  }
+  if (cause instanceof CookieJarLeaseLostError) {
+    return { code: "cookie_jar_lease_lost", message: cause.message };
+  }
   if (cause instanceof ProxyExecutionError) {
     return { code: cause.detail.code, message: cause.detail.message };
   }

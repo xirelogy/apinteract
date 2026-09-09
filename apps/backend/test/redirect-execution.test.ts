@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { AuditService } from "../src/audit/audit-service.js";
 import { LocalBlobStore } from "../src/blobs/local-blob-store.js";
+import { CookieJarService } from "../src/cookies/cookie-jar-service.js";
 import { EnvironmentService } from "../src/environments/environment-service.js";
 import { RequestExchangeService } from "../src/exchanges/request-exchange-service.js";
 import {
@@ -101,8 +102,20 @@ describe("redirect execution orchestration", () => {
             status: index === 0 ? 302 : 200,
             headers:
               index === 0
-                ? [{ name: "Location", value: "/final?from=redirect" }]
-                : [{ name: "Content-Type", value: "text/plain" }],
+                ? [
+                    { name: "Location", value: "/final?from=redirect" },
+                    {
+                      name: "Set-Cookie",
+                      value: "redirect_session=accepted; Path=/; HttpOnly",
+                    },
+                  ]
+                : [
+                    { name: "Content-Type", value: "text/plain" },
+                    {
+                      name: "Set-Cookie",
+                      value: "final_cookie=stored; Path=/; Max-Age=3600",
+                    },
+                  ],
             httpVersion: "HTTP/1.1",
             receivedAt: "2026-09-08T00:00:00.000Z",
           });
@@ -117,6 +130,7 @@ describe("redirect execution orchestration", () => {
           });
         },
       } as unknown as ProxyClient;
+      const cookies = new CookieJarService(database.db, workspaces, audit);
       const executions = new ExecutionService(
         database.db,
         requests,
@@ -124,6 +138,8 @@ describe("redirect execution orchestration", () => {
         proxy,
         blobs,
         audit,
+        undefined,
+        { cookies },
       );
       const events: ExecutionEvent[] = [];
       const savedRequest = await requests.createRequest(
@@ -150,9 +166,10 @@ describe("redirect execution orchestration", () => {
           redirectPolicy: { follow: true, maxRedirects: 2 },
         },
       );
+      const sessionId = createEntityId();
       const running = await executions.start(
         userId,
-        createEntityId(),
+        sessionId,
         savedRequest.requestId,
         (event) => events.push(event),
       );
@@ -173,6 +190,10 @@ describe("redirect execution orchestration", () => {
       expect(calls[1]?.headers).not.toContainEqual(
         expect.objectContaining({ name: "Content-Type" }),
       );
+      expect(calls[1]?.headers).toContainEqual({
+        name: "Cookie",
+        value: "redirect_session=accepted",
+      });
       expect(calls[1]?.options.totalTimeoutMs).toBeLessThanOrEqual(
         calls[0]?.options.totalTimeoutMs ?? 0,
       );
@@ -226,6 +247,15 @@ describe("redirect execution orchestration", () => {
       );
       expect(destination.bodyPreview).toBe("final");
       expect(destination.redirectChain).toHaveLength(2);
+      const jar = await cookies.getActive(
+        userId,
+        sessionId,
+        workspace.workspaceId,
+      );
+      expect(jar.cookies.map((cookie) => cookie.name)).toEqual([
+        "redirect_session",
+        "final_cookie",
+      ]);
     } finally {
       await database.close();
       await rm(rootPath, { recursive: true, force: true });

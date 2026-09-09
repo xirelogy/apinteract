@@ -100,6 +100,9 @@ importers:
       quickjs-emscripten:
         specifier: 0.31.0
         version: 0.31.0
+      tough-cookie:
+        specifier: 6.0.2
+        version: 6.0.2
       uuid:
         specifier: 13.0.2
         version: 13.0.2
@@ -6989,14 +6992,12 @@ packages:
 
   /tldts-core@7.4.9:
     resolution: {integrity: sha512-DxKfPBI52p2msTEu7MPhdpdDTBhhVQg1a/8PjQckeyAvO13eMYElX545grIp6nnTGIMZlRvFZPvFhvI/WIz2Vg==}
-    dev: true
 
   /tldts@7.4.9:
     resolution: {integrity: sha512-3kZ8wQQ/k5DrChD4X4FVvr2D7E5uoRgAqkPyLpSCGUvqOvqu+JEdr3mwMUaVWb+vMHZaKhF5fp2PBigKsui7hA==}
     hasBin: true
     dependencies:
       tldts-core: 7.4.9
-    dev: true
 
   /to-regex-range@5.0.1:
     resolution: {integrity: sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ==}
@@ -7020,7 +7021,6 @@ packages:
     engines: {node: '>=16'}
     dependencies:
       tldts: 7.4.9
-    dev: true
 
   /tr46@6.0.0:
     resolution: {integrity: sha512-bLVMLPtstlZ4iMQHpFHTR7GAGj2jxi8Dg0s2h2MafAE4uSWF98FC/3MomU51iQAMf8/qDUbKWf5GxuvvVcXEhw==}

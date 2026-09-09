@@ -2,6 +2,7 @@ import type {
   CollectionView,
   CapturedExchangeView,
   CurrentSession,
+  EnvironmentCookieJarSource,
   EnvironmentVariableWrite,
   EnvironmentView,
   ExecutionView,
@@ -19,6 +20,7 @@ import type {
   WorkspaceView,
   WorkspaceSummary,
   RedirectPolicyOverride,
+  CookiePolicyOverride,
 } from "../contracts/backend";
 
 export type ConnectionState =
@@ -69,6 +71,8 @@ export interface RequestDraftInput {
   readonly postResponseScript: string;
   /** Request-level overrides; older locally persisted drafts may omit them. */
   readonly redirectPolicy?: RedirectPolicyOverride;
+  /** Request-level cookie toggle; older locally persisted drafts may omit it. */
+  readonly cookiePolicy?: CookiePolicyOverride;
 }
 
 export type RequestRecoveryWarning = "stale" | "secrets-omitted";
@@ -104,6 +108,7 @@ export interface WorkspacePropertiesDraft {
   readonly headers: readonly RequestField[];
   readonly variables: readonly VariableWrite[];
   readonly redirectPolicy: RedirectPolicyOverride;
+  readonly cookiePolicy: CookiePolicyOverride;
 }
 
 export interface CollectionPropertiesDraft {
@@ -119,6 +124,7 @@ export interface EnvironmentDraft {
   readonly name: string;
   readonly description: string;
   readonly notes: string;
+  readonly cookieJarSource: EnvironmentCookieJarSource;
   readonly variables: readonly EnvironmentVariableWrite[];
   readonly includedEnvironmentIds: readonly string[];
 }

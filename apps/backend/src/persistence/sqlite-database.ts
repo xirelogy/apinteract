@@ -29,6 +29,10 @@ const AUTH_PROVIDER_CREDENTIALS_MIGRATION = "0019_auth_provider_credentials";
 const EXECUTION_TRANSPORT_METADATA_MIGRATION =
   "0020_execution_transport_metadata";
 const HTTP_REDIRECTS_MIGRATION = "0021_http_redirects";
+const HTTP_COOKIES_MIGRATION = "0022_http_cookies";
+const ENVIRONMENT_COOKIE_JAR_SOURCE_MIGRATION =
+  "0023_environment_cookie_jar_source";
+const GLOBAL_COOKIE_CONCURRENCY_MIGRATION = "0024_global_cookie_concurrency";
 
 const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -578,6 +582,44 @@ export class SqliteDatabase {
     ) {
       this.#migrateHttpRedirects();
     }
+
+    const httpCookiesApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(HTTP_COOKIES_MIGRATION);
+    if (
+      httpCookiesApplied === undefined ||
+      !this.#columnExists("user_preferences", "cookie_policy_json") ||
+      !this.#columnExists("workspaces", "cookie_policy_json") ||
+      !this.#columnExists("request_drafts", "cookie_policy_json") ||
+      !this.#tableExists("cookie_jars") ||
+      !this.#tableExists("cookie_records") ||
+      !this.#tableExists("cookie_jar_waiters")
+    ) {
+      this.#migrateHttpCookies();
+    }
+
+    const environmentCookieJarSourceApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(ENVIRONMENT_COOKIE_JAR_SOURCE_MIGRATION);
+    if (
+      environmentCookieJarSourceApplied === undefined ||
+      !this.#columnExists("environments", "cookie_jar_source")
+    ) {
+      this.#migrateEnvironmentCookieJarSource();
+    }
+
+    const globalCookieConcurrencyApplied = this.#driver
+      .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+      .get(GLOBAL_COOKIE_CONCURRENCY_MIGRATION);
+    if (
+      globalCookieConcurrencyApplied === undefined ||
+      !this.#columnExists("user_preferences", "cookie_concurrency_mode") ||
+      !this.#columnExists("cookie_jar_waiters", "requested_mode") ||
+      !this.#columnExists("cookie_jar_waiters", "expires_at") ||
+      this.#columnExists("cookie_jars", "concurrency_mode")
+    ) {
+      this.#migrateGlobalCookieConcurrency();
+    }
   }
 
   /** Creates the ledger required to inspect migration state safely. */
@@ -627,6 +669,9 @@ export class SqliteDatabase {
         AUTH_PROVIDER_CREDENTIALS_MIGRATION,
         EXECUTION_TRANSPORT_METADATA_MIGRATION,
         HTTP_REDIRECTS_MIGRATION,
+        HTTP_COOKIES_MIGRATION,
+        ENVIRONMENT_COOKIE_JAR_SOURCE_MIGRATION,
+        GLOBAL_COOKIE_CONCURRENCY_MIGRATION,
       ].some((identifier) => !identifiers.has(identifier)) ||
       !this.#columnExists("request_drafts", "body_json") ||
       !this.#tableExists("request_attachments") ||
@@ -647,7 +692,18 @@ export class SqliteDatabase {
       !this.#columnExists("executions", "root_execution_id") ||
       !this.#columnExists("executions", "exchange_sequence") ||
       !this.#columnExists("executions", "redirect_json") ||
-      !this.#columnExists("executions", "outgoing_request_json")
+      !this.#columnExists("executions", "outgoing_request_json") ||
+      !this.#columnExists("user_preferences", "cookie_policy_json") ||
+      !this.#columnExists("workspaces", "cookie_policy_json") ||
+      !this.#columnExists("request_drafts", "cookie_policy_json") ||
+      !this.#tableExists("cookie_jars") ||
+      !this.#tableExists("cookie_records") ||
+      !this.#tableExists("cookie_jar_waiters") ||
+      !this.#columnExists("environments", "cookie_jar_source") ||
+      !this.#columnExists("user_preferences", "cookie_concurrency_mode") ||
+      !this.#columnExists("cookie_jar_waiters", "requested_mode") ||
+      !this.#columnExists("cookie_jar_waiters", "expires_at") ||
+      this.#columnExists("cookie_jars", "concurrency_mode")
     );
   }
 
@@ -1523,6 +1579,130 @@ export class SqliteDatabase {
         .get(HTTP_REDIRECTS_MIGRATION);
       if (applied === undefined)
         this.#recordMigration(HTTP_REDIRECTS_MIGRATION);
+    })();
+  }
+
+  /** Adds inherited cookie policy and workspace-owned cookie-jar storage. */
+  #migrateHttpCookies(): void {
+    this.#driver.transaction(() => {
+      if (!this.#columnExists("user_preferences", "cookie_policy_json")) {
+        this.#driver.exec(
+          "ALTER TABLE user_preferences ADD COLUMN cookie_policy_json TEXT NOT NULL DEFAULT '{\"enabled\":true}' CHECK(json_valid(cookie_policy_json))",
+        );
+      }
+      if (!this.#columnExists("workspaces", "cookie_policy_json")) {
+        this.#driver.exec(
+          "ALTER TABLE workspaces ADD COLUMN cookie_policy_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(cookie_policy_json))",
+        );
+      }
+      if (!this.#columnExists("request_drafts", "cookie_policy_json")) {
+        this.#driver.exec(
+          "ALTER TABLE request_drafts ADD COLUMN cookie_policy_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(cookie_policy_json))",
+        );
+      }
+      this.#driver.exec(`
+        CREATE TABLE IF NOT EXISTS cookie_jars (
+          id BLOB PRIMARY KEY CHECK(length(id) = 16),
+          workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          environment_id BLOB REFERENCES environments(id) ON DELETE CASCADE,
+          revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+          lease_owner_execution_id BLOB,
+          lease_fence INTEGER NOT NULL DEFAULT 0 CHECK(lease_fence >= 0),
+          lease_expires_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        ) STRICT;
+        CREATE UNIQUE INDEX IF NOT EXISTS cookie_jars_workspace_default
+          ON cookie_jars(workspace_id) WHERE environment_id IS NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS cookie_jars_environment
+          ON cookie_jars(environment_id) WHERE environment_id IS NOT NULL;
+
+        CREATE TABLE IF NOT EXISTS cookie_records (
+          id BLOB PRIMARY KEY CHECK(length(id) = 16),
+          jar_id BLOB NOT NULL REFERENCES cookie_jars(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          domain TEXT NOT NULL,
+          path TEXT NOT NULL,
+          host_only INTEGER NOT NULL CHECK(host_only IN (0, 1)),
+          secure INTEGER NOT NULL CHECK(secure IN (0, 1)),
+          http_only INTEGER NOT NULL CHECK(http_only IN (0, 1)),
+          same_site TEXT CHECK(same_site IN ('strict', 'lax', 'none')),
+          expires_at INTEGER,
+          session_only INTEGER NOT NULL CHECK(session_only IN (0, 1)),
+          metadata_json TEXT NOT NULL CHECK(json_valid(metadata_json)),
+          storage_format TEXT NOT NULL CHECK(storage_format = 'plaintext-v1'),
+          payload TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(jar_id, name, domain, path)
+        ) STRICT;
+        CREATE INDEX IF NOT EXISTS cookie_records_expiry
+          ON cookie_records(jar_id, expires_at);
+
+        CREATE TABLE IF NOT EXISTS cookie_jar_waiters (
+          jar_id BLOB NOT NULL REFERENCES cookie_jars(id) ON DELETE CASCADE,
+          execution_id BLOB NOT NULL CHECK(length(execution_id) = 16),
+          requested_mode TEXT NOT NULL DEFAULT 'optimistic' CHECK(requested_mode IN ('optimistic', 'serialized')),
+          enqueued_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          PRIMARY KEY(jar_id, execution_id)
+        ) WITHOUT ROWID, STRICT;
+        CREATE INDEX IF NOT EXISTS cookie_jar_waiters_order
+          ON cookie_jar_waiters(jar_id, enqueued_at, execution_id);
+      `);
+      const applied = this.#driver
+        .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+        .get(HTTP_COOKIES_MIGRATION);
+      if (applied === undefined) this.#recordMigration(HTTP_COOKIES_MIGRATION);
+    })();
+  }
+
+  /** Adds the per-environment choice between its own and workspace cookie jar. */
+  #migrateEnvironmentCookieJarSource(): void {
+    this.#driver.transaction(() => {
+      if (!this.#columnExists("environments", "cookie_jar_source")) {
+        this.#driver.exec(
+          "ALTER TABLE environments ADD COLUMN cookie_jar_source TEXT NOT NULL DEFAULT 'environment' CHECK(cookie_jar_source IN ('environment', 'workspace'))",
+        );
+      }
+      const applied = this.#driver
+        .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+        .get(ENVIRONMENT_COOKIE_JAR_SOURCE_MIGRATION);
+      if (applied === undefined) {
+        this.#recordMigration(ENVIRONMENT_COOKIE_JAR_SOURCE_MIGRATION);
+      }
+    })();
+  }
+
+  /** Moves cookie admission mode from individual jars to user execution defaults. */
+  #migrateGlobalCookieConcurrency(): void {
+    this.#driver.transaction(() => {
+      if (!this.#columnExists("user_preferences", "cookie_concurrency_mode")) {
+        this.#driver.exec(
+          "ALTER TABLE user_preferences ADD COLUMN cookie_concurrency_mode TEXT NOT NULL DEFAULT 'optimistic' CHECK(cookie_concurrency_mode IN ('optimistic', 'serialized'))",
+        );
+      }
+      if (!this.#columnExists("cookie_jar_waiters", "requested_mode")) {
+        this.#driver.exec(
+          "ALTER TABLE cookie_jar_waiters ADD COLUMN requested_mode TEXT NOT NULL DEFAULT 'optimistic' CHECK(requested_mode IN ('optimistic', 'serialized'))",
+        );
+      }
+      if (!this.#columnExists("cookie_jar_waiters", "expires_at")) {
+        this.#driver.exec(
+          "ALTER TABLE cookie_jar_waiters ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0",
+        );
+      }
+      if (this.#columnExists("cookie_jars", "concurrency_mode")) {
+        this.#driver.exec(
+          "ALTER TABLE cookie_jars DROP COLUMN concurrency_mode",
+        );
+      }
+      const applied = this.#driver
+        .prepare("SELECT id FROM schema_migrations WHERE id = ?")
+        .get(GLOBAL_COOKIE_CONCURRENCY_MIGRATION);
+      if (applied === undefined) {
+        this.#recordMigration(GLOBAL_COOKIE_CONCURRENCY_MIGRATION);
+      }
     })();
   }
 

@@ -1218,6 +1218,15 @@
             "$ref": "#/components/schemas/EnvironmentSelectCommand"
           },
           {
+            "$ref": "#/components/schemas/CookieJarGetCommand"
+          },
+          {
+            "$ref": "#/components/schemas/CookieJarDeleteCookieCommand"
+          },
+          {
+            "$ref": "#/components/schemas/CookieJarClearCommand"
+          },
+          {
             "$ref": "#/components/schemas/EnvironmentPreviewVariablesCommand"
           },
           {
@@ -1411,11 +1420,22 @@
               "payload": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["expectedRevision", "redirectPolicy"],
+                "required": [
+                  "expectedRevision",
+                  "redirectPolicy",
+                  "cookiePolicy",
+                  "cookieConcurrencyMode"
+                ],
                 "properties": {
                   "expectedRevision": { "type": "integer", "minimum": 0 },
                   "redirectPolicy": {
                     "$ref": "#/components/schemas/ResolvedRedirectPolicy"
+                  },
+                  "cookiePolicy": {
+                    "$ref": "#/components/schemas/ResolvedCookiePolicy"
+                  },
+                  "cookieConcurrencyMode": {
+                    "$ref": "#/components/schemas/CookieJarConcurrencyMode"
                   }
                 }
               }
@@ -1531,6 +1551,9 @@
                   },
                   "redirectPolicy": {
                     "$ref": "#/components/schemas/RedirectPolicyOverride"
+                  },
+                  "cookiePolicy": {
+                    "$ref": "#/components/schemas/CookiePolicyOverride"
                   },
                   "description": {
                     "type": "string",
@@ -1976,6 +1999,10 @@
                   "notes": {
                     "$ref": "#/components/schemas/ResourceNotes"
                   },
+                  "cookieJarSource": {
+                    "$ref": "#/components/schemas/EnvironmentCookieJarSource",
+                    "description": "Cookie partition used while this environment is selected. Omission defaults to the environment's own jar."
+                  },
                   "variables": {
                     "type": "array",
                     "items": {
@@ -2049,6 +2076,10 @@
                   "notes": {
                     "$ref": "#/components/schemas/ResourceNotes"
                   },
+                  "cookieJarSource": {
+                    "$ref": "#/components/schemas/EnvironmentCookieJarSource",
+                    "description": "Cookie partition used while this environment is selected. Omission preserves the current source."
+                  },
                   "variables": {
                     "type": "array",
                     "items": {
@@ -2110,6 +2141,98 @@
                       { "type": "null" }
                     ]
                   }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CookieJarGetCommand": {
+        "description": "Loads one explicitly identified workspace-owned cookie partition.",
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "cookie_jar.get" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["workspaceId", "environmentId"],
+                "properties": {
+                  "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+                  "environmentId": {
+                    "oneOf": [
+                      { "$ref": "#/components/schemas/EnvironmentId" },
+                      { "type": "null" }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CookieJarDeleteCookieCommand": {
+        "description": "Deletes one stored cookie without accepting replacement credential data.",
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "cookie_jar.delete_cookie" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "workspaceId",
+                  "environmentId",
+                  "cookieId",
+                  "expectedRevision"
+                ],
+                "properties": {
+                  "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+                  "environmentId": {
+                    "oneOf": [
+                      { "$ref": "#/components/schemas/EnvironmentId" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "cookieId": { "$ref": "#/components/schemas/UuidV7" },
+                  "expectedRevision": { "type": "integer", "minimum": 0 }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CookieJarClearCommand": {
+        "description": "Clears session cookies or every cookie in one shared partition.",
+        "allOf": [
+          { "$ref": "#/components/schemas/CommandEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "const": "cookie_jar.clear" },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "workspaceId",
+                  "environmentId",
+                  "expectedRevision",
+                  "scope"
+                ],
+                "properties": {
+                  "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+                  "environmentId": {
+                    "oneOf": [
+                      { "$ref": "#/components/schemas/EnvironmentId" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "expectedRevision": { "type": "integer", "minimum": 0 },
+                  "scope": { "type": "string", "enum": ["session", "all"] }
                 }
               }
             }
@@ -2930,6 +3053,9 @@
                   "redirectPolicy": {
                     "$ref": "#/components/schemas/RedirectPolicyOverride"
                   },
+                  "cookiePolicy": {
+                    "$ref": "#/components/schemas/CookiePolicyOverride"
+                  },
                   "variables": {
                     "type": "array",
                     "items": { "$ref": "#/components/schemas/VariableWrite" }
@@ -3219,6 +3345,9 @@
                   "redirectPolicy": {
                     "$ref": "#/components/schemas/RedirectPolicyOverride"
                   },
+                  "cookiePolicy": {
+                    "$ref": "#/components/schemas/CookiePolicyOverride"
+                  },
                   "variableProfile": {
                     "$ref": "#/components/schemas/RequestVariableProfileUpdate"
                   },
@@ -3413,6 +3542,7 @@
         "anyOf": [
           { "$ref": "#/components/schemas/UserPreferencesView" },
           { "$ref": "#/components/schemas/WorkspaceView" },
+          { "$ref": "#/components/schemas/CookieJarView" },
           { "$ref": "#/components/schemas/EnvironmentListView" },
           { "$ref": "#/components/schemas/EnvironmentView" },
           { "$ref": "#/components/schemas/VariableProfileView" },
@@ -3507,13 +3637,121 @@
           }
         }
       },
+      "CookiePolicyOverride": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean" }
+        }
+      },
+      "ResolvedCookiePolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["enabled"],
+        "properties": {
+          "enabled": { "type": "boolean" }
+        }
+      },
+      "CookieJarConcurrencyMode": {
+        "type": "string",
+        "enum": ["optimistic", "serialized"]
+      },
+      "EnvironmentCookieJarSource": {
+        "type": "string",
+        "enum": ["environment", "workspace"]
+      },
+      "CookieView": {
+        "description": "A visible credential record in an authorized shared jar management view.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cookieId",
+          "name",
+          "value",
+          "domain",
+          "path",
+          "hostOnly",
+          "secure",
+          "httpOnly",
+          "sameSite",
+          "expiresAt",
+          "session",
+          "extensions",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "cookieId": { "$ref": "#/components/schemas/UuidV7" },
+          "name": { "type": "string" },
+          "value": { "type": "string" },
+          "domain": { "type": "string" },
+          "path": { "type": "string" },
+          "hostOnly": { "type": "boolean" },
+          "secure": { "type": "boolean" },
+          "httpOnly": { "type": "boolean" },
+          "sameSite": {
+            "oneOf": [
+              { "type": "string", "enum": ["strict", "lax", "none"] },
+              { "type": "null" }
+            ]
+          },
+          "expiresAt": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/UtcDateTime" },
+              { "type": "null" }
+            ]
+          },
+          "session": { "type": "boolean" },
+          "extensions": { "type": "array", "items": { "type": "string" } },
+          "createdAt": { "$ref": "#/components/schemas/UtcDateTime" },
+          "updatedAt": { "$ref": "#/components/schemas/UtcDateTime" }
+        }
+      },
+      "CookieJarView": {
+        "description": "An explicitly identified environment or workspace-default cookie partition.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "jarId",
+          "workspaceId",
+          "environmentId",
+          "revision",
+          "cookies"
+        ],
+        "properties": {
+          "jarId": { "$ref": "#/components/schemas/UuidV7" },
+          "workspaceId": { "$ref": "#/components/schemas/WorkspaceId" },
+          "environmentId": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/EnvironmentId" },
+              { "type": "null" }
+            ]
+          },
+          "revision": { "type": "integer", "minimum": 0 },
+          "cookies": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CookieView" }
+          }
+        }
+      },
       "UserPreferencesView": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["redirectPolicy", "revision"],
+        "required": [
+          "redirectPolicy",
+          "cookiePolicy",
+          "cookieConcurrencyMode",
+          "revision"
+        ],
         "properties": {
           "redirectPolicy": {
             "$ref": "#/components/schemas/ResolvedRedirectPolicy"
+          },
+          "cookiePolicy": {
+            "$ref": "#/components/schemas/ResolvedCookiePolicy"
+          },
+          "cookieConcurrencyMode": {
+            "$ref": "#/components/schemas/CookieJarConcurrencyMode"
           },
           "revision": { "type": "integer", "minimum": 0 }
         }
@@ -3547,6 +3785,7 @@
           "baseUrl",
           "headers",
           "redirectPolicy",
+          "cookiePolicy",
           "revision"
         ],
         "properties": {
@@ -3574,6 +3813,9 @@
           },
           "redirectPolicy": {
             "$ref": "#/components/schemas/RedirectPolicyOverride"
+          },
+          "cookiePolicy": {
+            "$ref": "#/components/schemas/CookiePolicyOverride"
           },
           "revision": {
             "type": "integer",
@@ -3960,6 +4202,7 @@
           "name",
           "description",
           "notes",
+          "cookieJarSource",
           "revision",
           "includedEnvironments",
           "variables",
@@ -3973,6 +4216,9 @@
             "$ref": "#/components/schemas/ResourceDescription"
           },
           "notes": { "$ref": "#/components/schemas/ResourceNotes" },
+          "cookieJarSource": {
+            "$ref": "#/components/schemas/EnvironmentCookieJarSource"
+          },
           "revision": { "type": "integer", "minimum": 0 },
           "includedEnvironments": {
             "type": "array",
@@ -4228,6 +4474,7 @@
           "preRequestScript",
           "postResponseScript",
           "redirectPolicy",
+          "cookiePolicy",
           "draftRevision"
         ],
         "properties": {
@@ -4309,6 +4556,9 @@
           },
           "redirectPolicy": {
             "$ref": "#/components/schemas/RedirectPolicyOverride"
+          },
+          "cookiePolicy": {
+            "$ref": "#/components/schemas/CookiePolicyOverride"
           },
           "capturedExchange": {
             "$ref": "#/components/schemas/CapturedExchangeView"
@@ -4543,6 +4793,9 @@
           },
           "effectiveRedirectPolicy": {
             "$ref": "#/components/schemas/ResolvedRedirectPolicy"
+          },
+          "effectiveCookiePolicy": {
+            "$ref": "#/components/schemas/ResolvedCookiePolicy"
           },
           "redirect": {
             "$ref": "#/components/schemas/ExecutionRedirectResult"
@@ -4862,6 +5115,9 @@
           },
           "redirectPolicy": {
             "$ref": "#/components/schemas/RedirectPolicyOverride"
+          },
+          "cookiePolicy": {
+            "$ref": "#/components/schemas/CookiePolicyOverride"
           }
         }
       },

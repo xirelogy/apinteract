@@ -46,6 +46,8 @@ import type {
   VariableWrite,
   RedirectPolicyOverride,
   ResolvedRedirectPolicy,
+  CookiePolicyOverride,
+  ResolvedCookiePolicy,
 } from "@/model/contracts/backend";
 import type {
   RequestDraftInput,
@@ -113,6 +115,8 @@ const props = withDefaults(
       readonly follow: "userDefaults" | "workspace";
       readonly maxRedirects: "userDefaults" | "workspace";
     };
+    inheritedCookiePolicy?: ResolvedCookiePolicy;
+    inheritedCookiePolicySource?: "userDefaults" | "workspace";
   }>(),
   {
     inheritedTarget: "",
@@ -135,6 +139,8 @@ const props = withDefaults(
       follow: "userDefaults",
       maxRedirects: "userDefaults",
     }),
+    inheritedCookiePolicy: () => ({ enabled: true }),
+    inheritedCookiePolicySource: "userDefaults",
   },
 );
 const i18n = useI18n();
@@ -214,6 +220,7 @@ const preRequestScript = ref("");
 const postResponseScript = ref("");
 const redirectFollow = ref<"inherit" | "follow" | "manual">("inherit");
 const maximumRedirects = ref("");
+const cookieBehavior = ref<"inherit" | "enabled" | "disabled">("inherit");
 const activeTab = ref<(typeof requestTabs)[number]>("query");
 const versionName = ref("");
 const requestVariableCount = ref<number | null>(null);
@@ -256,6 +263,13 @@ watch(
           : "manual";
     maximumRedirects.value =
       policy.maxRedirects === undefined ? "" : String(policy.maxRedirects);
+    const cookiePolicy = source?.cookiePolicy ?? {};
+    cookieBehavior.value =
+      cookiePolicy.enabled === undefined
+        ? "inherit"
+        : cookiePolicy.enabled
+          ? "enabled"
+          : "disabled";
   },
   { immediate: true },
 );
@@ -337,6 +351,24 @@ const redirectPolicy = computed<RedirectPolicyOverride>(() => ({
     ? {}
     : { maxRedirects: Number(maximumRedirects.value) }),
 }));
+const cookieBehaviorOptions = computed(() => [
+  {
+    value: "inherit",
+    label: t("cookies.inherit", {
+      source: t(`redirects.source.${props.inheritedCookiePolicySource}`),
+      value: props.inheritedCookiePolicy.enabled
+        ? t("cookies.enabled")
+        : t("cookies.disabled"),
+    }),
+  },
+  { value: "enabled", label: t("cookies.enabled") },
+  { value: "disabled", label: t("cookies.disabled") },
+]);
+const cookiePolicy = computed<CookiePolicyOverride>(() =>
+  cookieBehavior.value === "inherit"
+    ? {}
+    : { enabled: cookieBehavior.value === "enabled" },
+);
 const maximumRedirectsValid = computed(
   () =>
     maximumRedirects.value.trim() === "" ||
@@ -710,6 +742,7 @@ function currentDraft(): RequestDraftInput {
     preRequestScript: preRequestScript.value,
     postResponseScript: postResponseScript.value,
     redirectPolicy: redirectPolicy.value,
+    cookiePolicy: cookiePolicy.value,
   };
 }
 
@@ -736,6 +769,14 @@ function selectTargetMode(value: string): void {
 function selectRedirectFollow(value: string): void {
   if (value === "inherit" || value === "follow" || value === "manual") {
     redirectFollow.value = value;
+    emitChange();
+  }
+}
+
+/** Applies one validated request-level cookie behavior override. */
+function selectCookieBehavior(value: string): void {
+  if (value === "inherit" || value === "enabled" || value === "disabled") {
+    cookieBehavior.value = value;
     emitChange();
   }
 }
@@ -780,7 +821,9 @@ function requestTabLabel(tab: (typeof requestTabs)[number]): string {
 function requestTabHasContent(tab: (typeof requestTabs)[number]): boolean {
   if (tab === "settings") {
     return (
-      redirectFollow.value !== "inherit" || maximumRedirects.value.trim() !== ""
+      redirectFollow.value !== "inherit" ||
+      maximumRedirects.value.trim() !== "" ||
+      cookieBehavior.value !== "inherit"
     );
   }
   if (tab === "body") return bodyHasContent.value;
@@ -1449,6 +1492,20 @@ function resizePanesByKeyboard(event: KeyboardEvent): void {
                   :invalid="invalid"
                   :disabled="editorDisabled"
                   @input="emitChange"
+                />
+              </FormField>
+            </section>
+            <section class="redirect-settings">
+              <h3>{{ t("cookies.heading") }}</h3>
+              <FormField v-slot="{ controlId }" :label="t('cookies.behavior')">
+                <SelectMenu
+                  :input-id="controlId"
+                  :model-value="cookieBehavior"
+                  :options="cookieBehaviorOptions"
+                  :label="t('cookies.behavior')"
+                  density="compact"
+                  :disabled="editorDisabled"
+                  @update:model-value="selectCookieBehavior"
                 />
               </FormField>
             </section>

@@ -465,6 +465,13 @@ describe("WorkspacePropertiesDialog", () => {
         canEdit: true,
         canDelete: true,
         busy: false,
+        cookieJar: {
+          jarId: "019fb000-0000-7000-8000-000000000001",
+          workspaceId,
+          environmentId: null,
+          revision: 0,
+          cookies: [],
+        },
       },
       global: { plugins: [i18n] },
     });
@@ -478,6 +485,20 @@ describe("WorkspacePropertiesDialog", () => {
     const saveButton = wrapper.get('button[aria-label="Save"]');
     expect(saveButton.attributes("form")).toBe("workspace-properties-form");
     expect(saveButton.classes()).toContain("primary-button");
+    const cookiesTab = wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text().includes("Cookies"));
+    await cookiesTab?.trigger("click");
+    expect(wrapper.emitted("loadCookies")).toEqual([[]]);
+    expect(wrapper.get(".cookie-jar-panel").attributes("aria-label")).toBe(
+      "Cookie jar content",
+    );
+    expect(wrapper.get(".cookie-jar-panel h3").text()).toBe(
+      "Cookie jar content",
+    );
+    expect(wrapper.get(".cookie-properties-section").text()).not.toContain(
+      "HTTP cookies",
+    );
 
     await vi.advanceTimersByTimeAsync(150);
     expect(wrapper.emitted("preview")).toEqual([[["host"]]]);
@@ -585,6 +606,7 @@ describe("WorkspacePropertiesDialog", () => {
           },
         ],
         [{ name: "team", kind: "value", value: "platform" }],
+        {},
         {},
       ],
     ]);

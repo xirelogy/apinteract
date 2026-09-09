@@ -17,6 +17,10 @@ are documented in the [backend configuration reference](configuration.md).
   reporting, exact response-body transfer, and execution-scoped certificate
   download.
 - WebSocket provides authenticated commands, replies, and execution events.
+- Cookie-jar WebSocket commands explicitly address a workspace-default or
+  environment partition and expose its delete and clear controls. Cookie
+  concurrency is a user execution default rather than jar state. Values are
+  returned only after workspace authorization and never enter the proxy API.
 - The backend sends a native WebSocket ping every 25 seconds and expects a
   pong, keeping idle connections alive through common ingress timeouts and
   terminating peers that no longer respond.

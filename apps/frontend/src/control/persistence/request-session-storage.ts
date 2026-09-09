@@ -601,6 +601,7 @@ function normalizeRequestDraft(draft: RequestDraftInput): RequestDraftInput {
     description: compatible.description ?? "",
     notes: compatible.notes ?? "",
     redirectPolicy: compatible.redirectPolicy ?? {},
+    cookiePolicy: compatible.cookiePolicy ?? {},
   };
 }
 
@@ -612,12 +613,14 @@ function normalizeWorkspacePropertiesDraft(
     readonly description?: string;
     readonly notes?: string;
     readonly redirectPolicy?: WorkspacePropertiesDraft["redirectPolicy"];
+    readonly cookiePolicy?: WorkspacePropertiesDraft["cookiePolicy"];
   };
   return {
     ...draft,
     description: compatible.description ?? "",
     notes: compatible.notes ?? "",
     redirectPolicy: compatible.redirectPolicy ?? {},
+    cookiePolicy: compatible.cookiePolicy ?? {},
   };
 }
 
@@ -641,11 +644,13 @@ function normalizeEnvironmentDraft(draft: EnvironmentDraft): EnvironmentDraft {
   const compatible = draft as EnvironmentDraft & {
     readonly description?: string;
     readonly notes?: string;
+    readonly cookieJarSource?: "environment" | "workspace";
   };
   return {
     ...draft,
     description: compatible.description ?? "",
     notes: compatible.notes ?? "",
+    cookieJarSource: compatible.cookieJarSource ?? "environment",
   };
 }
 
@@ -797,7 +802,9 @@ function isWorkspacePropertiesDraft(
     isFieldArray(value.headers) &&
     isVariableWriteArray(value.variables) &&
     (value.redirectPolicy === undefined ||
-      isRedirectPolicyOverride(value.redirectPolicy))
+      isRedirectPolicyOverride(value.redirectPolicy)) &&
+    (value.cookiePolicy === undefined ||
+      isCookiePolicyOverride(value.cookiePolicy))
   );
 }
 
@@ -825,6 +832,9 @@ function isEnvironmentDraft(value: unknown): value is EnvironmentDraft {
     (value.description === undefined ||
       typeof value.description === "string") &&
     (value.notes === undefined || typeof value.notes === "string") &&
+    (value.cookieJarSource === undefined ||
+      value.cookieJarSource === "environment" ||
+      value.cookieJarSource === "workspace") &&
     isVariableWriteArray(value.variables) &&
     Array.isArray(value.includedEnvironmentIds) &&
     value.includedEnvironmentIds.every((id) => typeof id === "string")
@@ -862,7 +872,9 @@ function isRequestDraft(value: unknown): value is RequestDraftInput {
     typeof value.preRequestScript === "string" &&
     typeof value.postResponseScript === "string" &&
     (value.redirectPolicy === undefined ||
-      isRedirectPolicyOverride(value.redirectPolicy))
+      isRedirectPolicyOverride(value.redirectPolicy)) &&
+    (value.cookiePolicy === undefined ||
+      isCookiePolicyOverride(value.cookiePolicy))
   );
 }
 
@@ -877,6 +889,15 @@ function isRedirectPolicyOverride(value: unknown): boolean {
       (Number.isInteger(value.maxRedirects) &&
         Number(value.maxRedirects) >= 0 &&
         Number(value.maxRedirects) <= 50))
+  );
+}
+
+/** Validates one independently inheritable cookie toggle from local storage. */
+function isCookiePolicyOverride(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    Object.keys(value).every((key) => key === "enabled") &&
+    (value.enabled === undefined || typeof value.enabled === "boolean")
   );
 }
 

@@ -8,6 +8,8 @@ import { useApplicationController } from "@/app/dependencies";
 import { useApplicationStore } from "@/control/state/application-store";
 import type {
   ExecutionView,
+  CookieJarView,
+  CookiePolicyOverride,
   RequestAttachment,
   RequestField,
   RequestView,
@@ -54,6 +56,8 @@ const pendingBulkTabClose = ref<{
   readonly runningCount: number;
 } | null>(null);
 const importDialogOpen = ref(false);
+const activeCookieJar = ref<CookieJarView | null>(null);
+let cookieJarLoadSequence = 0;
 const requestDuplicateTarget = ref<{
   readonly requestId: string;
   readonly name: string;
@@ -109,6 +113,18 @@ const inheritedRedirectPolicySources = computed(() => ({
       ? ("userDefaults" as const)
       : ("workspace" as const),
 }));
+const inheritedCookiePolicy = computed(() => ({
+  enabled:
+    selectedWorkspace.value?.cookiePolicy?.enabled ??
+    userPreferences.value?.cookiePolicy.enabled ??
+    true,
+}));
+const inheritedCookiePolicySource = computed<"userDefaults" | "workspace">(
+  () =>
+    selectedWorkspace.value?.cookiePolicy?.enabled === undefined
+      ? "userDefaults"
+      : "workspace",
+);
 const activeTab = computed(
   () =>
     requestTabs.value.find(
@@ -684,6 +700,7 @@ async function saveWorkspaceProperties(
   headers: readonly RequestField[],
   variables: readonly VariableWrite[],
   redirectPolicy: RedirectPolicyOverride,
+  cookiePolicy: CookiePolicyOverride,
 ): Promise<void> {
   controller.updateWorkspacePropertiesDraft(tabId, {
     name,
@@ -693,6 +710,7 @@ async function saveWorkspaceProperties(
     headers,
     variables,
     redirectPolicy,
+    cookiePolicy,
   });
   await controller.saveWorkspacePropertiesTab(tabId);
 }
@@ -706,6 +724,7 @@ function saveActiveWorkspaceProperties(
   headers: readonly RequestField[],
   variables: readonly VariableWrite[],
   redirectPolicy: RedirectPolicyOverride,
+  cookiePolicy: CookiePolicyOverride,
 ): void {
   const tab = activeResourceTab.value;
   if (tab?.kind === "workspace") {
@@ -718,8 +737,36 @@ function saveActiveWorkspaceProperties(
       headers,
       variables,
       redirectPolicy,
+      cookiePolicy,
     );
   }
+}
+
+/** Loads one cookie partition for the properties surface that owns it. */
+async function loadCookieJar(environmentId: string | null): Promise<void> {
+  const workspaceId = selectedWorkspaceId.value;
+  if (workspaceId === null) return;
+  const sequence = ++cookieJarLoadSequence;
+  const jar = await controller.loadCookieJar(workspaceId, environmentId);
+  if (sequence === cookieJarLoadSequence) activeCookieJar.value = jar;
+}
+
+/** Deletes one cookie from the active shared partition. */
+async function deleteCookie(cookieId: string): Promise<void> {
+  if (activeCookieJar.value === null) return;
+  activeCookieJar.value = await controller.deleteCookie(
+    activeCookieJar.value,
+    cookieId,
+  );
+}
+
+/** Clears the requested subset of the active shared partition. */
+async function clearCookieJar(scope: "session" | "all"): Promise<void> {
+  if (activeCookieJar.value === null) return;
+  activeCookieJar.value = await controller.clearCookieJar(
+    activeCookieJar.value,
+    scope,
+  );
 }
 
 /** Saves the active collection editor without relying on template narrowing. */
@@ -1014,6 +1061,8 @@ function discardActiveResourceTab(): void {
             :busy="busy"
             :recovery-warning="activeResourceTab.omittedSecretValues ?? false"
             :user-redirect-policy="userPreferences?.redirectPolicy"
+            :user-cookie-policy="userPreferences?.cookiePolicy"
+            :cookie-jar="activeCookieJar"
             @change="
               controller.updateWorkspacePropertiesDraft(
                 activeResourceTab.tabId,
@@ -1027,6 +1076,9 @@ function discardActiveResourceTab(): void {
               })
             "
             @save="saveActiveWorkspaceProperties"
+            @load-cookies="loadCookieJar(null)"
+            @delete-cookie="deleteCookie"
+            @clear-cookies="clearCookieJar"
             @delete="deleteWorkspace"
           />
           <CollectionPropertiesDialog
@@ -1063,11 +1115,15 @@ function discardActiveResourceTab(): void {
             :show-toolbar="false"
             :can-edit="canEditWorkspace"
             :busy="busy"
+            :cookie-jar="activeCookieJar"
             @change="
               (tabId, draft) => controller.updateEnvironmentDraft(tabId, draft)
             "
             @save-editor="saveEnvironmentEditor"
             @delete="deleteEnvironment"
+            @load-cookies="loadCookieJar"
+            @delete-cookie="deleteCookie"
+            @clear-cookies="clearCookieJar"
           />
           <RequestEditor
             v-else
@@ -1095,6 +1151,8 @@ function discardActiveResourceTab(): void {
             :download-transport-certificate="downloadTransportCertificate"
             :inherited-redirect-policy="inheritedRedirectPolicy"
             :inherited-redirect-policy-sources="inheritedRedirectPolicySources"
+            :inherited-cookie-policy="inheritedCookiePolicy"
+            :inherited-cookie-policy-source="inheritedCookiePolicySource"
             @change="updateActiveRequestDraft"
             @save="saveRequest"
             @execute="executeRequest"

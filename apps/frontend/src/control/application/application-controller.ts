@@ -19,6 +19,7 @@ import type {
   ImportProviderId,
   ImportProvidersView,
   ImportedRequest,
+  EnvironmentCookieJarSource,
   EnvironmentListView,
   EnvironmentVariableWrite,
   EnvironmentView,
@@ -42,6 +43,10 @@ import type {
   WorkspaceView,
   RedirectPolicyOverride,
   ResolvedRedirectPolicy,
+  CookiePolicyOverride,
+  ResolvedCookiePolicy,
+  CookieJarView,
+  CookieJarConcurrencyMode,
   UserPreferencesView,
 } from "@/model/contracts/backend";
 import { useApplicationStore } from "@/control/state/application-store";
@@ -186,9 +191,24 @@ export class ApplicationController {
     });
   }
 
-  /** Saves complete user redirect defaults with optimistic concurrency. */
+  /** Saves redirect defaults while preserving the current cookie preference. */
   async updateUserRedirectPolicy(
     redirectPolicy: ResolvedRedirectPolicy,
+  ): Promise<UserPreferencesView> {
+    const current = useApplicationStore().userPreferences;
+    if (current === null) throw new Error("User preferences are unavailable");
+    return this.updateUserPreferences(
+      redirectPolicy,
+      current.cookiePolicy,
+      current.cookieConcurrencyMode,
+    );
+  }
+
+  /** Saves complete user HTTP defaults with optimistic concurrency. */
+  async updateUserPreferences(
+    redirectPolicy: ResolvedRedirectPolicy,
+    cookiePolicy: ResolvedCookiePolicy,
+    cookieConcurrencyMode: CookieJarConcurrencyMode,
   ): Promise<UserPreferencesView> {
     return this.#run(async () => {
       const current = useApplicationStore().userPreferences;
@@ -198,6 +218,8 @@ export class ApplicationController {
         {
           expectedRevision: current.revision,
           redirectPolicy,
+          cookiePolicy,
+          cookieConcurrencyMode,
         },
       );
       useApplicationStore().userPreferences = preferences;
@@ -796,6 +818,7 @@ export class ApplicationController {
       tab.draft.baseUrl,
       tab.draft.headers,
       tab.draft.redirectPolicy,
+      tab.draft.cookiePolicy,
       tab.variableProfile.revision,
       tab.draft.variables,
     );
@@ -824,6 +847,7 @@ export class ApplicationController {
     baseUrl: string,
     headers: readonly RequestField[],
     redirectPolicy: RedirectPolicyOverride,
+    cookiePolicy: CookiePolicyOverride,
     expectedVariableRevision: number,
     variables: readonly VariableWrite[],
   ): Promise<{ workspace: WorkspaceView; profile: VariableProfileView }> {
@@ -839,6 +863,7 @@ export class ApplicationController {
           baseUrl,
           headers,
           redirectPolicy,
+          cookiePolicy,
         },
       );
       const store = useApplicationStore();
@@ -934,6 +959,49 @@ export class ApplicationController {
       store.selectedEnvironmentId = result.selectedEnvironmentId;
       await this.#refreshVariablePreviews();
     });
+  }
+
+  /** Loads one explicitly identified workspace-owned cookie jar. */
+  async loadCookieJar(
+    workspaceId: string,
+    environmentId: string | null,
+  ): Promise<CookieJarView> {
+    return this.#run(() =>
+      this.#webSocket.command<CookieJarView>("cookie_jar.get", {
+        workspaceId,
+        environmentId,
+      }),
+    );
+  }
+
+  /** Deletes one cookie from the displayed shared partition. */
+  async deleteCookie(
+    jar: CookieJarView,
+    cookieId: string,
+  ): Promise<CookieJarView> {
+    return this.#run(() =>
+      this.#webSocket.command<CookieJarView>("cookie_jar.delete_cookie", {
+        workspaceId: jar.workspaceId,
+        environmentId: jar.environmentId,
+        cookieId,
+        expectedRevision: jar.revision,
+      }),
+    );
+  }
+
+  /** Clears session-only or all cookies from the displayed shared partition. */
+  async clearCookieJar(
+    jar: CookieJarView,
+    scope: "session" | "all",
+  ): Promise<CookieJarView> {
+    return this.#run(() =>
+      this.#webSocket.command<CookieJarView>("cookie_jar.clear", {
+        workspaceId: jar.workspaceId,
+        environmentId: jar.environmentId,
+        expectedRevision: jar.revision,
+        scope,
+      }),
+    );
   }
 
   /** Refreshes redacted resolution hints for an explicit or active request scope. */
@@ -1104,6 +1172,7 @@ export class ApplicationController {
           name: "",
           description: "",
           notes: "",
+          cookieJarSource: "environment",
           variables: [],
           includedEnvironmentIds: [],
         },
@@ -1152,6 +1221,7 @@ export class ApplicationController {
             tab.draft.notes,
             tab.draft.variables,
             tab.draft.includedEnvironmentIds,
+            tab.draft.cookieJarSource,
           )
         : await this.updateEnvironment(
             tab.environment.environmentId,
@@ -1161,6 +1231,7 @@ export class ApplicationController {
             tab.draft.notes,
             tab.draft.variables,
             tab.draft.includedEnvironmentIds,
+            tab.draft.cookieJarSource,
           );
     const draft = environmentDraft(environment);
     this.#updateResourceTab(tabId, (current) =>
@@ -1195,6 +1266,7 @@ export class ApplicationController {
     notes: string,
     variables: readonly EnvironmentVariableWrite[],
     includedEnvironmentIds: readonly string[],
+    cookieJarSource: EnvironmentCookieJarSource,
   ): Promise<EnvironmentView> {
     const store = useApplicationStore();
     const workspaceId = requireSelection(store.selectedWorkspaceId);
@@ -1208,6 +1280,7 @@ export class ApplicationController {
           notes,
           variables,
           includedEnvironmentIds,
+          cookieJarSource,
         },
       );
       await this.#reloadEnvironments(workspaceId);
@@ -1226,6 +1299,7 @@ export class ApplicationController {
     notes: string,
     variables: readonly EnvironmentVariableWrite[],
     includedEnvironmentIds: readonly string[],
+    cookieJarSource: EnvironmentCookieJarSource,
   ): Promise<EnvironmentView> {
     const store = useApplicationStore();
     const workspaceId = requireSelection(store.selectedWorkspaceId);
@@ -1240,6 +1314,7 @@ export class ApplicationController {
           notes,
           variables,
           includedEnvironmentIds,
+          cookieJarSource,
         },
       );
       await this.#reloadEnvironments(workspaceId);
@@ -3045,6 +3120,7 @@ function emptyDraft(
     preRequestScript: "",
     postResponseScript: "",
     redirectPolicy: {},
+    cookiePolicy: {},
   };
 }
 
@@ -3069,6 +3145,7 @@ function requestToDraft(request: RequestView): RequestDraftInput {
     preRequestScript: request.preRequestScript,
     postResponseScript: request.postResponseScript,
     redirectPolicy: request.redirectPolicy ?? {},
+    cookiePolicy: request.cookiePolicy ?? {},
   };
 }
 
@@ -3147,6 +3224,7 @@ function workspacePropertiesDraft(
     baseUrl: workspace.baseUrl,
     headers: workspace.headers.map((header) => ({ ...header })),
     redirectPolicy: { ...(workspace.redirectPolicy ?? {}) },
+    cookiePolicy: { ...(workspace.cookiePolicy ?? {}) },
     variables: variableViewsToWrites(profile.variables),
   };
 }
@@ -3159,6 +3237,7 @@ function cloneWorkspacePropertiesDraft(
     ...draft,
     headers: draft.headers.map((header) => ({ ...header })),
     redirectPolicy: { ...draft.redirectPolicy },
+    cookiePolicy: { ...draft.cookiePolicy },
     variables: cloneVariableWrites(draft.variables),
   };
 }
@@ -3195,6 +3274,7 @@ function environmentDraft(environment: EnvironmentView): EnvironmentDraft {
     name: environment.name,
     description: environment.description,
     notes: environment.notes,
+    cookieJarSource: environment.cookieJarSource,
     variables: environment.variables.map((variable) => {
       const common = {
         variableId: variable.variableId,
@@ -3224,6 +3304,7 @@ function cloneEnvironmentDraft(draft: EnvironmentDraft): EnvironmentDraft {
     name: draft.name,
     description: draft.description,
     notes: draft.notes,
+    cookieJarSource: draft.cookieJarSource,
     variables: draft.variables.map((variable) => ({ ...variable })),
     includedEnvironmentIds: [...draft.includedEnvironmentIds],
   };
@@ -3314,6 +3395,7 @@ function executableDraft(draft: RequestDraftInput) {
     preRequestScript: draft.preRequestScript,
     postResponseScript: draft.postResponseScript,
     redirectPolicy: draft.redirectPolicy ?? {},
+    cookiePolicy: draft.cookiePolicy ?? {},
   };
 }
 

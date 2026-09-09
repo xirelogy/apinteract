@@ -4,6 +4,15 @@ import { sql, type Kysely, type Transaction } from "kysely";
 
 import type { AuditService } from "../audit/audit-service.js";
 import {
+  parseCookiePolicyOverride,
+  resolveCookieConcurrencyMode,
+  resolveCookiePolicy,
+  validateCookiePolicyOverride,
+  type CookieConcurrencyMode,
+  type CookiePolicyOverride,
+  type ResolvedCookiePolicy,
+} from "../cookies/cookie-policy.js";
+import {
   validateFieldDescription,
   validateResourceDescription,
   validateResourceNotes,
@@ -167,6 +176,7 @@ export interface RequestView {
   readonly preRequestScript: string;
   readonly postResponseScript: string;
   readonly redirectPolicy: RedirectPolicyOverride;
+  readonly cookiePolicy: CookiePolicyOverride;
   readonly draftRevision: number;
   /** Latest recorded import response, which is not an APInteract execution. */
   readonly capturedExchange?: CapturedExchangeView;
@@ -197,6 +207,7 @@ export interface RequestExecutionInput {
   readonly preRequestScript?: string;
   readonly postResponseScript?: string;
   readonly redirectPolicy?: RedirectPolicyOverride;
+  readonly cookiePolicy?: CookiePolicyOverride;
 }
 
 /** Carries an optional request-variable mutation within a request save. */
@@ -211,6 +222,7 @@ export interface RequestCreationOptions {
   readonly description?: string;
   readonly notes?: string;
   readonly redirectPolicy?: RedirectPolicyOverride;
+  readonly cookiePolicy?: CookiePolicyOverride;
 }
 
 /** Identifies one collection and its parent created by a provider import. */
@@ -274,6 +286,10 @@ export interface PreparedExecution {
   readonly materialized: boolean;
   readonly createdAt: number;
   readonly redirectPolicy: ResolvedRedirectPolicy;
+  readonly cookiePolicy: ResolvedCookiePolicy;
+  readonly cookieConcurrencyMode: CookieConcurrencyMode;
+  /** Selects the workspace-default jar when null. */
+  readonly cookieJarEnvironmentId: EntityId | null;
 }
 
 /** Represents the persistence projection required to build a request view. */
@@ -295,6 +311,7 @@ interface RequestRow {
   readonly pre_request_script: string;
   readonly post_response_script: string;
   readonly redirect_policy_json: string;
+  readonly cookie_policy_json: string;
   readonly draft_revision: number;
   readonly order_revision: number;
 }
@@ -318,6 +335,7 @@ interface RevisionContent {
   readonly preRequestScript: string;
   readonly postResponseScript: string;
   readonly redirectPolicy: RedirectPolicyOverride;
+  readonly cookiePolicy: CookiePolicyOverride;
 }
 
 /** Represents the persistence projection required to build a collection view. */
@@ -1018,6 +1036,9 @@ export class RequestService {
       ...(options.redirectPolicy === undefined
         ? {}
         : { redirectPolicy: options.redirectPolicy }),
+      ...(options.cookiePolicy === undefined
+        ? {}
+        : { cookiePolicy: options.cookiePolicy }),
     });
     const normalizedName = normalizeName(name);
     const normalizedDescription = validateResourceDescription(
@@ -1071,6 +1092,7 @@ export class RequestService {
           pre_request_script: content.preRequestScript,
           post_response_script: content.postResponseScript,
           redirect_policy_json: JSON.stringify(content.redirectPolicy),
+          cookie_policy_json: JSON.stringify(content.cookiePolicy),
           updated_by: idToBytes(userId),
           updated_at: now,
         })
@@ -1138,6 +1160,7 @@ export class RequestService {
         preRequestScript: content.preRequestScript,
         postResponseScript: content.postResponseScript,
         redirectPolicy: content.redirectPolicy,
+        cookiePolicy: content.cookiePolicy,
         draftRevision: 0,
       };
     });
@@ -1396,6 +1419,7 @@ export class RequestService {
             redirect_policy_json: JSON.stringify(
               imported.content.redirectPolicy,
             ),
+            cookie_policy_json: JSON.stringify(imported.content.cookiePolicy),
             updated_by: idToBytes(userId),
             updated_at: now,
           })
@@ -1661,6 +1685,7 @@ export class RequestService {
       content.description ?? current.description,
       content.notes ?? current.notes,
       content.redirectPolicy,
+      content.cookiePolicy,
     );
   }
 
@@ -1741,6 +1766,7 @@ export class RequestService {
           pre_request_script: source.pre_request_script,
           post_response_script: source.post_response_script,
           redirect_policy_json: source.redirect_policy_json,
+          cookie_policy_json: source.cookie_policy_json,
           updated_by: idToBytes(userId),
           updated_at: now,
         })
@@ -1798,6 +1824,7 @@ export class RequestService {
     description = "",
     notes = "",
     redirectPolicy: RedirectPolicyOverride = {},
+    cookiePolicy: CookiePolicyOverride = {},
   ): Promise<RequestView> {
     const normalizedName = normalizeName(name);
     const normalizedDescription = validateResourceDescription(description);
@@ -1813,11 +1840,13 @@ export class RequestService {
       preRequestScript,
       postResponseScript,
       redirectPolicy,
+      cookiePolicy,
     });
     const queryJson = JSON.stringify(content.query);
     const headersJson = JSON.stringify(content.headers);
     const bodyJson = JSON.stringify(content.requestBody);
     const redirectPolicyJson = JSON.stringify(content.redirectPolicy);
+    const cookiePolicyJson = JSON.stringify(content.cookiePolicy);
     return this.#database.transaction().execute(async (transaction) => {
       const row = await this.#requestRow(transaction, requestId);
       const workspaceId = bytesToId(row.workspace_id);
@@ -1847,7 +1876,8 @@ export class RequestService {
         row.body_json === bodyJson &&
         row.pre_request_script === content.preRequestScript &&
         row.post_response_script === content.postResponseScript &&
-        row.redirect_policy_json === redirectPolicyJson
+        row.redirect_policy_json === redirectPolicyJson &&
+        row.cookie_policy_json === cookiePolicyJson
       ) {
         await this.#ensureRevision(transaction, row, userId, "manual_save");
         return this.#requestView(transaction, row);
@@ -1872,6 +1902,7 @@ export class RequestService {
           pre_request_script: content.preRequestScript,
           post_response_script: content.postResponseScript,
           redirect_policy_json: redirectPolicyJson,
+          cookie_policy_json: cookiePolicyJson,
           draft_revision: expectedDraftRevision + 1,
           updated_by: idToBytes(userId),
           updated_at: Date.now(),
@@ -1913,6 +1944,7 @@ export class RequestService {
         preRequestScript: content.preRequestScript,
         postResponseScript: content.postResponseScript,
         redirectPolicy: content.redirectPolicy,
+        cookiePolicy: content.cookiePolicy,
         draftRevision: expectedDraftRevision + 1,
       };
       await this.#ensureRevision(
@@ -1932,6 +1964,7 @@ export class RequestService {
           pre_request_script: content.preRequestScript,
           post_response_script: content.postResponseScript,
           redirect_policy_json: redirectPolicyJson,
+          cookie_policy_json: cookiePolicyJson,
           draft_revision: expectedDraftRevision + 1,
         },
         userId,
@@ -2035,6 +2068,16 @@ export class RequestService {
         request.workspaceId,
         request.redirectPolicy,
       );
+      const effectiveCookiePolicy = await resolveCookiePolicy(
+        transaction,
+        userId,
+        request.workspaceId,
+        request.cookiePolicy,
+      );
+      const cookieConcurrencyMode = await resolveCookieConcurrencyMode(
+        transaction,
+        userId,
+      );
       const executionRequest = stripExecutionDocumentation({
         workspaceId: request.workspaceId,
         requestId: request.requestId,
@@ -2093,6 +2136,8 @@ export class RequestService {
             targetMode: "absolute",
             queryMode: "structured",
             redirectPolicy: effectiveRedirectPolicy,
+            cookiePolicy: effectiveCookiePolicy,
+            cookieConcurrencyMode,
             variableProfiles: variableProfile.evidence,
             secretReferences: eagerlyComposed?.secretReferences ?? [],
           }),
@@ -2140,6 +2185,9 @@ export class RequestService {
         materialized: eagerlyComposed !== undefined,
         createdAt,
         redirectPolicy: effectiveRedirectPolicy,
+        cookiePolicy: effectiveCookiePolicy,
+        cookieConcurrencyMode,
+        cookieJarEnvironmentId: variableProfile.cookieJarEnvironmentId,
       };
     });
   }
@@ -2167,6 +2215,16 @@ export class RequestService {
         userId,
         workspaceId,
         content.redirectPolicy,
+      );
+      const effectiveCookiePolicy = await resolveCookiePolicy(
+        transaction,
+        userId,
+        workspaceId,
+        content.cookiePolicy,
+      );
+      const cookieConcurrencyMode = await resolveCookieConcurrencyMode(
+        transaction,
+        userId,
       );
       const effectiveHeaders = content.headers;
       const request = stripExecutionDocumentation({
@@ -2236,6 +2294,8 @@ export class RequestService {
             targetMode: "absolute",
             queryMode: "structured",
             redirectPolicy: effectiveRedirectPolicy,
+            cookiePolicy: effectiveCookiePolicy,
+            cookieConcurrencyMode,
             variableProfiles: variableProfile.evidence,
             secretReferences: eagerlyComposed?.secretReferences ?? [],
           }),
@@ -2278,6 +2338,9 @@ export class RequestService {
         materialized: eagerlyComposed !== undefined,
         createdAt,
         redirectPolicy: effectiveRedirectPolicy,
+        cookiePolicy: effectiveCookiePolicy,
+        cookieConcurrencyMode,
+        cookieJarEnvironmentId: variableProfile.cookieJarEnvironmentId,
       };
     });
   }
@@ -2334,6 +2397,16 @@ export class RequestService {
         workspaceId,
         localRequest.redirectPolicy,
       );
+      const effectiveCookiePolicy = await resolveCookiePolicy(
+        transaction,
+        userId,
+        workspaceId,
+        localRequest.cookiePolicy,
+      );
+      const cookieConcurrencyMode = await resolveCookieConcurrencyMode(
+        transaction,
+        userId,
+      );
       const executionRequest = stripExecutionDocumentation({
         ...localRequest,
         headers: withRequestBodyContentType(
@@ -2369,6 +2442,8 @@ export class RequestService {
         targetMode: "absolute",
         queryMode: "structured",
         redirectPolicy: effectiveRedirectPolicy,
+        cookiePolicy: effectiveCookiePolicy,
+        cookieConcurrencyMode,
         variableProfiles: variableProfile.evidence,
         secretReferences: eagerlyComposed?.secretReferences ?? [],
       });
@@ -2425,6 +2500,9 @@ export class RequestService {
         materialized: eagerlyComposed !== undefined,
         createdAt,
         redirectPolicy: effectiveRedirectPolicy,
+        cookiePolicy: effectiveCookiePolicy,
+        cookieConcurrencyMode,
+        cookieJarEnvironmentId: variableProfile.cookieJarEnvironmentId,
       };
     });
   }
@@ -2577,6 +2655,7 @@ export class RequestService {
         "draft.pre_request_script",
         "draft.post_response_script",
         "draft.redirect_policy_json",
+        "draft.cookie_policy_json",
         "node.workspace_id",
         "node.parent_collection_id",
         "node.name",
@@ -3879,12 +3958,14 @@ function normalizeExecutionInput(input: RequestExecutionInput): Omit<
   | "preRequestScript"
   | "postResponseScript"
   | "redirectPolicy"
+  | "cookiePolicy"
 > & {
   readonly targetMode: "absolute" | "composed";
   readonly requestBody: RequestBodyDefinition;
   readonly preRequestScript: string;
   readonly postResponseScript: string;
   readonly redirectPolicy: RedirectPolicyOverride;
+  readonly cookiePolicy: CookiePolicyOverride;
 } {
   const requestBody = validateRequestBody(input.requestBody, input.body);
   return {
@@ -3901,6 +3982,7 @@ function normalizeExecutionInput(input: RequestExecutionInput): Omit<
     preRequestScript: validateScript(input.preRequestScript ?? ""),
     postResponseScript: validateScript(input.postResponseScript ?? ""),
     redirectPolicy: validateRedirectPolicyOverride(input.redirectPolicy),
+    cookiePolicy: validateCookiePolicyOverride(input.cookiePolicy),
   };
 }
 
@@ -4121,6 +4203,9 @@ export function composeWithVariables(
       ...(materialized.redirectPolicy === undefined
         ? {}
         : { redirectPolicy: materialized.redirectPolicy }),
+      ...(materialized.cookiePolicy === undefined
+        ? {}
+        : { cookiePolicy: materialized.cookiePolicy }),
     },
     secretReferences: [...references.values()],
   };
@@ -4145,6 +4230,7 @@ function mapRequest(row: {
   readonly pre_request_script: string;
   readonly post_response_script: string;
   readonly redirect_policy_json: string;
+  readonly cookie_policy_json: string;
   readonly draft_revision: number;
 }): Omit<RequestView, "inheritedHeaders" | "inheritedTarget"> {
   return {
@@ -4168,6 +4254,7 @@ function mapRequest(row: {
     preRequestScript: row.pre_request_script,
     postResponseScript: row.post_response_script,
     redirectPolicy: parseRedirectPolicyOverride(row.redirect_policy_json),
+    cookiePolicy: parseCookiePolicyOverride(row.cookie_policy_json),
     draftRevision: row.draft_revision,
   };
 }
@@ -4198,6 +4285,7 @@ function revisionContent(
     preRequestScript: request.preRequestScript,
     postResponseScript: request.postResponseScript,
     redirectPolicy: request.redirectPolicy,
+    cookiePolicy: request.cookiePolicy,
   };
 }
 
@@ -4219,6 +4307,9 @@ function parseRevisionContent(value: string): RevisionContent {
     ...(parsed.redirectPolicy === undefined
       ? {}
       : { redirectPolicy: parsed.redirectPolicy }),
+    ...(parsed.cookiePolicy === undefined
+      ? {}
+      : { cookiePolicy: parsed.cookiePolicy }),
   });
   return {
     ...(parsed.name === undefined ? {} : { name: normalizeName(parsed.name) }),
@@ -4248,6 +4339,7 @@ function parseRevisionContent(value: string): RevisionContent {
     preRequestScript: normalized.preRequestScript,
     postResponseScript: normalized.postResponseScript,
     redirectPolicy: normalized.redirectPolicy,
+    cookiePolicy: normalized.cookiePolicy,
   };
 }
 
@@ -4291,6 +4383,8 @@ function revisionRequestView(
     body: content.body,
     preRequestScript: content.preRequestScript,
     postResponseScript: content.postResponseScript,
+    redirectPolicy: content.redirectPolicy,
+    cookiePolicy: content.cookiePolicy,
   };
 }
 

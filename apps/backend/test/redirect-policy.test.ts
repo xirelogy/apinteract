@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { AuditService } from "../src/audit/audit-service.js";
+import { DEFAULT_COOKIE_POLICY } from "../src/cookies/cookie-policy.js";
 import {
   DEFAULT_REDIRECT_POLICY,
   MAX_REDIRECTS_HARD_LIMIT,
@@ -62,15 +63,32 @@ describe("HTTP redirect policy", () => {
 
       await expect(preferences.get(userId)).resolves.toEqual({
         redirectPolicy: DEFAULT_REDIRECT_POLICY,
+        cookiePolicy: DEFAULT_COOKIE_POLICY,
+        cookieConcurrencyMode: "optimistic",
         revision: 0,
       });
-      const savedPreferences = await preferences.update(userId, 0, {
-        follow: false,
-        maxRedirects: 7,
+      const savedPreferences = await preferences.update(
+        userId,
+        0,
+        {
+          follow: false,
+          maxRedirects: 7,
+        },
+        DEFAULT_COOKIE_POLICY,
+        "serialized",
+      );
+      expect(savedPreferences).toMatchObject({
+        revision: 1,
+        cookieConcurrencyMode: "serialized",
       });
-      expect(savedPreferences.revision).toBe(1);
       await expect(
-        preferences.update(userId, 0, { follow: true, maxRedirects: 10 }),
+        preferences.update(
+          userId,
+          0,
+          { follow: true, maxRedirects: 10 },
+          DEFAULT_COOKIE_POLICY,
+          "optimistic",
+        ),
       ).rejects.toBeInstanceOf(UserPreferencesConflictError);
 
       await workspaces.update(

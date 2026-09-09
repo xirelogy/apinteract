@@ -56,6 +56,7 @@ describe("environment service", () => {
       expect(first).toMatchObject({
         description: "Development services",
         notes: "# Local environment\n\nShared development credentials.",
+        cookieJarSource: "environment",
       });
       await expect(
         fixture.environments.create(
@@ -136,6 +137,7 @@ describe("environment service", () => {
       expect(preserved).toMatchObject({
         description: "Updated development services",
         notes: "Use this environment for local work.",
+        cookieJarSource: "environment",
       });
       expect(preserved.variables[1]).toMatchObject({ secretVersion: 1 });
       await expect(
@@ -176,6 +178,63 @@ describe("environment service", () => {
           fixture.workspaceId,
         ),
       ).resolves.toMatchObject({ selectedEnvironmentId: null });
+    } finally {
+      await fixture.database.close();
+    }
+  });
+
+  it("selects variables from an environment while pinning its configured cookie jar", async () => {
+    const fixture = await createFixture(roots);
+    try {
+      const environment = await fixture.environments.create(
+        fixture.userId,
+        fixture.workspaceId,
+        "Shared cookies",
+        [{ name: "origin", kind: "value", value: "environment" }],
+        [],
+        "",
+        "",
+        "workspace",
+      );
+      await fixture.environments.select(
+        fixture.userId,
+        fixture.firstSessionId,
+        fixture.workspaceId,
+        environment.environmentId,
+      );
+
+      const shared = await fixture.variables.effectiveProfile(
+        fixture.database.db,
+        fixture.firstSessionId,
+        fixture.workspaceId,
+        null,
+        null,
+      );
+      expect(shared.selectedEnvironmentId).toBe(environment.environmentId);
+      expect(shared.cookieJarEnvironmentId).toBeNull();
+      expect(shared.variables).toEqual([
+        expect.objectContaining({ name: "origin", value: "environment" }),
+      ]);
+
+      await fixture.environments.update(
+        fixture.userId,
+        environment.environmentId,
+        environment.revision,
+        environment.name,
+        environment.variables,
+        undefined,
+        environment.description,
+        environment.notes,
+        "environment",
+      );
+      const isolated = await fixture.variables.effectiveProfile(
+        fixture.database.db,
+        fixture.firstSessionId,
+        fixture.workspaceId,
+        null,
+        null,
+      );
+      expect(isolated.cookieJarEnvironmentId).toBe(environment.environmentId);
     } finally {
       await fixture.database.close();
     }

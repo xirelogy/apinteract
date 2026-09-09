@@ -5,6 +5,15 @@ import type { RawData, WebSocket } from "ws";
 import type { Application } from "../bootstrap/application.js";
 import type { BackendConfiguration } from "../config.js";
 import {
+  CookieJarConflictError,
+  type CookieJarIdentity,
+} from "../cookies/cookie-jar-service.js";
+import {
+  type CookieConcurrencyMode,
+  type CookiePolicyOverride,
+  type ResolvedCookiePolicy,
+} from "../cookies/cookie-policy.js";
+import {
   DocumentationValidationError,
   validateFieldDescription,
   validateResourceDescription,
@@ -15,6 +24,7 @@ import {
   EnvironmentCompositionInvalidError,
   EnvironmentConflictError,
   EnvironmentInUseError,
+  type EnvironmentCookieJarSource,
   type EnvironmentVariableWrite,
 } from "../environments/environment-service.js";
 import { VariableResolutionError } from "../environments/variable-resolver.js";
@@ -225,6 +235,8 @@ async function dispatch(
         userId,
         requireInteger(command.payload.expectedRevision, "expectedRevision"),
         requireResolvedRedirectPolicy(command.payload.redirectPolicy),
+        requireResolvedCookiePolicy(command.payload.cookiePolicy),
+        requireCookieJarConcurrencyMode(command.payload.cookieConcurrencyMode),
       );
     case "workspace.list":
       return { workspaces: await application.workspaces.list(userId) };
@@ -251,6 +263,7 @@ async function dispatch(
         requireResourceDescription(command.payload.description),
         requireResourceNotes(command.payload.notes),
         requireRedirectPolicyOverride(command.payload.redirectPolicy),
+        requireCookiePolicyOverride(command.payload.cookiePolicy),
       );
     case "workspace.delete":
       return application.workspaces.delete(
@@ -345,6 +358,7 @@ async function dispatch(
         ),
         requireResourceDescription(command.payload.description),
         requireResourceNotes(command.payload.notes),
+        optionalEnvironmentCookieJarSource(command.payload.cookieJarSource),
       );
     case "environment.get":
       return application.environments.get(
@@ -364,6 +378,7 @@ async function dispatch(
         ),
         requireResourceDescription(command.payload.description),
         requireResourceNotes(command.payload.notes),
+        optionalEnvironmentCookieJarSource(command.payload.cookieJarSource),
       );
     case "environment.delete":
       return application.environments.delete(
@@ -377,6 +392,25 @@ async function dispatch(
         identity.sessionId,
         requireString(command.payload.workspaceId, "workspaceId"),
         optionalEnvironmentId(command.payload.environmentId),
+      );
+    case "cookie_jar.get":
+      return application.cookies.get(
+        userId,
+        requireCookieJarIdentity(command.payload),
+      );
+    case "cookie_jar.delete_cookie":
+      return application.cookies.deleteCookie(
+        userId,
+        requireCookieJarIdentity(command.payload),
+        requireString(command.payload.cookieId, "cookieId"),
+        requireInteger(command.payload.expectedRevision, "expectedRevision"),
+      );
+    case "cookie_jar.clear":
+      return application.cookies.clear(
+        userId,
+        requireCookieJarIdentity(command.payload),
+        requireInteger(command.payload.expectedRevision, "expectedRevision"),
+        requireCookieJarClearScope(command.payload.scope),
       );
     case "environment.preview_variables":
       return application.environments.previewVariables(
@@ -502,6 +536,9 @@ async function dispatch(
           redirectPolicy: requireRedirectPolicyOverride(
             command.payload.redirectPolicy,
           ),
+          cookiePolicy: requireCookiePolicyOverride(
+            command.payload.cookiePolicy,
+          ),
         },
       );
     case "request.get":
@@ -584,6 +621,7 @@ async function dispatch(
         requireResourceDescription(command.payload.description),
         requireResourceNotes(command.payload.notes),
         requireRedirectPolicyOverride(command.payload.redirectPolicy),
+        requireCookiePolicyOverride(command.payload.cookiePolicy),
       );
     case "request.delete":
       return application.requests.delete(
@@ -671,6 +709,9 @@ function mapCommandError(cause: unknown): CommandError {
   }
   if (cause instanceof UserPreferencesConflictError) {
     return new CommandError("user_preferences_conflict", cause.message);
+  }
+  if (cause instanceof CookieJarConflictError) {
+    return new CommandError("cookie_jar_conflict", cause.message);
   }
   if (cause instanceof EnvironmentConflictError) {
     return new CommandError("environment_conflict", cause.message);
@@ -1423,6 +1464,79 @@ function requireResolvedRedirectPolicy(value: unknown): ResolvedRedirectPolicy {
   return { follow: policy.follow, maxRedirects: policy.maxRedirects };
 }
 
+/** Validates one independently inheritable cookie-jar toggle. */
+function requireCookiePolicyOverride(value: unknown): CookiePolicyOverride {
+  if (value === undefined) return {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new CommandError(
+      "validation_failed",
+      "cookiePolicy must be an object.",
+    );
+  }
+  const policy = value as Record<string, unknown>;
+  if (
+    Object.keys(policy).some((key) => key !== "enabled") ||
+    (policy.enabled !== undefined && typeof policy.enabled !== "boolean")
+  ) {
+    throw new CommandError(
+      "validation_failed",
+      "cookiePolicy contains invalid values.",
+    );
+  }
+  return policy.enabled === undefined ? {} : { enabled: policy.enabled };
+}
+
+/** Requires a complete per-user cookie default. */
+function requireResolvedCookiePolicy(value: unknown): ResolvedCookiePolicy {
+  const policy = requireCookiePolicyOverride(value);
+  if (policy.enabled === undefined) {
+    throw new CommandError(
+      "validation_failed",
+      "cookiePolicy must provide enabled.",
+    );
+  }
+  return { enabled: policy.enabled };
+}
+
+/** Reads a complete workspace/environment cookie partition identity. */
+function requireCookieJarIdentity(
+  payload: Readonly<Record<string, unknown>>,
+): CookieJarIdentity {
+  return {
+    workspaceId: requireString(payload.workspaceId, "workspaceId"),
+    environmentId: optionalEnvironmentId(payload.environmentId),
+  };
+}
+
+/** Accepts only supported shared-jar admission modes. */
+function requireCookieJarConcurrencyMode(
+  value: unknown,
+): CookieConcurrencyMode {
+  if (value === "optimistic" || value === "serialized") return value;
+  throw new CommandError(
+    "validation_failed",
+    "mode must be optimistic or serialized.",
+  );
+}
+
+/** Accepts only supported cookie clearing scopes. */
+function requireCookieJarClearScope(value: unknown): "session" | "all" {
+  if (value === "session" || value === "all") return value;
+  throw new CommandError("validation_failed", "scope must be session or all.");
+}
+
+/** Accepts an omitted compatible default or one explicit environment jar source. */
+function optionalEnvironmentCookieJarSource(
+  value: unknown,
+): EnvironmentCookieJarSource | undefined {
+  if (value === undefined) return undefined;
+  if (value === "environment" || value === "workspace") return value;
+  throw new CommandError(
+    "validation_failed",
+    "cookieJarSource must be environment or workspace.",
+  );
+}
+
 /** Validates a complete executable request snapshot from a command payload. */
 function requireExecutionInput(value: unknown): RequestExecutionInput {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -1447,6 +1561,7 @@ function requireExecutionInput(value: unknown): RequestExecutionInput {
       "postResponseScript",
     ),
     redirectPolicy: requireRedirectPolicyOverride(request.redirectPolicy),
+    cookiePolicy: requireCookiePolicyOverride(request.cookiePolicy),
   };
 }
 

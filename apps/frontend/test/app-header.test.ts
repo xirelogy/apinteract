@@ -92,6 +92,8 @@ describe("AppHeader", () => {
     const pinia = createPinia();
     useApplicationStore(pinia).userPreferences = {
       redirectPolicy: { follow: true, maxRedirects: 10 },
+      cookiePolicy: { enabled: true },
+      cookieConcurrencyMode: "optimistic",
       revision: 0,
     };
     const wrapper = mount(AppHeader, {
@@ -150,6 +152,8 @@ describe("AppHeader", () => {
         "Headers that append by default",
         "Follow redirects",
         "Maximum redirects",
+        "Use cookie jar",
+        "Concurrent requests",
       ],
     );
     expect(

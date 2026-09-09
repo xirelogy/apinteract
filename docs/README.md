@@ -17,7 +17,8 @@ This directory contains the public documentation for APInteract.
 - [Scripting](scripting/README.md): write pre-request and post-response
   JavaScript scripts and understand their available helpers and limits.
 - [Request targets](requests/README.md): compose request URLs from workspace
-  base URLs, nested collection paths, variables, and request-local paths.
+  base URLs, nested collection paths, variables, and request-local paths; then
+  configure [shared HTTP cookie jars](requests/cookies.md).
 - [Response inspection](responses/README.md): inspect raw, structured, HTML,
   image, and binary response content safely.
 - [All-in-one deployment](../deploy/aio/README.md): source-built container

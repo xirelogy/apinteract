@@ -209,6 +209,11 @@ export const enUsMessages = {
     clearStoredSecret: "Clear stored secret",
     create: "Create environment",
     createNew: "Create new environment",
+    cookieJarDescription:
+      "Choose whether this environment has an independent jar or shares the workspace-default jar. Changing this does not delete its independent jar.",
+    cookieJarEnvironment: "This environment",
+    cookieJarSource: "Cookie jar source",
+    cookieJarWorkspace: "Workspace default",
     deleteAction: "Delete environment",
     deleteConfirmation:
       "Delete {name}? Any session using it will switch to no environment.",
@@ -492,6 +497,49 @@ export const enUsMessages = {
       userDefaults: "user defaults",
       workspace: "workspace",
     },
+  },
+  cookies: {
+    tab: "Cookies",
+    heading: "HTTP cookies",
+    useJar: "Use cookie jar",
+    behavior: "Cookie jar behavior",
+    inherit: "Inherit from {source} ({value})",
+    enabled: "Use cookie jar",
+    disabled: "Do not use cookie jar",
+    concurrency: "Concurrent requests",
+    optimistic: "Optimistic",
+    serialized: "Serialized (one request at a time)",
+    loading: "Loading cookie jar...",
+    contentTitle: "Cookie jar content",
+    availableAfterSave:
+      "The cookie jar becomes available after this environment is saved.",
+    empty: "This cookie jar is empty.",
+    scope: "Domain / path",
+    expiry: "Expiry",
+    noExpiry: "Session",
+    attributes: "Properties",
+    copyValue: "Copy value for cookie {name}",
+    valueCopied: "Copied value for cookie {name}",
+    secureTitle: "Secure",
+    httpOnlyTitle: "HTTP-Only",
+    sameSiteTitle: "SameSite: {value}",
+    secureDescription:
+      "Sent only to secure targets. Localhost uses the standard development exception.",
+    httpOnlyDescription:
+      "Unavailable to browser scripts. APInteract retains this server-provided flag.",
+    sameSiteDescription:
+      "Browser cross-site policy retained as metadata; API requests have no browser site context.",
+    clearSession: "Clear session cookies",
+    clearAll: "Clear all cookies",
+    clearSessionTitle: "Clear session cookies?",
+    clearSessionMessage:
+      "This will delete every session cookie in this jar. Persistent cookies will be kept.",
+    clearAllTitle: "Clear all cookies?",
+    clearAllMessage:
+      "This will delete every cookie in this jar, including persistent cookies.",
+    clearWarning:
+      "Requests that depend on these cookies may lose their authenticated state. This action cannot be undone.",
+    deleteCookie: "Delete cookie {name}",
   },
   scripting: {
     scripts: "Scripts",

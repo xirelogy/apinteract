@@ -78,6 +78,7 @@ function savedTab(): EnvironmentEditorTab {
     name: "Development",
     description: "Development services",
     notes: "# Local environment",
+    cookieJarSource: "environment" as const,
     revision: 2,
     includedEnvironments: [],
     variables: [
@@ -96,6 +97,7 @@ function savedTab(): EnvironmentEditorTab {
     name: environment.name,
     description: environment.description,
     notes: environment.notes,
+    cookieJarSource: environment.cookieJarSource,
     variables: [
       {
         variableId: "019fa8be-a510-76b9-b73b-69f4c7af7877",
@@ -135,6 +137,9 @@ describe("EnvironmentManager", () => {
       global: { plugins: [i18n()] },
     });
 
+    expect(wrapper.find('button[aria-label="Manage cookies"]').exists()).toBe(
+      false,
+    );
     await wrapper
       .get('button[aria-label="Manage environments"]')
       .trigger("click");
@@ -188,6 +193,46 @@ describe("EnvironmentManager", () => {
       editorTabs.find((item) => item.text().includes("Variables"))?.text(),
     ).toContain("1");
     await editorTabs
+      .find((item) => item.text().includes("Cookies"))
+      ?.trigger("click");
+    expect(wrapper.emitted("loadCookies")).toEqual([[environmentId]]);
+    expect(wrapper.get(".cookie-properties-section").text()).not.toContain(
+      "Choose whether this environment",
+    );
+    await wrapper
+      .get('button[aria-label="More information about Cookie jar source"]')
+      .trigger("click");
+    expect(document.body.textContent).toContain(
+      "Choose whether this environment has an independent jar",
+    );
+    const jarSource = wrapper.get<HTMLButtonElement>(
+      'button[aria-label="Cookie jar source"]',
+    );
+    expect(jarSource.text()).toContain("This environment");
+    await jarSource.trigger("click");
+    await flushPromises();
+    const workspaceJar = [
+      ...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ].find((option) => option.textContent?.trim() === "Workspace default");
+    workspaceJar?.click();
+    await flushPromises();
+    expect(wrapper.emitted("loadCookies")).toEqual([[environmentId], [null]]);
+    await wrapper.setProps({
+      cookieJar: {
+        jarId: "019fb000-0000-7000-8000-000000000001",
+        workspaceId,
+        environmentId: null,
+        revision: 0,
+        cookies: [],
+      },
+    });
+    expect(wrapper.get(".cookie-jar-panel").attributes("aria-label")).toBe(
+      "Cookie jar content",
+    );
+    expect(wrapper.get(".cookie-jar-panel").text()).not.toContain(
+      "Workspace default",
+    );
+    await editorTabs
       .find((item) => item.text().includes("Documentation"))
       ?.trigger("click");
     await wrapper
@@ -206,6 +251,7 @@ describe("EnvironmentManager", () => {
       name: "Local development",
       description: "Updated development services",
       notes: "# Local environment",
+      cookieJarSource: "workspace",
     });
     wrapper.unmount();
   });

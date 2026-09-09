@@ -6,6 +6,7 @@ import { AuthProviderRegistry } from "../authentication/auth-provider-registry.j
 import { CredentialRepository } from "../authentication/credential-repository.js";
 import { FirstUserBootstrapService } from "../authentication/first-user-bootstrap-service.js";
 import { LocalBlobStore } from "../blobs/local-blob-store.js";
+import { CookieJarService } from "../cookies/cookie-jar-service.js";
 import { ExecutionService } from "../executions/execution-service.js";
 import { UserPreferencesService } from "../executions/redirect-policy.js";
 import { EnvironmentService } from "../environments/environment-service.js";
@@ -41,6 +42,7 @@ export interface Application {
   readonly workspaces: WorkspaceService;
   readonly userPreferences: UserPreferencesService;
   readonly environments: EnvironmentService;
+  readonly cookies: CookieJarService;
   readonly variables: VariableService;
   readonly requestAttachments: RequestAttachmentService;
   readonly requests: RequestService;
@@ -82,6 +84,7 @@ export async function createApplication(
   const workspaces = new WorkspaceService(database.db, audit);
   const userPreferences = new UserPreferencesService(database.db, audit);
   const environments = new EnvironmentService(database.db, workspaces, audit);
+  const cookies = new CookieJarService(database.db, workspaces, audit);
   const variables = new VariableService(
     database.db,
     workspaces,
@@ -186,6 +189,7 @@ export async function createApplication(
     scripts,
     {
       variables,
+      cookies,
       ...(configuration.scripts === undefined
         ? {}
         : { policy: configuration.scripts.variableWrites }),
@@ -209,6 +213,7 @@ export async function createApplication(
     workspaces,
     userPreferences,
     environments,
+    cookies,
     variables,
     requestAttachments,
     requests,

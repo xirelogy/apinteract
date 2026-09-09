@@ -32,6 +32,7 @@ import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 import LocaleSelector from "@/view/presentation/features/LocaleSelector.vue";
 import { applicationControllerKey } from "@/app/dependencies";
 import { useApplicationStore } from "@/control/state/application-store";
+import type { CookieJarConcurrencyMode } from "@/model/contracts/backend";
 
 const props = defineProps<{
   open: boolean;
@@ -54,11 +55,17 @@ const dateTimeFormat = ref<DateTimeFormat>("locale");
 const appendingHeaders = ref("");
 const followRedirects = ref(true);
 const maximumRedirects = ref("10");
+const useCookieJar = ref(true);
+const cookieConcurrencyMode = ref<CookieJarConcurrencyMode>("optimistic");
 const dateTimeExample = new Date();
 const displayStyleOptions = computed(() => [
   { value: "system", label: t("header.displayStyle.system") },
   { value: "light", label: t("header.displayStyle.light") },
   { value: "dark", label: t("header.displayStyle.dark") },
+]);
+const cookieConcurrencyOptions = computed(() => [
+  { value: "optimistic", label: t("cookies.optimistic") },
+  { value: "serialized", label: t("cookies.serialized") },
 ]);
 const dateTimeFormatOptions = computed(() =>
   [
@@ -122,10 +129,14 @@ watch(
         maximumRedirects.value = String(
           preferences.redirectPolicy.maxRedirects,
         );
+        useCookieJar.value = preferences.cookiePolicy.enabled;
+        cookieConcurrencyMode.value = preferences.cookieConcurrencyMode;
       }
       void controller?.loadUserPreferences().then((loaded) => {
         followRedirects.value = loaded.redirectPolicy.follow;
         maximumRedirects.value = String(loaded.redirectPolicy.maxRedirects);
+        useCookieJar.value = loaded.cookiePolicy.enabled;
+        cookieConcurrencyMode.value = loaded.cookieConcurrencyMode;
       });
       void controller?.loadPlugins();
       void controller?.loadVersions();
@@ -150,10 +161,14 @@ async function save(): Promise<void> {
   displayStylePreference.setDisplayStyle(displayStyle.value);
   dateTimeFormatPreference.setDateTimeFormat(dateTimeFormat.value);
   headerPreferences.setAppendingHeaderNames(parsedAppendingHeaders.value.names);
-  await controller?.updateUserRedirectPolicy({
-    follow: followRedirects.value,
-    maxRedirects: Number(maximumRedirects.value),
-  });
+  await controller?.updateUserPreferences(
+    {
+      follow: followRedirects.value,
+      maxRedirects: Number(maximumRedirects.value),
+    },
+    { enabled: useCookieJar.value },
+    cookieConcurrencyMode.value,
+  );
   close();
 }
 
@@ -167,6 +182,13 @@ function selectDisplayStyle(value: string): void {
 /** Accepts only date/time formats represented by the controlled option list. */
 function selectDateTimeFormat(value: string): void {
   if (isDateTimeFormat(value)) dateTimeFormat.value = value;
+}
+
+/** Accepts only supported request admission behavior for shared cookie jars. */
+function selectCookieConcurrencyMode(value: string): void {
+  if (value === "optimistic" || value === "serialized") {
+    cookieConcurrencyMode.value = value;
+  }
 }
 </script>
 
@@ -305,6 +327,25 @@ function selectDateTimeFormat(value: string): void {
                   inputmode="numeric"
                   :aria-describedby="describedBy"
                   :invalid="invalid"
+                />
+              </FormField>
+            </section>
+            <section class="account-options-group">
+              <h3>{{ t("cookies.heading") }}</h3>
+              <CheckboxControl
+                v-model="useCookieJar"
+                :label="t('cookies.useJar')"
+              />
+              <FormField
+                v-slot="{ controlId }"
+                :label="t('cookies.concurrency')"
+              >
+                <SelectMenu
+                  :input-id="controlId"
+                  :model-value="cookieConcurrencyMode"
+                  :options="cookieConcurrencyOptions"
+                  :label="t('cookies.concurrency')"
+                  @update:model-value="selectCookieConcurrencyMode"
                 />
               </FormField>
             </section>

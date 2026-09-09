@@ -10,7 +10,7 @@
     "apinteract": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && mkdir -p dist/cookies && cp src/cookies/public_suffix_list.dat dist/cookies/public_suffix_list.dat",
     "dev": "tsx watch src/main.ts --config ../../var/config/backend.yaml",
     "start": "node dist/main.js",
     "test": "vitest run",
@@ -27,6 +27,7 @@
     "jose": "6.1.0",
     "kysely": "0.28.17",
     "quickjs-emscripten": "0.31.0",
+    "tough-cookie": "6.0.2",
     "uuid": "13.0.2",
     "ws": "8.21.3",
     "yaml": "2.9.0"

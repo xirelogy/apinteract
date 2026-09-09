@@ -677,4 +677,138 @@ describe("SqliteDatabase migrations", () => {
       await rm(rootPath, { recursive: true, force: true });
     }
   });
+
+  it("defaults existing environments to their independent cookie jar", async () => {
+    const rootPath = await mkdtemp(
+      join(tmpdir(), "apinteract-environment-cookie-migration-"),
+    );
+    const databasePath = join(rootPath, "database.sqlite3");
+    const backupDirectory = join(rootPath, "backups");
+    const userId = new Uint8Array(16).fill(1);
+    const workspaceId = new Uint8Array(16).fill(2);
+    const environmentId = new Uint8Array(16).fill(3);
+    const now = Date.now();
+
+    try {
+      const current = await SqliteDatabase.open(databasePath, backupDirectory);
+      await current.db
+        .insertInto("users")
+        .values({
+          id: userId,
+          status: "active",
+          username: "cookie-migration-user",
+          display_name: "Cookie Migration User",
+          is_instance_admin: 0,
+          created_at: now,
+          deleted_at: null,
+        })
+        .execute();
+      await current.db
+        .insertInto("workspaces")
+        .values({
+          id: workspaceId,
+          name: "Cookie migration",
+          description_text: "",
+          notes_markdown: "",
+          revision: 0,
+          headers_json: "[]",
+          created_by: userId,
+          created_at: now,
+          deleted_by: null,
+          deleted_at: null,
+        })
+        .execute();
+      await current.db
+        .insertInto("environments")
+        .values({
+          id: environmentId,
+          workspace_id: workspaceId,
+          name: "Existing",
+          name_key: "existing",
+          description_text: "",
+          notes_markdown: "",
+          cookie_jar_source: "environment",
+          revision: 0,
+          created_by: userId,
+          created_at: now,
+          updated_by: userId,
+          updated_at: now,
+        })
+        .execute();
+      await current.close();
+
+      const driver = new BetterSqlite3(databasePath);
+      driver.exec(`
+        ALTER TABLE environments DROP COLUMN cookie_jar_source;
+        DELETE FROM schema_migrations
+        WHERE id = '0023_environment_cookie_jar_source';
+      `);
+      driver.close();
+
+      const migrated = await SqliteDatabase.open(databasePath, backupDirectory);
+      await expect(
+        migrated.db
+          .selectFrom("environments")
+          .select("cookie_jar_source")
+          .where("id", "=", environmentId)
+          .executeTakeFirstOrThrow(),
+      ).resolves.toEqual({ cookie_jar_source: "environment" });
+      await migrated.close();
+    } finally {
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
+
+  it("moves cookie concurrency from shared jars to user preferences", async () => {
+    const rootPath = await mkdtemp(
+      join(tmpdir(), "apinteract-cookie-concurrency-migration-"),
+    );
+    const databasePath = join(rootPath, "database.sqlite3");
+    const backupDirectory = join(rootPath, "backups");
+
+    try {
+      const current = await SqliteDatabase.open(databasePath, backupDirectory);
+      await current.close();
+
+      const legacy = new BetterSqlite3(databasePath);
+      legacy.exec(`
+        ALTER TABLE user_preferences DROP COLUMN cookie_concurrency_mode;
+        ALTER TABLE cookie_jars
+          ADD COLUMN concurrency_mode TEXT NOT NULL DEFAULT 'optimistic'
+          CHECK(concurrency_mode IN ('optimistic', 'serialized'));
+        ALTER TABLE cookie_jar_waiters DROP COLUMN requested_mode;
+        ALTER TABLE cookie_jar_waiters DROP COLUMN expires_at;
+        DELETE FROM schema_migrations
+        WHERE id = '0024_global_cookie_concurrency';
+      `);
+      legacy.close();
+
+      const migrated = await SqliteDatabase.open(databasePath, backupDirectory);
+      await migrated.close();
+
+      const inspected = new BetterSqlite3(databasePath);
+      const userPreferenceColumns = inspected
+        .prepare("PRAGMA table_info(user_preferences)")
+        .all() as { readonly name: string }[];
+      const jarColumns = inspected
+        .prepare("PRAGMA table_info(cookie_jars)")
+        .all() as { readonly name: string }[];
+      const waiterColumns = inspected
+        .prepare("PRAGMA table_info(cookie_jar_waiters)")
+        .all() as { readonly name: string }[];
+      inspected.close();
+
+      expect(userPreferenceColumns.map((column) => column.name)).toContain(
+        "cookie_concurrency_mode",
+      );
+      expect(jarColumns.map((column) => column.name)).not.toContain(
+        "concurrency_mode",
+      );
+      expect(waiterColumns.map((column) => column.name)).toEqual(
+        expect.arrayContaining(["requested_mode", "expires_at"]),
+      );
+    } finally {
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
 });

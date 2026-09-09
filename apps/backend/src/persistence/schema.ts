@@ -22,6 +22,8 @@ export interface UserPreferenceTable {
   user_id: BinaryId;
   revision: number;
   redirect_policy_json: string;
+  cookie_policy_json: Generated<string>;
+  cookie_concurrency_mode: Generated<"optimistic" | "serialized">;
 }
 
 export interface LoginCredentialTable {
@@ -87,6 +89,7 @@ export interface WorkspaceTable {
   headers_json: string;
   base_url_template: Generated<string>;
   redirect_policy_json: Generated<string>;
+  cookie_policy_json: Generated<string>;
   created_by: BinaryId;
   created_at: number;
   deleted_by: BinaryId | null;
@@ -129,11 +132,54 @@ export interface EnvironmentTable {
   name_key: string;
   description_text: string;
   notes_markdown: string;
+  cookie_jar_source: "environment" | "workspace";
   revision: number;
   created_by: BinaryId;
   created_at: number;
   updated_by: BinaryId;
   updated_at: number;
+}
+
+/** Stores one workspace-owned cookie-state partition and its fenced writer lease. */
+export interface CookieJarTable {
+  id: BinaryId;
+  workspace_id: BinaryId;
+  environment_id: BinaryId | null;
+  revision: number;
+  lease_owner_execution_id: BinaryId | null;
+  lease_fence: number;
+  lease_expires_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+/** Stores one RFC cookie identity with separately versioned credential material. */
+export interface CookieRecordTable {
+  id: BinaryId;
+  jar_id: BinaryId;
+  name: string;
+  domain: string;
+  path: string;
+  host_only: 0 | 1;
+  secure: 0 | 1;
+  http_only: 0 | 1;
+  same_site: "strict" | "lax" | "none" | null;
+  expires_at: number | null;
+  session_only: 0 | 1;
+  metadata_json: string;
+  storage_format: "plaintext-v1";
+  payload: string;
+  created_at: number;
+  updated_at: number;
+}
+
+/** Persists fair shared/exclusive cookie admission across backend processes. */
+export interface CookieJarWaiterTable {
+  jar_id: BinaryId;
+  execution_id: BinaryId;
+  requested_mode: "optimistic" | "serialized";
+  enqueued_at: number;
+  expires_at: number;
 }
 
 /** Stores one ordered, same-workspace environment inclusion edge. */
@@ -195,6 +241,7 @@ export interface RequestDraftTable {
   pre_request_script: string;
   post_response_script: string;
   redirect_policy_json: Generated<string>;
+  cookie_policy_json: Generated<string>;
   updated_by: BinaryId;
   updated_at: number;
 }
@@ -372,6 +419,9 @@ export interface DatabaseSchema {
   collection_profiles: CollectionProfileTable;
   environments: EnvironmentTable;
   environment_includes: EnvironmentIncludeTable;
+  cookie_jars: CookieJarTable;
+  cookie_records: CookieRecordTable;
+  cookie_jar_waiters: CookieJarWaiterTable;
   variable_profiles: VariableProfileTable;
   variables: VariableTable;
   variable_secrets: VariableSecretTable;

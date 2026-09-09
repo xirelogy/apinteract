@@ -18,6 +18,9 @@ import type {
   WorkspaceView,
   RedirectPolicyOverride,
   ResolvedRedirectPolicy,
+  CookiePolicyOverride,
+  ResolvedCookiePolicy,
+  CookieJarView,
 } from "@/model/contracts/backend";
 import type { WorkspacePropertiesDraft } from "@/model/domain/application";
 import {
@@ -44,6 +47,7 @@ import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 import ResourceDeleteDialog from "./ResourceDeleteDialog.vue";
 import VariableFieldsEditor from "./VariableFieldsEditor.vue";
 import DocumentationEditor from "./DocumentationEditor.vue";
+import CookieJarPanel from "./CookieJarPanel.vue";
 import { useRowReorder } from "@/view/presentation/controls/row-reorder";
 
 interface VariableFieldsEditorApi {
@@ -60,12 +64,17 @@ const props = defineProps<{
   busy: boolean;
   recoveryWarning?: boolean;
   userRedirectPolicy?: ResolvedRedirectPolicy | undefined;
+  userCookiePolicy?: ResolvedCookiePolicy | undefined;
+  cookieJar?: CookieJarView | null;
 }>();
 const emit = defineEmits<{
   close: [];
   change: [draft: WorkspacePropertiesDraft];
   delete: [workspaceId: string, revision: number];
   preview: [names: readonly string[]];
+  loadCookies: [];
+  deleteCookie: [cookieId: string];
+  clearCookies: [scope: "session" | "all"];
   save: [
     name: string,
     description: string,
@@ -74,11 +83,12 @@ const emit = defineEmits<{
     headers: readonly RequestField[],
     variables: readonly VariableWrite[],
     redirectPolicy: RedirectPolicyOverride,
+    cookiePolicy: CookiePolicyOverride,
   ];
 }>();
 const { t } = useI18n();
 const activeSection = ref<
-  "headers" | "variables" | "execution" | "documentation"
+  "headers" | "variables" | "execution" | "cookies" | "documentation"
 >("headers");
 const name = ref(props.draft?.name ?? props.workspace.name);
 const description = ref(
@@ -111,6 +121,15 @@ const maximumRedirects = ref(
     ? ""
     : String(initialRedirectPolicy.maxRedirects),
 );
+const initialCookiePolicy =
+  props.draft?.cookiePolicy ?? props.workspace.cookiePolicy ?? {};
+const cookieBehavior = ref<"inherit" | "enabled" | "disabled">(
+  initialCookiePolicy.enabled === undefined
+    ? "inherit"
+    : initialCookiePolicy.enabled
+      ? "enabled"
+      : "disabled",
+);
 const redirectFollowOptions = computed(() => [
   {
     value: "inherit",
@@ -133,6 +152,31 @@ const redirectPolicy = computed<RedirectPolicyOverride>(() => ({
     ? {}
     : { maxRedirects: Number(maximumRedirects.value) }),
 }));
+const cookieBehaviorOptions = computed(() => [
+  {
+    value: "inherit",
+    label: t("cookies.inherit", {
+      source: t("redirects.source.userDefaults"),
+      value:
+        props.userCookiePolicy?.enabled === false
+          ? t("cookies.disabled")
+          : t("cookies.enabled"),
+    }),
+  },
+  { value: "enabled", label: t("cookies.enabled") },
+  { value: "disabled", label: t("cookies.disabled") },
+]);
+const cookiePolicy = computed<CookiePolicyOverride>(() =>
+  cookieBehavior.value === "inherit"
+    ? {}
+    : { enabled: cookieBehavior.value === "enabled" },
+);
+const workspaceCookieJar = computed(() =>
+  props.cookieJar?.workspaceId === props.workspace.workspaceId &&
+  props.cookieJar.environmentId === null
+    ? props.cookieJar
+    : null,
+);
 const maximumRedirectsValid = computed(
   () =>
     maximumRedirects.value.trim() === "" ||
@@ -173,10 +217,14 @@ watch(
     headers,
     redirectFollow,
     maximumRedirects,
+    cookieBehavior,
   ],
   publishDraft,
   { deep: true },
 );
+watch(activeSection, (section) => {
+  if (section === "cookies") emit("loadCookies");
+});
 
 onBeforeUnmount(() => {
   if (previewTimer !== undefined) clearTimeout(previewTimer);
@@ -247,6 +295,7 @@ function publishDraft(): void {
     headers: meaningfulRequestFields(headers.value),
     variables: variables.value,
     redirectPolicy: redirectPolicy.value,
+    cookiePolicy: cookiePolicy.value,
   });
 }
 
@@ -260,6 +309,14 @@ function updateVariables(nextVariables: readonly VariableWrite[]): void {
 function selectRedirectFollow(value: string): void {
   if (value === "inherit" || value === "follow" || value === "manual") {
     redirectFollow.value = value;
+    publishDraft();
+  }
+}
+
+/** Applies one validated workspace cookie behavior selection. */
+function selectCookieBehavior(value: string): void {
+  if (value === "inherit" || value === "enabled" || value === "disabled") {
+    cookieBehavior.value = value;
     publishDraft();
   }
 }
@@ -288,6 +345,7 @@ function save(): void {
     meaningfulRequestFields(headers.value),
     variableEditor.value?.writes() ?? [],
     redirectPolicy.value,
+    cookiePolicy.value,
   );
 }
 </script>
@@ -390,6 +448,12 @@ function save(): void {
             </TabsTrigger>
             <TabsTrigger class="tab-button" value="execution">
               {{ t("redirects.execution") }}
+            </TabsTrigger>
+            <TabsTrigger class="tab-button" value="cookies">
+              {{ t("cookies.tab") }}
+              <span v-if="workspaceCookieJar" class="tab-count">{{
+                workspaceCookieJar.cookies.length
+              }}</span>
             </TabsTrigger>
             <TabsTrigger class="tab-button" value="documentation">
               {{ t("documentation.title") }}
@@ -586,6 +650,38 @@ function save(): void {
                 />
               </FormField>
             </section>
+          </TabsPanel>
+          <TabsPanel
+            value="cookies"
+            class="collection-properties-section cookie-properties-section"
+          >
+            <section class="redirect-settings">
+              <FormField v-slot="{ controlId }" :label="t('cookies.behavior')">
+                <SelectMenu
+                  :input-id="controlId"
+                  :model-value="cookieBehavior"
+                  :options="cookieBehaviorOptions"
+                  :label="t('cookies.behavior')"
+                  :disabled="busy || !canEdit"
+                  @update:model-value="selectCookieBehavior"
+                />
+              </FormField>
+            </section>
+            <p
+              v-if="activeSection === 'cookies' && workspaceCookieJar === null"
+              class="resource-dialog-context"
+              role="status"
+            >
+              {{ t("cookies.loading") }}
+            </p>
+            <CookieJarPanel
+              v-if="activeSection === 'cookies' && workspaceCookieJar !== null"
+              :jar="workspaceCookieJar"
+              :busy="busy"
+              :can-edit="canEdit"
+              @delete-cookie="emit('deleteCookie', $event)"
+              @clear="emit('clearCookies', $event)"
+            />
           </TabsPanel>
           <TabsPanel
             value="documentation"

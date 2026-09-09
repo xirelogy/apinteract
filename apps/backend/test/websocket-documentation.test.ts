@@ -54,6 +54,7 @@ describe("WebSocket documentation validation", () => {
         name: "Development",
         description: "Development services",
         notes: "# Local environment",
+        cookieJarSource: "workspace",
         variables: [],
       });
 
@@ -66,6 +67,7 @@ describe("WebSocket documentation validation", () => {
         undefined,
         "Development services",
         "# Local environment",
+        "workspace",
       );
     } finally {
       await server.close();
@@ -143,6 +145,28 @@ describe("WebSocket documentation validation", () => {
       await server.close();
     }
   });
+
+  it("routes an explicit cookie-jar identity without exposing proxy concepts", async () => {
+    const get = vi.fn().mockResolvedValue({ jarId: WORKSPACE_ID });
+    const { server, socket } = await authenticatedSocket({}, {}, { get });
+
+    try {
+      const loaded = await sendCommand(
+        socket,
+        "load-cookies",
+        "cookie_jar.get",
+        { workspaceId: WORKSPACE_ID, environmentId: null },
+      );
+
+      expect(loaded.outcome).toBe("success");
+      expect(get).toHaveBeenCalledWith(USER_ID, {
+        workspaceId: WORKSPACE_ID,
+        environmentId: null,
+      });
+    } finally {
+      await server.close();
+    }
+  });
 });
 
 /** Creates one in-memory authenticated control socket around selected service spies. */
@@ -152,6 +176,9 @@ async function authenticatedSocket(
     readonly update?: ReturnType<typeof vi.fn>;
   },
   environments: { readonly create?: ReturnType<typeof vi.fn> } = {},
+  cookies: {
+    readonly get?: ReturnType<typeof vi.fn>;
+  } = {},
 ) {
   const server = Fastify();
   const application = {
@@ -170,6 +197,7 @@ async function authenticatedSocket(
     },
     workspaces,
     environments,
+    cookies,
   } as unknown as Application;
   const configuration = {
     server: { publicOrigin: PUBLIC_ORIGIN },

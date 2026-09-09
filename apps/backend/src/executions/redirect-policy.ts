@@ -1,6 +1,14 @@
 import type { Kysely, Transaction } from "kysely";
 
 import type { AuditService } from "../audit/audit-service.js";
+import {
+  DEFAULT_COOKIE_POLICY,
+  DEFAULT_COOKIE_CONCURRENCY_MODE,
+  validateCookieConcurrencyMode,
+  validateResolvedCookiePolicy,
+  type CookieConcurrencyMode,
+  type ResolvedCookiePolicy,
+} from "../cookies/cookie-policy.js";
 import { idToBytes, type EntityId } from "../foundation/id.js";
 import type { DatabaseSchema } from "../persistence/schema.js";
 
@@ -22,6 +30,8 @@ export interface ResolvedRedirectPolicy {
 
 export interface UserPreferencesView {
   readonly redirectPolicy: ResolvedRedirectPolicy;
+  readonly cookiePolicy: ResolvedCookiePolicy;
+  readonly cookieConcurrencyMode: CookieConcurrencyMode;
   readonly revision: number;
 }
 
@@ -129,30 +139,55 @@ export class UserPreferencesService {
   async get(userId: EntityId): Promise<UserPreferencesView> {
     const row = await this.#database
       .selectFrom("user_preferences")
-      .select(["revision", "redirect_policy_json"])
+      .select([
+        "revision",
+        "redirect_policy_json",
+        "cookie_policy_json",
+        "cookie_concurrency_mode",
+      ])
       .where("user_id", "=", idToBytes(userId))
       .executeTakeFirst();
     return row === undefined
-      ? { redirectPolicy: DEFAULT_REDIRECT_POLICY, revision: 0 }
+      ? {
+          redirectPolicy: DEFAULT_REDIRECT_POLICY,
+          cookiePolicy: DEFAULT_COOKIE_POLICY,
+          cookieConcurrencyMode: DEFAULT_COOKIE_CONCURRENCY_MODE,
+          revision: 0,
+        }
       : {
           redirectPolicy: validateResolvedRedirectPolicy(
             JSON.parse(row.redirect_policy_json) as ResolvedRedirectPolicy,
+          ),
+          cookiePolicy: validateResolvedCookiePolicy(
+            JSON.parse(row.cookie_policy_json) as ResolvedCookiePolicy,
+          ),
+          cookieConcurrencyMode: validateCookieConcurrencyMode(
+            row.cookie_concurrency_mode,
           ),
           revision: row.revision,
         };
   }
 
-  /** Replaces user redirect defaults with optimistic conflict detection. */
+  /** Replaces user HTTP execution defaults with optimistic conflict detection. */
   async update(
     userId: EntityId,
     expectedRevision: number,
     redirectPolicy: ResolvedRedirectPolicy,
+    cookiePolicy: ResolvedCookiePolicy,
+    cookieConcurrencyMode: CookieConcurrencyMode,
   ): Promise<UserPreferencesView> {
     const policy = validateResolvedRedirectPolicy(redirectPolicy);
+    const cookies = validateResolvedCookiePolicy(cookiePolicy);
+    const concurrency = validateCookieConcurrencyMode(cookieConcurrencyMode);
     return this.#database.transaction().execute(async (transaction) => {
       const row = await transaction
         .selectFrom("user_preferences")
-        .select(["revision", "redirect_policy_json"])
+        .select([
+          "revision",
+          "redirect_policy_json",
+          "cookie_policy_json",
+          "cookie_concurrency_mode",
+        ])
         .where("user_id", "=", idToBytes(userId))
         .executeTakeFirst();
       const revision = row?.revision ?? 0;
@@ -160,8 +195,19 @@ export class UserPreferencesService {
         throw new UserPreferencesConflictError("User preferences changed");
       }
       const json = JSON.stringify(policy);
-      if (row !== undefined && row.redirect_policy_json === json) {
-        return { redirectPolicy: policy, revision };
+      const cookieJson = JSON.stringify(cookies);
+      if (
+        row !== undefined &&
+        row.redirect_policy_json === json &&
+        row.cookie_policy_json === cookieJson &&
+        row.cookie_concurrency_mode === concurrency
+      ) {
+        return {
+          redirectPolicy: policy,
+          cookiePolicy: cookies,
+          cookieConcurrencyMode: concurrency,
+          revision,
+        };
       }
       const nextRevision = revision + 1;
       if (row === undefined) {
@@ -171,12 +217,19 @@ export class UserPreferencesService {
             user_id: idToBytes(userId),
             revision: nextRevision,
             redirect_policy_json: json,
+            cookie_policy_json: cookieJson,
+            cookie_concurrency_mode: concurrency,
           })
           .execute();
       } else {
         const result = await transaction
           .updateTable("user_preferences")
-          .set({ revision: nextRevision, redirect_policy_json: json })
+          .set({
+            revision: nextRevision,
+            redirect_policy_json: json,
+            cookie_policy_json: cookieJson,
+            cookie_concurrency_mode: concurrency,
+          })
           .where("user_id", "=", idToBytes(userId))
           .where("revision", "=", expectedRevision)
           .executeTakeFirst();
@@ -190,7 +243,12 @@ export class UserPreferencesService {
         workspaceId: null,
         data: { revision: nextRevision },
       });
-      return { redirectPolicy: policy, revision: nextRevision };
+      return {
+        redirectPolicy: policy,
+        cookiePolicy: cookies,
+        cookieConcurrencyMode: concurrency,
+        revision: nextRevision,
+      };
     });
   }
 }

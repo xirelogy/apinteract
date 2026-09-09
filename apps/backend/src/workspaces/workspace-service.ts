@@ -2,6 +2,11 @@ import type { Kysely, Transaction } from "kysely";
 
 import type { AuditService } from "../audit/audit-service.js";
 import {
+  parseCookiePolicyOverride,
+  validateCookiePolicyOverride,
+  type CookiePolicyOverride,
+} from "../cookies/cookie-policy.js";
+import {
   parseRedirectPolicyOverride,
   validateRedirectPolicyOverride,
   type RedirectPolicyOverride,
@@ -44,6 +49,7 @@ export interface WorkspaceView extends WorkspaceSummary {
   readonly baseUrl: string;
   readonly headers: readonly WorkspaceHeader[];
   readonly redirectPolicy: RedirectPolicyOverride;
+  readonly cookiePolicy: CookiePolicyOverride;
   readonly revision: number;
 }
 
@@ -125,6 +131,7 @@ export class WorkspaceService {
         "workspace.headers_json",
         "workspace.base_url_template",
         "workspace.redirect_policy_json",
+        "workspace.cookie_policy_json",
         "membership.role",
       ])
       .where("workspace.id", "=", idToBytes(workspaceId))
@@ -143,6 +150,7 @@ export class WorkspaceService {
       baseUrl: row.base_url_template,
       headers: parseWorkspaceHeaders(row.headers_json),
       redirectPolicy: parseRedirectPolicyOverride(row.redirect_policy_json),
+      cookiePolicy: parseCookiePolicyOverride(row.cookie_policy_json),
       revision: row.revision,
     };
   }
@@ -158,6 +166,7 @@ export class WorkspaceService {
     description = "",
     notes = "",
     redirectPolicy: RedirectPolicyOverride = {},
+    cookiePolicy: CookiePolicyOverride = {},
   ): Promise<WorkspaceView> {
     const normalizedName = normalizeName(name);
     const normalizedHeaders = validateWorkspaceHeaders(headers);
@@ -166,6 +175,7 @@ export class WorkspaceService {
     const normalizedNotes = validateResourceNotes(notes);
     const normalizedRedirectPolicy =
       validateRedirectPolicyOverride(redirectPolicy);
+    const normalizedCookiePolicy = validateCookiePolicyOverride(cookiePolicy);
     return this.#database.transaction().execute(async (transaction) => {
       await this.requireCanEdit(transaction, userId, workspaceId);
       const row = await transaction
@@ -178,6 +188,7 @@ export class WorkspaceService {
           "headers_json",
           "base_url_template",
           "redirect_policy_json",
+          "cookie_policy_json",
         ])
         .where("id", "=", idToBytes(workspaceId))
         .where("deleted_at", "is", null)
@@ -190,6 +201,7 @@ export class WorkspaceService {
       }
       const headersJson = JSON.stringify(normalizedHeaders);
       const redirectPolicyJson = JSON.stringify(normalizedRedirectPolicy);
+      const cookiePolicyJson = JSON.stringify(normalizedCookiePolicy);
       const membership = await transaction
         .selectFrom("workspace_memberships")
         .select("role")
@@ -202,7 +214,8 @@ export class WorkspaceService {
         row.notes_markdown === normalizedNotes &&
         row.headers_json === headersJson &&
         row.base_url_template === normalizedBaseUrl &&
-        row.redirect_policy_json === redirectPolicyJson
+        row.redirect_policy_json === redirectPolicyJson &&
+        row.cookie_policy_json === cookiePolicyJson
       ) {
         return {
           workspaceId,
@@ -213,6 +226,7 @@ export class WorkspaceService {
           baseUrl: normalizedBaseUrl,
           headers: normalizedHeaders,
           redirectPolicy: normalizedRedirectPolicy,
+          cookiePolicy: normalizedCookiePolicy,
           revision: row.revision,
         };
       }
@@ -226,6 +240,7 @@ export class WorkspaceService {
           headers_json: headersJson,
           base_url_template: normalizedBaseUrl,
           redirect_policy_json: redirectPolicyJson,
+          cookie_policy_json: cookiePolicyJson,
           revision,
         })
         .where("id", "=", idToBytes(workspaceId))
@@ -248,6 +263,7 @@ export class WorkspaceService {
           baseUrlChanged: row.base_url_template !== normalizedBaseUrl,
           redirectPolicyChanged:
             row.redirect_policy_json !== redirectPolicyJson,
+          cookiePolicyChanged: row.cookie_policy_json !== cookiePolicyJson,
         },
       });
       return {
@@ -259,6 +275,7 @@ export class WorkspaceService {
         baseUrl: normalizedBaseUrl,
         headers: normalizedHeaders,
         redirectPolicy: normalizedRedirectPolicy,
+        cookiePolicy: normalizedCookiePolicy,
         revision,
       };
     });
@@ -302,6 +319,10 @@ export class WorkspaceService {
       if (result.numUpdatedRows !== 1n) {
         throw new WorkspaceConflictError("The workspace properties changed");
       }
+      await transaction
+        .deleteFrom("cookie_jars")
+        .where("workspace_id", "=", idToBytes(workspaceId))
+        .execute();
       await this.#audit.record(transaction, {
         type: "workspace.deleted",
         actorUserId: userId,

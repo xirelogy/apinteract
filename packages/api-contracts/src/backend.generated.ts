@@ -459,6 +459,9 @@ export interface components {
       | components["schemas"]["EnvironmentUpdateCommand"]
       | components["schemas"]["EnvironmentDeleteCommand"]
       | components["schemas"]["EnvironmentSelectCommand"]
+      | components["schemas"]["CookieJarGetCommand"]
+      | components["schemas"]["CookieJarDeleteCookieCommand"]
+      | components["schemas"]["CookieJarClearCommand"]
       | components["schemas"]["EnvironmentPreviewVariablesCommand"]
       | components["schemas"]["VariableProfileGetCommand"]
       | components["schemas"]["VariableProfileGetTemporaryCommand"]
@@ -554,6 +557,8 @@ export interface components {
       payload?: {
         expectedRevision: number;
         redirectPolicy: components["schemas"]["ResolvedRedirectPolicy"];
+        cookiePolicy: components["schemas"]["ResolvedCookiePolicy"];
+        cookieConcurrencyMode: components["schemas"]["CookieJarConcurrencyMode"];
       };
     } & {
       /**
@@ -601,6 +606,7 @@ export interface components {
         baseUrl: string;
         headers: components["schemas"]["RequestField"][];
         redirectPolicy?: components["schemas"]["RedirectPolicyOverride"];
+        cookiePolicy?: components["schemas"]["CookiePolicyOverride"];
         description?: string;
         notes?: string;
       };
@@ -783,6 +789,8 @@ export interface components {
         name: string;
         description?: components["schemas"]["ResourceDescription"];
         notes?: components["schemas"]["ResourceNotes"];
+        /** @description Cookie partition used while this environment is selected. Omission defaults to the environment's own jar. */
+        cookieJarSource?: components["schemas"]["EnvironmentCookieJarSource"];
         variables: components["schemas"]["EnvironmentVariableWrite"][];
         /** @description Ordered included environments from lowest to highest precedence. Omission creates an environment with no includes. */
         includedEnvironmentIds?: components["schemas"]["EnvironmentId"][];
@@ -816,6 +824,8 @@ export interface components {
         name: string;
         description?: components["schemas"]["ResourceDescription"];
         notes?: components["schemas"]["ResourceNotes"];
+        /** @description Cookie partition used while this environment is selected. Omission preserves the current source. */
+        cookieJarSource?: components["schemas"]["EnvironmentCookieJarSource"];
         variables: components["schemas"]["EnvironmentVariableWrite"][];
         /** @description Complete ordered replacement from lowest to highest precedence. Omission preserves the current composition. */
         includedEnvironmentIds?: components["schemas"]["EnvironmentId"][];
@@ -854,6 +864,56 @@ export interface components {
        * @enum {string}
        */
       type: "EnvironmentSelectCommand";
+    };
+    /** @description Loads one explicitly identified workspace-owned cookie partition. */
+    CookieJarGetCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "cookie_jar.get";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+        environmentId: components["schemas"]["EnvironmentId"] | null;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "CookieJarGetCommand";
+    };
+    /** @description Deletes one stored cookie without accepting replacement credential data. */
+    CookieJarDeleteCookieCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "cookie_jar.delete_cookie";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+        environmentId: components["schemas"]["EnvironmentId"] | null;
+        cookieId: components["schemas"]["UuidV7"];
+        expectedRevision: number;
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "CookieJarDeleteCookieCommand";
+    };
+    /** @description Clears session cookies or every cookie in one shared partition. */
+    CookieJarClearCommand: components["schemas"]["CommandEnvelope"] & {
+      /** @constant */
+      type?: "cookie_jar.clear";
+      payload?: {
+        workspaceId: components["schemas"]["WorkspaceId"];
+        environmentId: components["schemas"]["EnvironmentId"] | null;
+        expectedRevision: number;
+        /** @enum {string} */
+        scope: "session" | "all";
+      };
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "CookieJarClearCommand";
     };
     EnvironmentPreviewVariablesCommand: components["schemas"]["CommandEnvelope"] & {
       /** @constant */
@@ -1163,6 +1223,7 @@ export interface components {
         preRequestScript?: string;
         postResponseScript?: string;
         redirectPolicy?: components["schemas"]["RedirectPolicyOverride"];
+        cookiePolicy?: components["schemas"]["CookiePolicyOverride"];
         variables?: components["schemas"]["VariableWrite"][];
         description?: string;
         notes?: string;
@@ -1309,6 +1370,7 @@ export interface components {
         preRequestScript?: string;
         postResponseScript?: string;
         redirectPolicy?: components["schemas"]["RedirectPolicyOverride"];
+        cookiePolicy?: components["schemas"]["CookiePolicyOverride"];
         variableProfile?: components["schemas"]["RequestVariableProfileUpdate"];
         description?: string;
         notes?: string;
@@ -1407,6 +1469,7 @@ export interface components {
     WebSocketReplyPayload:
       | components["schemas"]["UserPreferencesView"]
       | components["schemas"]["WorkspaceView"]
+      | components["schemas"]["CookieJarView"]
       | components["schemas"]["EnvironmentListView"]
       | components["schemas"]["EnvironmentView"]
       | components["schemas"]["VariableProfileView"]
@@ -1445,8 +1508,45 @@ export interface components {
       follow: boolean;
       maxRedirects: number;
     };
+    CookiePolicyOverride: {
+      enabled?: boolean;
+    };
+    ResolvedCookiePolicy: {
+      enabled: boolean;
+    };
+    /** @enum {string} */
+    CookieJarConcurrencyMode: "optimistic" | "serialized";
+    /** @enum {string} */
+    EnvironmentCookieJarSource: "environment" | "workspace";
+    /** @description A visible credential record in an authorized shared jar management view. */
+    CookieView: {
+      cookieId: components["schemas"]["UuidV7"];
+      name: string;
+      value: string;
+      domain: string;
+      path: string;
+      hostOnly: boolean;
+      secure: boolean;
+      httpOnly: boolean;
+      sameSite: ("strict" | "lax" | "none") | null;
+      expiresAt: components["schemas"]["UtcDateTime"] | null;
+      session: boolean;
+      extensions: string[];
+      createdAt: components["schemas"]["UtcDateTime"];
+      updatedAt: components["schemas"]["UtcDateTime"];
+    };
+    /** @description An explicitly identified environment or workspace-default cookie partition. */
+    CookieJarView: {
+      jarId: components["schemas"]["UuidV7"];
+      workspaceId: components["schemas"]["WorkspaceId"];
+      environmentId: components["schemas"]["EnvironmentId"] | null;
+      revision: number;
+      cookies: components["schemas"]["CookieView"][];
+    };
     UserPreferencesView: {
       redirectPolicy: components["schemas"]["ResolvedRedirectPolicy"];
+      cookiePolicy: components["schemas"]["ResolvedCookiePolicy"];
+      cookieConcurrencyMode: components["schemas"]["CookieJarConcurrencyMode"];
       revision: number;
     };
     WorkspaceSummary: {
@@ -1465,6 +1565,7 @@ export interface components {
       baseUrl: string;
       headers: components["schemas"]["RequestField"][];
       redirectPolicy: components["schemas"]["RedirectPolicyOverride"];
+      cookiePolicy: components["schemas"]["CookiePolicyOverride"];
       revision: number;
     };
     TreeNode: {
@@ -1623,6 +1724,7 @@ export interface components {
       name: string;
       description: components["schemas"]["ResourceDescription"];
       notes: components["schemas"]["ResourceNotes"];
+      cookieJarSource: components["schemas"]["EnvironmentCookieJarSource"];
       revision: number;
       /** @description Directly included environments in low-to-high precedence order. */
       includedEnvironments: components["schemas"]["EnvironmentSummary"][];
@@ -1739,6 +1841,7 @@ export interface components {
       preRequestScript: string;
       postResponseScript: string;
       redirectPolicy: components["schemas"]["RedirectPolicyOverride"];
+      cookiePolicy: components["schemas"]["CookiePolicyOverride"];
       capturedExchange?: components["schemas"]["CapturedExchangeView"];
       draftRevision: number;
     };
@@ -1811,6 +1914,7 @@ export interface components {
       rootExecutionId?: components["schemas"]["ExecutionId"];
       exchangeSequence?: number;
       effectiveRedirectPolicy?: components["schemas"]["ResolvedRedirectPolicy"];
+      effectiveCookiePolicy?: components["schemas"]["ResolvedCookiePolicy"];
       redirect?: components["schemas"]["ExecutionRedirectResult"];
       redirectChain?: components["schemas"]["ExecutionRedirectChainItem"][];
     };
@@ -1945,6 +2049,7 @@ export interface components {
       preRequestScript?: string;
       postResponseScript?: string;
       redirectPolicy?: components["schemas"]["RedirectPolicyOverride"];
+      cookiePolicy?: components["schemas"]["CookiePolicyOverride"];
     };
     ScriptLogEntry: {
       /** @description One-based production order across script logs and tests for this execution. */

@@ -21,6 +21,7 @@ defineProps<{
 
 defineSlots<{
   default(): unknown;
+  icon?(): unknown;
 }>();
 
 const root = ref<HTMLElement | null>(null);
@@ -139,7 +140,9 @@ function closeFromViewportChange(): void {
       @click="togglePopover"
       @keydown="handleTriggerKeydown"
     >
-      <Info :size="15" aria-hidden="true" />
+      <slot name="icon">
+        <Info :size="15" aria-hidden="true" />
+      </slot>
     </IconButton>
     <Teleport v-if="teleportTarget" :to="teleportTarget">
       <div

@@ -151,3 +151,10 @@ authentication-generated fields, and every secret-derived header. Framing and
 hop-by-hop headers are regenerated for every destination, and a method rewrite
 that removes the body also removes its representation headers. The source
 response records removed header names without recording their values.
+
+## Use HTTP cookies
+
+Cookie-based workflows use workspace-owned jars selected by the active
+environment, with inherited per-request enablement and explicit concurrency
+control. See [Use shared HTTP cookie jars](cookies.md) for ownership, matching,
+security, redirect, and management behavior.

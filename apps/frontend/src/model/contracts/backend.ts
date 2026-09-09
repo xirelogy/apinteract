@@ -10,10 +10,23 @@ export type RedirectPolicyOverride =
   components["schemas"]["RedirectPolicyOverride"];
 export type ResolvedRedirectPolicy =
   components["schemas"]["ResolvedRedirectPolicy"];
+export type CookiePolicyOverride =
+  components["schemas"]["CookiePolicyOverride"];
+export type ResolvedCookiePolicy =
+  components["schemas"]["ResolvedCookiePolicy"];
+export type CookieJarView = components["schemas"]["CookieJarView"];
+export type CookieView = components["schemas"]["CookieView"];
+export type CookieJarConcurrencyMode =
+  components["schemas"]["CookieJarConcurrencyMode"];
 type GeneratedWorkspaceView = components["schemas"]["WorkspaceView"];
-export type WorkspaceView = Omit<GeneratedWorkspaceView, "redirectPolicy"> & {
+export type WorkspaceView = Omit<
+  GeneratedWorkspaceView,
+  "redirectPolicy" | "cookiePolicy"
+> & {
   /** Optional while restoring data produced before redirect preferences existed. */
   readonly redirectPolicy?: RedirectPolicyOverride;
+  /** Optional while restoring data produced before cookie preferences existed. */
+  readonly cookiePolicy?: CookiePolicyOverride;
 };
 export type UserPreferencesView = components["schemas"]["UserPreferencesView"];
 export type TreeNode = components["schemas"]["TreeNode"];
@@ -22,6 +35,8 @@ export type CollectionDeleteResult =
   components["schemas"]["CollectionDeleteResult"];
 export type EnvironmentSummary = components["schemas"]["EnvironmentSummary"];
 export type EnvironmentListView = components["schemas"]["EnvironmentListView"];
+export type EnvironmentCookieJarSource =
+  components["schemas"]["EnvironmentCookieJarSource"];
 export type EnvironmentView = components["schemas"]["EnvironmentView"];
 export type EnvironmentVariableView =
   components["schemas"]["EnvironmentVariableView"];
@@ -46,9 +61,14 @@ export type ImportApplyResult = components["schemas"]["ImportApplyResult"];
 export type CapturedExchangeView =
   components["schemas"]["CapturedExchangeView"];
 type GeneratedRequestView = components["schemas"]["RequestView"];
-export type RequestView = Omit<GeneratedRequestView, "redirectPolicy"> & {
+export type RequestView = Omit<
+  GeneratedRequestView,
+  "redirectPolicy" | "cookiePolicy"
+> & {
   /** Optional while restoring data produced before redirect preferences existed. */
   readonly redirectPolicy?: RedirectPolicyOverride;
+  /** Optional while restoring data produced before cookie preferences existed. */
+  readonly cookiePolicy?: CookiePolicyOverride;
 };
 export type RequestBodyDefinition =
   components["schemas"]["RequestBodyDefinition"];

@@ -4,8 +4,10 @@ import { Asterisk, Layers3, Save, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 import type {
+  EnvironmentCookieJarSource,
   EnvironmentSummary,
   EnvironmentVariableWrite,
+  CookieJarView,
 } from "@/model/contracts/backend";
 import type {
   EnvironmentDraft,
@@ -26,6 +28,7 @@ import TabsRoot from "@/view/presentation/controls/tabs/TabsRoot.vue";
 import TabsTrigger from "@/view/presentation/controls/tabs/TabsTrigger.vue";
 import { useRowReorder } from "@/view/presentation/controls/row-reorder";
 import DocumentationEditor from "./DocumentationEditor.vue";
+import CookieJarPanel from "./CookieJarPanel.vue";
 import ResourceDeleteDialog from "./ResourceDeleteDialog.vue";
 import VariableFieldsEditor from "./VariableFieldsEditor.vue";
 
@@ -41,8 +44,9 @@ const props = withDefaults(
     showToolbar?: boolean;
     canEdit: boolean;
     busy: boolean;
+    cookieJar?: CookieJarView | null;
   }>(),
-  { editorTab: null, showToolbar: true },
+  { editorTab: null, showToolbar: true, cookieJar: null },
 );
 const emit = defineEmits<{
   select: [environmentId: string | null];
@@ -50,14 +54,18 @@ const emit = defineEmits<{
   change: [tabId: string, draft: EnvironmentDraft];
   saveEditor: [tabId: string];
   delete: [environmentId: string, revision: number];
+  loadCookies: [environmentId: string | null];
+  deleteCookie: [cookieId: string];
+  clearCookies: [scope: "session" | "all"];
 }>();
 const { t } = useI18n();
-const activeSection = ref<"variables" | "inclusions" | "documentation">(
-  "variables",
-);
+const activeSection = ref<
+  "variables" | "inclusions" | "cookies" | "documentation"
+>("variables");
 const name = ref("");
 const description = ref("");
 const notes = ref("");
+const cookieJarSource = ref<EnvironmentCookieJarSource>("environment");
 const editingId = ref<string | null>(null);
 const variableEditor = ref<VariableFieldsEditorApi | null>(null);
 const variableEditorKey = ref(0);
@@ -77,6 +85,25 @@ const options = computed(() => [
     label: environment.name,
   })),
 ]);
+const cookieJarSourceOptions = computed(() => [
+  {
+    value: "environment",
+    label: t("environment.cookieJarEnvironment"),
+  },
+  { value: "workspace", label: t("environment.cookieJarWorkspace") },
+]);
+const cookieJarEnvironmentId = computed(() =>
+  cookieJarSource.value === "environment" ? editingId.value : null,
+);
+const visibleCookieJar = computed(() => {
+  const jar = props.cookieJar;
+  return jar !== null &&
+    jar !== undefined &&
+    jar.workspaceId === props.editorTab?.environment?.workspaceId &&
+    jar.environmentId === cookieJarEnvironmentId.value
+    ? jar
+    : null;
+});
 const availableIncludeOptions = computed(() =>
   props.environments
     .filter(
@@ -125,12 +152,18 @@ watch(
     name.value = tab.draft.name;
     description.value = tab.draft.description;
     notes.value = tab.draft.notes;
+    cookieJarSource.value = tab.draft.cookieJarSource;
     includedEnvironmentIds.value = [...tab.draft.includedEnvironmentIds];
     variableCount.value = tab.draft.variables.length;
     variableEditorKey.value += 1;
   },
   { immediate: true },
 );
+watch(activeSection, (section) => {
+  if (section === "cookies" && editingId.value !== null) {
+    emit("loadCookies", cookieJarEnvironmentId.value);
+  }
+});
 
 /** Opens the manager with a clean create form. */
 function createEnvironment(): void {
@@ -224,6 +257,7 @@ function publishDraft(variables?: readonly EnvironmentVariableWrite[]): void {
     name: name.value,
     description: description.value,
     notes: notes.value,
+    cookieJarSource: cookieJarSource.value,
     variables:
       variables ?? variableEditor.value?.writes() ?? tab.draft.variables,
     includedEnvironmentIds: includedEnvironmentIds.value,
@@ -240,6 +274,17 @@ function updateDescription(value: string): void {
 function updateNotes(value: string): void {
   notes.value = value;
   publishDraft();
+}
+
+/** Selects the cookie partition used whenever this environment is active. */
+function selectCookieJarSource(value: string): void {
+  if (value === "environment" || value === "workspace") {
+    cookieJarSource.value = value;
+    publishDraft();
+    if (activeSection.value === "cookies" && editingId.value !== null) {
+      emit("loadCookies", cookieJarEnvironmentId.value);
+    }
+  }
 }
 
 /** Publishes and requests persistence for the current environment tab. */
@@ -401,6 +446,12 @@ function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
               {{ t("environment.inclusions") }}
               <span class="tab-count">{{ includedEnvironmentIds.length }}</span>
             </TabsTrigger>
+            <TabsTrigger class="tab-button" value="cookies">
+              {{ t("cookies.tab") }}
+              <span v-if="visibleCookieJar" class="tab-count">{{
+                visibleCookieJar.cookies.length
+              }}</span>
+            </TabsTrigger>
             <TabsTrigger class="tab-button" value="documentation">
               {{ t("documentation.title") }}
               <span
@@ -528,6 +579,61 @@ function setDeleteConfirmationOpen(confirmationOpen: boolean): void {
                 </div>
               </div>
             </section>
+          </TabsPanel>
+
+          <TabsPanel
+            value="cookies"
+            class="environment-editor-section cookie-properties-section"
+          >
+            <section class="redirect-settings">
+              <div class="form-field">
+                <div class="cookie-source-field-heading">
+                  <span class="form-field-label">
+                    {{ t("environment.cookieJarSource") }}
+                  </span>
+                  <InfoPopover
+                    :label="
+                      t('common.actions.moreInformation', {
+                        topic: t('environment.cookieJarSource'),
+                      })
+                    "
+                  >
+                    {{ t("environment.cookieJarDescription") }}
+                  </InfoPopover>
+                </div>
+                <SelectMenu
+                  :model-value="cookieJarSource"
+                  :options="cookieJarSourceOptions"
+                  :label="t('environment.cookieJarSource')"
+                  :disabled="busy || !canEdit"
+                  @update:model-value="selectCookieJarSource"
+                />
+              </div>
+            </section>
+            <p
+              v-if="activeSection === 'cookies' && editingId === null"
+              class="resource-dialog-context"
+              role="status"
+            >
+              {{ t("cookies.availableAfterSave") }}
+            </p>
+            <p
+              v-else-if="
+                activeSection === 'cookies' && visibleCookieJar === null
+              "
+              class="resource-dialog-context"
+              role="status"
+            >
+              {{ t("cookies.loading") }}
+            </p>
+            <CookieJarPanel
+              v-if="activeSection === 'cookies' && visibleCookieJar !== null"
+              :jar="visibleCookieJar"
+              :busy="busy"
+              :can-edit="canEdit"
+              @delete-cookie="emit('deleteCookie', $event)"
+              @clear="emit('clearCookies', $event)"
+            />
           </TabsPanel>
 
           <TabsPanel
