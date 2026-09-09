@@ -1,4 +1,6 @@
-# Build request targets from collection paths
+# Compose and execute HTTP requests
+
+## Build request targets from collection paths
 
 APInteract can store a request as either a complete URL or as a path composed
 from its workspace and collection hierarchy. Composed targets make it easier

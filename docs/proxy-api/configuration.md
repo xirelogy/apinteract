@@ -181,7 +181,9 @@ targetPolicy:
 
 If DNS returns both allowed and denied candidates, the complete target is
 denied. Redirects remain manual and are returned as target responses; the proxy
-does not automatically follow them.
+does not automatically follow them or retain cookies. Product-level automatic
+redirects and cookie jars are backend-owned: the backend submits each hop as a
+new execution after applying its policies.
 
 ## Resource Limits
 

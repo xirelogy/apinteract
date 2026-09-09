@@ -13,10 +13,11 @@ import { parseJsonObject } from "@apinteract/plugin-sdk/backend/import";
 import { localize } from "@apinteract/plugin-sdk/frontend/localization";
 ```
 
-The frontend localization helper performs cached, script-safe BCP 47 matching.
-It accepts compatible region forms such as `zh-CN` for an active `zh-Hans`
-locale and falls back to the supplied default when no compatible translation
-exists. Keep translation maps immutable after registration.
+The frontend localization helper, available since version 1.1.0, performs
+cached, script-safe BCP 47 matching. It accepts compatible region forms such as
+`zh-CN` for an active `zh-Hans` locale and falls back to the supplied default
+when no compatible translation exists. Keep translation maps immutable after
+registration.
 
 The SDK is independently versioned from the plugin contract. Plugin builds
 must bundle SDK runtime helpers into their own `dist/` output; an installed

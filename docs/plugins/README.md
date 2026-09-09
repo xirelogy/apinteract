@@ -28,7 +28,8 @@ fallback and caching rules.
 ### Localizing plugin-owned text
 
 Plugin labels and text rendered by mounted views must use the SDK localization
-helper so they follow the active APInteract locale:
+helper, available in `@apinteract/plugin-sdk` 1.1.0 and later, so they follow
+the active APInteract locale:
 
 ```ts
 import { localize } from "@apinteract/plugin-sdk/frontend/localization";

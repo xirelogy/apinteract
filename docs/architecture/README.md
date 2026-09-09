@@ -80,16 +80,30 @@ An API request follows this flow:
    headers.
 4. The backend prepares the variable context, runs the pre-request script, and
    resolves the resulting variable and secret templates.
-5. The backend selects a proxy and creates an idempotent execution using the
-   final URL, headers, behavior, and body metadata.
-6. The backend streams request bytes to the proxy when a body is present.
-7. The proxy performs the target HTTP request and streams response metadata and
-   bytes back to the backend.
-8. The backend runs the post-response script, persists appropriate history, and
-   persists the response and execution transport metadata, then sends response
-   events to the frontend.
-9. The backend releases the terminal proxy execution after persisting or
-   discarding its result.
+5. The backend resolves the effective redirect and cookie policies, acquires
+   the selected workspace or environment cookie jar when enabled, and injects
+   cookies eligible for the first target.
+6. For each hop, the backend selects a proxy and creates an idempotent proxy
+   execution using the materialized URL, headers, behavior, and body metadata.
+7. The backend streams request bytes when a body is present. The proxy performs
+   exactly one target HTTP request, streams its response metadata and bytes,
+   and releases its transient execution state after the backend consumes it.
+8. The backend atomically applies valid `Set-Cookie` fields as soon as it
+   receives the response head. After receiving the complete response, it
+   evaluates the redirect. When policy permits another hop, it persists the
+   source response, constructs the destination request, selects cookies again
+   for that URL, and repeats steps 6 through 8.
+9. The complete chain shares one deadline and aggregate response-body budget.
+   Every destination independently passes the proxy's DNS, address, TLS,
+   timeout, and response checks.
+10. The backend runs the post-response script against the terminal response,
+    persists the completed chain and script results, publishes response events
+    to the frontend, and releases the cookie-jar lease.
+
+The proxy deliberately has no redirect or cookie-jar knowledge. It always
+operates in manual redirect mode and handles one hop at a time; backend
+orchestration turns those isolated executions into the product-level redirect
+chain.
 
 Workspace scripts run in a backend-managed, isolated script runner rather than
 in the frontend, proxy, or main backend JavaScript context. The

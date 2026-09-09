@@ -111,7 +111,10 @@ Read the current URL with `asdk.request.url.get()` and replace it with
 `asdk.request.setUrl(value)`. APInteract checks a changed URL again before
 sending the request. The proxy resolves every final hostname, applies its
 loopback, link-local, private-network, and administrator CIDR policy, and pins
-an approved address into the connection. Redirects remain manual.
+an approved address into the connection. After the initial request, the backend
+may follow redirects according to the effective request policy. Scripts do not
+control individual redirect hops, and the post-response script receives only
+the terminal response.
 
 Changing the target origin is a separate permission. A script cannot use a
 request mutation to bypass an administrator's network policy.

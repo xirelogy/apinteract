@@ -26,6 +26,8 @@ APInteract:
 - provides workspace environments, variables, secret values, and variable
   aliases;
 - resolves inherited collection headers and scoped variables explicitly;
+- follows configurable HTTP redirects while retaining every response hop;
+- shares browser-compatible cookie jars through workspaces and environments;
 - runs sandboxed pre-request and post-response scripts through a documented
   SDK;
 - supports username-and-password authentication and isolated user sessions;

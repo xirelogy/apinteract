@@ -21,6 +21,10 @@ are documented in the [backend configuration reference](configuration.md).
   environment partition and expose its delete and clear controls. Cookie
   concurrency is a user execution default rather than jar state. Values are
   returned only after workspace authorization and never enter the proxy API.
+- Automatic redirects are backend orchestration. The backend persists each
+  complete response hop, applies cookie changes before preparing the next
+  destination, and submits every destination as a separate manual-mode proxy
+  execution.
 - The backend sends a native WebSocket ping every 25 seconds and expects a
   pong, keeping idle connections alive through common ingress timeouts and
   terminating peers that no longer respond.

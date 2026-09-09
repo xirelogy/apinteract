@@ -49,6 +49,7 @@ technical name and a concise explanation. Long values remain truncated in the
 row and have a dedicated copy action. The expiry follows the date/time format
 selected in Account Options. Jar revisions and locations remain implicit in
 the owning Cookies tab and are not repeated.
+
 The environment jar-source explanation is available from its information
 control. The cookie list fills the remaining tab space and scrolls independently
 so its clear actions remain in a stable footer.
