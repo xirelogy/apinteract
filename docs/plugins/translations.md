@@ -57,3 +57,38 @@ pack does not prevent the application from starting.
 
 Translation packs are data only. They cannot contain executable JavaScript or
 HTML messages.
+
+## Locale matching for plugin text
+
+Frontend plugins own their labels and runtime text. Use the SDK helper rather
+than asking the host to translate plugin strings:
+
+```ts
+import { localize } from "@apinteract/plugin-sdk/frontend/localization";
+
+const label = localize(
+  "Preview",
+  { "zh-CN": "预览", "zh-TW": "預覽" },
+  current.locale,
+);
+```
+
+Resolution is ordered and script-safe:
+
+1. exact and canonical BCP 47 matches;
+2. a likely-subtag-compatible locale using the runtime's CLDR data;
+3. the plugin's supplied fallback text.
+
+This means `zh-Hans` can use `zh-CN` when no `zh-Hans` translation exists, and
+`zh-Hant` can use `zh-TW`. The matcher compares language and likely script
+before considering region, so `sr-Latn` will not fall back to `sr-RS` when that
+tag implies Cyrillic Serbian. Region differences within the same language and
+script are allowed as a lower-priority fallback.
+
+The resolver memoizes canonical tags, likely-subtag profiles, translation-map
+indexes, and locale-set decisions. Plugin authors do not need to manage or
+invalidate these caches. Translation maps should be treated as immutable after
+registration; changing a map in place is unsupported.
+
+The matcher is a best-fit fallback, not a promise that regional terminology is
+identical. Provide an exact key whenever a region-specific wording matters.

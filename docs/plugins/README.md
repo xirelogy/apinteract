@@ -22,6 +22,37 @@ helpers and declares `plugin-api` as a peer dependency. Both packages are
 development inputs: a distributable plugin bundles SDK runtime helpers and has
 no unresolved `@apinteract/*` runtime imports.
 
+See [translation packs and locale matching](translations.md) for the complete
+fallback and caching rules.
+
+### Localizing plugin-owned text
+
+Plugin labels and text rendered by mounted views must use the SDK localization
+helper so they follow the active APInteract locale:
+
+```ts
+import { localize } from "@apinteract/plugin-sdk/frontend/localization";
+
+const label = localize(
+  "Preview",
+  { "zh-CN": "预览", "zh-TW": "預覽" },
+  current.locale,
+);
+```
+
+The resolver first checks exact/canonical BCP 47 keys, then uses CLDR
+likely-subtag data to find a compatible language-and-script translation, and
+finally returns the supplied English fallback. Therefore `zh-Hans` may use a
+`zh-CN` translation and `zh-Hant` may use `zh-TW`; a script-incompatible match
+such as `sr-Latn` to a Cyrillic Serbian locale is rejected. Same-language,
+same-script regional differences are lower-priority fallbacks. Use an exact
+locale key when regional wording must remain distinct.
+
+The SDK caches canonicalization, likely-subtag profiles, translation-map
+indexes, and locale-set decisions. Keep translation maps immutable after
+registration. Plugin packages should bundle the SDK helper into their output;
+they must not import application source or require the SDK at runtime.
+
 ## Package Format
 
 Every discovery-root child is one self-contained package:

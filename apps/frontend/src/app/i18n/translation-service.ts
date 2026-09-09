@@ -1,5 +1,6 @@
 import { inject, readonly, ref, type InjectionKey } from "vue";
 import { createI18n } from "vue-i18n";
+import { matchLocale } from "@apinteract/plugin-sdk/frontend/localization";
 
 import { enUsMessages, type MessageSchema } from "@/app/i18n/messages";
 import { officialTranslationPacks } from "@/app/i18n/official-locales";
@@ -352,49 +353,10 @@ export function matchSupportedLocale(
   requestedLocales: readonly string[],
   availableLocales: readonly LocaleOption[],
 ): string | null {
-  const available = new Map(
-    availableLocales.map((option) => [
-      option.locale.toLowerCase(),
-      option.locale,
-    ]),
-  );
+  const candidates = availableLocales.map((option) => option.locale);
   for (const requested of requestedLocales) {
-    const canonical = canonicalLocale(requested);
-    if (canonical === null) {
-      continue;
-    }
-    const exact = available.get(canonical.toLowerCase());
-    if (exact !== undefined) {
-      return exact;
-    }
-    const lower = canonical.toLowerCase();
-    if (lower.startsWith("zh-")) {
-      const traditional =
-        lower.includes("-hant") ||
-        /-hk(?:-|$)|-mo(?:-|$)|-tw(?:-|$)/u.test(lower);
-      const chinese = available.get(traditional ? "zh-hant" : "zh-hans");
-      if (chinese !== undefined) {
-        return chinese;
-      }
-    }
-    if (lower.startsWith("en-")) {
-      const british = /-au(?:-|$)|-gb(?:-|$)|-ie(?:-|$)|-nz(?:-|$)/u.test(
-        lower,
-      );
-      const english = available.get(british ? "en-gb" : "en-us");
-      if (english !== undefined) {
-        return english;
-      }
-    }
-    const language = lower.split("-")[0];
-    const languageMatch = availableLocales.find(
-      (option) =>
-        option.locale.toLowerCase() === language ||
-        option.locale.toLowerCase().startsWith(`${language}-`),
-    );
-    if (languageMatch !== undefined) {
-      return languageMatch.locale;
-    }
+    const match = matchLocale(requested, candidates);
+    if (match !== null) return match;
   }
   return null;
 }

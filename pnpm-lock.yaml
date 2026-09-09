@@ -140,6 +140,9 @@ importers:
       '@apinteract/plugin-api':
         specifier: workspace:*
         version: link:../../packages/plugin-api
+      '@apinteract/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
       '@codemirror/commands':
         specifier: ^6.10.4
         version: 6.10.4

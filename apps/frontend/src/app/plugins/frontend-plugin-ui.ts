@@ -16,6 +16,7 @@ import type {
   SandboxedDocumentMountOptions,
   WireBodyEditorMountOptions,
 } from "@apinteract/plugin-api/frontend";
+import { localizePluginLabel as resolvePluginLabel } from "@apinteract/plugin-sdk/frontend/localization";
 
 import CodeEditor from "@/view/presentation/controls/CodeEditor.vue";
 import type { CodeEditorLanguage as HostCodeEditorLanguage } from "@/view/presentation/controls/CodeEditor.vue";
@@ -157,9 +158,5 @@ export function localizePluginLabel(
   label: PluginLabel,
   locale: string,
 ): string {
-  return (
-    label.translations?.[locale] ??
-    label.translations?.[locale.split("-")[0] ?? ""] ??
-    label.default
-  );
+  return resolvePluginLabel(label, locale);
 }
