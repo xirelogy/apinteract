@@ -1,0 +1,3 @@
+# Deliberately public localhost TLS key used only by proxy transport tests.
+# Keep this exception fingerprint-scoped so another key at the same path is detected.
+0845ac75d0844a7ab2e37fc0af4d0e337eac6eb0:apps/proxy/test/fixtures/localhost-key.pem:private-key:1

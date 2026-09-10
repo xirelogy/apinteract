@@ -93,6 +93,13 @@ Evidence is written to `var/release/VERSION/`, which is ignored by Git. An
 existing evidence directory is never overwritten. Preserve a failed attempt
 for diagnosis or move it before rerunning the gate.
 
+Secret-scan exceptions must identify one reviewed historical finding by its
+exact Gitleaks fingerprint in [`.gitleaksignore`](../../.gitleaksignore).
+Path-wide or rule-wide exclusions are not accepted because they could conceal a
+different future credential. The current exception covers only the deliberately
+public self-signed localhost key used by proxy transport tests; that fixture
+must never be used by a deployment or external service.
+
 The dependency, license, and source gates run before the image build. A failed
 gate leaves diagnostic evidence but no release image. The image is complete
 only when the command prints `Release image built and verified`.

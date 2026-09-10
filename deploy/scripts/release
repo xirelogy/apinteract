@@ -166,6 +166,7 @@ run_gitleaks() {
     "${gitleaks_image}" detect \
     --source /repo \
     --log-opts="--all" \
+    --gitleaks-ignore-path /repo/.gitleaksignore \
     --no-banner \
     --redact \
     --report-format json \

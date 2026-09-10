@@ -14,6 +14,10 @@ const trivyIgnorePolicy = await readFile(
   new URL("../deploy/release/trivy-ignore.yaml", import.meta.url),
   "utf8",
 );
+const gitleaksIgnorePolicy = await readFile(
+  new URL("../.gitleaksignore", import.meta.url),
+  "utf8",
+);
 const administratorHelper = await readFile(
   new URL("../deploy/aio/apinteract-admin", import.meta.url),
   "utf8",
@@ -54,6 +58,20 @@ test("uses exact scanner versions instead of floating latest tags", () => {
       new RegExp(`^${tool}_image="[^"]+:v?\\d+\\.\\d+\\.\\d+"$`, "m"),
     );
   }
+});
+
+test("keeps the intentional TLS test key exception fingerprint-scoped", () => {
+  assert.match(
+    releaseScript,
+    /--gitleaks-ignore-path \/repo\/\.gitleaksignore/,
+  );
+  const entries = gitleaksIgnorePolicy
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"));
+  assert.deepEqual(entries, [
+    "0845ac75d0844a7ab2e37fc0af4d0e337eac6eb0:apps/proxy/test/fixtures/localhost-key.pem:private-key:1",
+  ]);
 });
 
 test("retries transient tool pulls and writes SBOMs atomically", () => {
