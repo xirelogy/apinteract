@@ -1658,6 +1658,97 @@ describe("RequestService draft updates", () => {
         "https://root.example.test/api/health",
       );
 
+      const emptyRoot = await requests.createCollection(
+        userId,
+        workspace.workspaceId,
+        null,
+        "Empty target root",
+      );
+      const rootAbsolute = await requests.createRequest(
+        userId,
+        workspace.workspaceId,
+        emptyRoot.nodeId,
+        "Absolute first component",
+        "GET",
+        "https://first.example.test/health",
+        [],
+        [],
+        "",
+        "",
+        "",
+        "composed",
+      );
+      expect(rootAbsolute.targetMode).toBe("composed");
+      const rootAbsoluteExecution = await requests.prepareExecution(
+        userId,
+        createEntityId(),
+        rootAbsolute.requestId,
+      );
+      expect(rootAbsoluteExecution.request.targetUrl).toBe(
+        "https://first.example.test/health",
+      );
+      if (rootAbsoluteExecution.revisionId === undefined) {
+        throw new Error("Missing root composed request revision");
+      }
+      const rootAbsoluteRevision = await requests.prepareRevisionExecution(
+        userId,
+        createEntityId(),
+        rootAbsolute.requestId,
+        rootAbsoluteExecution.revisionId,
+      );
+      expect(rootAbsoluteRevision.request.targetUrl).toBe(
+        "https://first.example.test/health",
+      );
+      const temporaryRootAbsolute = await requests.prepareTemporaryExecution(
+        userId,
+        createEntityId(),
+        workspace.workspaceId,
+        emptyRoot.nodeId,
+        {
+          method: "GET",
+          targetMode: "composed",
+          targetUrl: "https://temporary.example.test/health",
+          query: [],
+          headers: [],
+          body: "",
+        },
+      );
+      expect(temporaryRootAbsolute.request.targetUrl).toBe(
+        "https://temporary.example.test/health",
+      );
+      await expect(
+        requests.createRequest(
+          userId,
+          workspace.workspaceId,
+          emptyRoot.nodeId,
+          "Relative without base",
+          "GET",
+          "/health",
+          [],
+          [],
+          "",
+          "",
+          "",
+          "composed",
+        ),
+      ).rejects.toThrow("Target URL must be an absolute HTTP URL");
+      await expect(
+        requests.createRequest(
+          userId,
+          workspace.workspaceId,
+          serviceRoot.nodeId,
+          "Absolute nested component",
+          "GET",
+          "https://other.example.test/health",
+          [],
+          [],
+          "",
+          "",
+          "",
+          "composed",
+        ),
+      ).rejects.toThrow("Path template is invalid");
+
       const variableRoot = await requests.createCollection(
         userId,
         workspace.workspaceId,

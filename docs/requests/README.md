@@ -41,9 +41,11 @@ produce this effective target:
 https://api.example.com/v1/users/{id}
 ```
 
-The request editor shows the effective target below the target controls. An
-absolute URL must be established by the workspace or a collection before a
-composed request can be sent.
+The request editor shows the effective target below the target controls. If
+the workspace and every ancestor collection are blank, the request itself may
+provide the absolute HTTP(S) URL as the first non-empty component. Once an
+inherited component exists, the request value must be a relative path
+template; it cannot replace that inherited target.
 
 For example, the workspace and `Public API` collection may be blank while a
 nested `Service A` collection starts its branch:
@@ -60,10 +62,12 @@ This produces `https://a.example.com/v1/users/{id}`. A sibling collection can
 establish a different service URL in the same way.
 
 APInteract removes extra slashes only where two components meet. Slashes
-inside a component are preserved. Components after the first non-empty one and
-the request path cannot contain a query string, fragment, network authority,
-or a separate URL scheme. Add query parameters through the request's **Query**
-tab.
+inside a component are preserved. After an absolute component has been
+established, every later component (including a request path under an
+inherited prefix) cannot contain a query string, fragment, network authority,
+or a separate URL scheme. A request that is itself the first non-empty
+component follows the absolute-URL rules above. Add query parameters through
+the request's **Query** tab.
 
 ## Choose composed or absolute mode
 

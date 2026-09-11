@@ -3021,7 +3021,7 @@
                   "targetUrl": {
                     "type": "string",
                     "maxLength": 8192,
-                    "description": "Absolute URL template or composed request-local path."
+                    "description": "Absolute URL template in absolute mode, or in composed mode when no inherited component exists; otherwise a relative request-local path template."
                   },
                   "query": {
                     "type": "array",
@@ -3313,7 +3313,7 @@
                   "targetUrl": {
                     "type": "string",
                     "maxLength": 8192,
-                    "description": "Absolute URL template or composed request-local path."
+                    "description": "Absolute URL template in absolute mode, or in composed mode when no inherited component exists; otherwise a relative request-local path template."
                   },
                   "query": {
                     "type": "array",
@@ -4509,7 +4509,7 @@
           "targetUrl": {
             "type": "string",
             "maxLength": 8192,
-            "description": "Absolute URL template in absolute mode, or a path-only template in composed mode."
+            "description": "Absolute URL template in absolute mode, or an absolute first component when no inherited target exists; otherwise a relative path template in composed mode."
           },
           "inheritedTarget": {
             "type": "string",
@@ -5084,7 +5084,7 @@
           "targetUrl": {
             "type": "string",
             "maxLength": 8192,
-            "description": "Absolute URL template or composed request-local path."
+            "description": "Absolute URL template in absolute mode, or in composed mode when no inherited component exists; otherwise a relative request-local path template."
           },
           "query": {
             "type": "array",

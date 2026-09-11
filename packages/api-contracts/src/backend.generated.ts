@@ -1214,7 +1214,7 @@ export interface components {
         method: components["schemas"]["HttpMethod"];
         /** @enum {string} */
         targetMode: "absolute" | "composed";
-        /** @description Absolute URL template or composed request-local path. */
+        /** @description Absolute URL template in absolute mode, or in composed mode when no inherited component exists; otherwise a relative request-local path template. */
         targetUrl: string;
         query: components["schemas"]["RequestField"][];
         headers: components["schemas"]["RequestField"][];
@@ -1361,7 +1361,7 @@ export interface components {
         method: components["schemas"]["HttpMethod"];
         /** @enum {string} */
         targetMode: "absolute" | "composed";
-        /** @description Absolute URL template or composed request-local path. */
+        /** @description Absolute URL template in absolute mode, or in composed mode when no inherited component exists; otherwise a relative request-local path template. */
         targetUrl: string;
         query: components["schemas"]["RequestField"][];
         headers: components["schemas"]["RequestField"][];
@@ -1825,7 +1825,7 @@ export interface components {
       method: components["schemas"]["HttpMethod"];
       /** @enum {string} */
       targetMode: "absolute" | "composed";
-      /** @description Absolute URL template in absolute mode, or a path-only template in composed mode. */
+      /** @description Absolute URL template in absolute mode, or an absolute first component when no inherited target exists; otherwise a relative path template in composed mode. */
       targetUrl: string;
       /** @description Current composed workspace and collection target prefix before the request-local path. */
       inheritedTarget: string;
@@ -2040,7 +2040,7 @@ export interface components {
       method: components["schemas"]["HttpMethod"];
       /** @enum {string} */
       targetMode: "absolute" | "composed";
-      /** @description Absolute URL template or composed request-local path. */
+      /** @description Absolute URL template in absolute mode, or in composed mode when no inherited component exists; otherwise a relative request-local path template. */
       targetUrl: string;
       query: components["schemas"]["RequestField"][];
       headers: components["schemas"]["RequestField"][];

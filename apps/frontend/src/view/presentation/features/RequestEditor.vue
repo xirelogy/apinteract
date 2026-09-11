@@ -436,11 +436,26 @@ onBeforeUnmount(() => {
 /** Accepts final HTTP URLs and bounded placeholders resolved by the backend. */
 function isValidTargetTemplate(value: string): boolean {
   if (value.includes("<<")) {
-    return value.length <= 8192 && !value.includes("?") && !value.includes("#");
+    return (
+      value.length > 0 &&
+      value.length <= 8192 &&
+      !value.includes("?") &&
+      !value.includes("#") &&
+      !value.includes("\\") &&
+      !/^https?:\/\/[^/]*@/u.test(value) &&
+      !containsControlCharacter(value) &&
+      !/%(?![\dA-Fa-f]{2})/u.test(value)
+    );
   }
   try {
     const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.username === "" &&
+      url.password === "" &&
+      url.search === "" &&
+      url.hash === ""
+    );
   } catch {
     return false;
   }
@@ -463,8 +478,18 @@ function isValidPathTemplate(value: string): boolean {
     !value.includes("#") &&
     !value.includes("\\") &&
     !value.includes("://") &&
-    !value.startsWith("//")
+    !value.startsWith("//") &&
+    !containsControlCharacter(value) &&
+    !/%(?![\dA-Fa-f]{2})/u.test(value)
   );
+}
+
+/** Rejects ASCII controls that cannot safely cross the request boundary. */
+function containsControlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 31 || codePoint === 127;
+  });
 }
 
 /** Debounces metadata lookup while preserving uninterrupted request editing. */

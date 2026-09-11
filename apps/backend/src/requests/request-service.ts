@@ -2058,6 +2058,11 @@ export class RequestService {
         request.targetMode,
         request.targetUrl,
       );
+      validateComposedTargetForComponents(
+        request.targetMode,
+        request.targetUrl,
+        targetComponents,
+      );
       const effectiveHeaders = withRequestBodyContentType(
         resolvedHeaders,
         request.requestBody,
@@ -2227,15 +2232,21 @@ export class RequestService {
         userId,
       );
       const effectiveHeaders = content.headers;
+      const targetComponents = content.effectiveTargetComponents ?? [
+        content.targetUrl,
+      ];
+      validateComposedTargetForComponents(
+        content.targetMode,
+        content.targetUrl,
+        targetComponents,
+      );
       const request = stripExecutionDocumentation({
         workspaceId,
         requestId,
         method: content.method,
         targetMode: content.targetMode,
         targetUrl: content.targetUrl,
-        targetComponents: content.effectiveTargetComponents ?? [
-          content.targetUrl,
-        ],
+        targetComponents,
         query: content.query,
         headers: withRequestBodyContentType(
           effectiveHeaders,
@@ -2374,6 +2385,11 @@ export class RequestService {
         parentCollectionId === null ? null : idToBytes(parentCollectionId),
         localRequest.targetMode,
         localRequest.targetUrl,
+      );
+      validateComposedTargetForComponents(
+        localRequest.targetMode,
+        localRequest.targetUrl,
+        targetComponents,
       );
       const variableProfile =
         temporaryVariables === null
@@ -2536,6 +2552,11 @@ export class RequestService {
         row.target_mode,
         row.target_url,
       ));
+    validateComposedTargetForComponents(
+      row.target_mode,
+      row.target_url,
+      targetComponents,
+    );
     const content = JSON.stringify(
       revisionContent(row, resolvedHeaders, inheritedHeaders, targetComponents),
     );
@@ -3424,7 +3445,14 @@ function validateCapturedExchange(
 
 /** Normalizes an absolute HTTP target URL without query or fragment data. */
 function validateTargetUrl(value: string): string {
-  const url = new URL(value);
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(
+      "Target URL must be an absolute HTTP URL without user information, query, or fragment",
+    );
+  }
   if (
     (url.protocol !== "http:" && url.protocol !== "https:") ||
     url.username !== "" ||
@@ -3973,7 +4001,7 @@ function normalizeExecutionInput(input: RequestExecutionInput): Omit<
     targetMode: input.targetMode ?? "absolute",
     targetUrl:
       (input.targetMode ?? "absolute") === "composed"
-        ? validatePathTemplate(input.targetUrl)
+        ? validateComposedTargetInput(input.targetUrl)
         : validateTargetTemplate(input.targetUrl),
     query: validateQuery(input.query),
     headers: validateHeaders(input.headers),
@@ -3984,6 +4012,33 @@ function normalizeExecutionInput(input: RequestExecutionInput): Omit<
     redirectPolicy: validateRedirectPolicyOverride(input.redirectPolicy),
     cookiePolicy: validateCookiePolicyOverride(input.cookiePolicy),
   };
+}
+
+/** Validates a composed target before its inherited prefix is available. */
+function validateComposedTargetInput(value: string): string {
+  return value.includes("://")
+    ? validateTargetTemplate(value)
+    : validatePathTemplate(value);
+}
+
+/** Validates a composed request component against its resolved prefix. */
+function validateComposedTargetForComponents(
+  targetMode: "absolute" | "composed",
+  targetUrl: string,
+  targetComponents: readonly string[],
+): void {
+  if (targetMode === "absolute") {
+    validateTargetTemplate(targetUrl);
+    return;
+  }
+  const hasInheritedPrefix = targetComponents
+    .slice(0, -1)
+    .some((component) => component !== "");
+  if (hasInheritedPrefix) {
+    validatePathTemplate(targetUrl);
+  } else {
+    validateTargetTemplate(targetUrl);
+  }
 }
 
 /** Removes documentation metadata before scripts, snapshots, and proxy execution. */

@@ -1210,6 +1210,20 @@ describe("RequestEditor", () => {
       .get('input[aria-label="Request path"]')
       .setValue("<<base_url>>/42");
     expect(send?.attributes("disabled")).toBeUndefined();
+    await wrapper
+      .get('input[aria-label="Request path"]')
+      .setValue("https://standalone.example.test/42");
+    expect(send?.attributes("disabled")).toBeUndefined();
+    await wrapper
+      .get('input[aria-label="Request path"]')
+      .setValue("https://user:secret@standalone.example.test/42");
+    expect(send?.attributes("disabled")).toBeDefined();
+    await wrapper
+      .get('input[aria-label="Request path"]')
+      .setValue("https://standalone.example.test/42?check=1");
+    expect(send?.attributes("disabled")).toBeDefined();
+    await wrapper.get('input[aria-label="Request path"]').setValue("/42");
+    expect(send?.attributes("disabled")).toBeDefined();
     vi.useRealTimers();
   });
 
